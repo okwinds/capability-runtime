@@ -1,0 +1,44 @@
+# Skills Runtime SDK overlays 示例（只表达形态，不绑定具体业务）
+#
+# Source of Truth：
+# - `../skills-runtime-sdk/docs/specs/skills-runtime-sdk/docs/configuration.md`
+# - `../skills-runtime-sdk/docs/specs/skills-runtime-sdk/docs/skills.md`
+
+skills:
+  # Strict Catalog（spaces + sources）是生产默认（先契约再执行）。
+  spaces:
+    - id: "space-eng"
+      account: "alice"
+      domain: "engineering"
+      sources: ["src-fs"]
+      enabled: true
+
+  sources:
+    - id: "src-fs"
+      type: "filesystem"
+      options:
+        root: "./skills"  # 可相对 workspace_root
+
+  # scan：metadata-only（frontmatter-only），不得读取正文 body
+  scan:
+    refresh_policy: "ttl"  # always|ttl|manual
+    ttl_sec: 30
+    max_frontmatter_bytes: 16384
+    max_depth: 4
+    ignore_dot_entries: true
+
+  # injection：lazy-load body，并对正文大小施加硬上限
+  injection:
+    max_bytes: 200000
+
+llm:
+  # OpenAI-compatible base_url（示例）
+  base_url: "https://api.openai.com/v1"
+  # API key 环境变量名（生产推荐由部署系统注入 OS env）
+  api_key_env: "OPENAI_API_KEY"
+  timeout_sec: 60
+
+run:
+  max_steps: 40
+  max_wall_time_sec: 1800
+

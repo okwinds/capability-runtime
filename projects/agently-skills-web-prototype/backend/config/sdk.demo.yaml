@@ -1,0 +1,39 @@
+# Skills Runtime SDK overlays（用于 Web 原型）
+#
+# 目标：
+# - 支持 preflight（零 I/O）与 run（tool_calls/approvals/WAL）
+# - 表达形态，不绑定具体业务
+
+skills:
+  spaces:
+    - id: "space-demo"
+      account: "demo"
+      domain: "prototype"
+      sources: ["src-fs"]
+      enabled: true
+
+  sources:
+    - id: "src-fs"
+      type: "filesystem"
+      options:
+        root: "./skills"
+
+  scan:
+    refresh_policy: "ttl"
+    ttl_sec: 30
+    max_frontmatter_bytes: 16384
+    max_depth: 4
+    ignore_dot_entries: true
+
+  injection:
+    max_bytes: 200000
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  api_key_env: "OPENAI_API_KEY"
+  timeout_sec: 60
+
+run:
+  max_steps: 20
+  max_wall_time_sec: 300
+

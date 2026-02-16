@@ -1,0 +1,25 @@
+# 冻结清单（Source of Truth）
+#
+# 说明：
+# - 你定义的“冻结”是：两上游已发布到 PyPI，本仓停止开发即冻结。
+# - 本原型默认不强制在这里写死版本号（避免与环境不一致导致无法安装），
+#   但你在准备对外复刻/交付时，应把三者的版本号/commit 固化在此处。
+#
+# 最小建议：
+# - agently: "x.y.z"
+# - skills-runtime-sdk-python: "x.y.z"
+# - agently-skills-runtime: "0.1.0"（或 git commit）
+
+python: ">=3.10"
+
+packages:
+  agently:
+    source: "pypi"
+    version: ""  # TODO: 填写冻结版本号
+  skills-runtime-sdk-python:
+    source: "pypi"
+    version: ""  # TODO: 填写冻结版本号
+  agently-skills-runtime:
+    source: "local"
+    version: "0.1.0"
+    path: "../../"  # 相对本文件：指向仓库根（本仓包）
