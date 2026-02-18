@@ -9,8 +9,8 @@
 
 ### 这个框架是什么
 `agently-skills-runtime` 是一个"面向能力"的 AI 代理框架。它通过桥接适配器形式聚合两个上游开源项目的能力：
-- **Agently**（https://github.com/okwinds/Agently）：提供 agent 构建 + TriggerFlow workflow 编排 + LLM 传输层
-- **skills-runtime-sdk**（https://github.com/okwinds/skills-runtime-sdk）：提供 skills 驱动 + tools/approvals/WAL/事件系统
+- **Agently**（/home/gavin/workspaces/codes/Agently ）：提供 agent 构建 + TriggerFlow workflow 编排 + LLM 传输层
+- **skills-runtime-sdk**（/home/gavin/workspaces/codes/skills-runtime-sdk ）：提供 skills 驱动 + tools/approvals/WAL/事件系统
 
 ### 框架核心理念
 框架提供三种**对等的、可互相嵌套的元能力原语**：
