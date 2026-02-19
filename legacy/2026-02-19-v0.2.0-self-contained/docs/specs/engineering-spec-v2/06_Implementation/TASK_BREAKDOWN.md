@@ -1,6 +1,6 @@
 # 任务拆解（Task Breakdown, v2）
 
-> 目标：把 `instructcontext/CODEX_PROMPT.md` 的 Step 1~6 拆成可按 TDD 循环执行的任务清单。
+> 目标：把 `instructcontext/1-true-CODEX_PROMPT.md` 的 Step 1~6 拆成可按 TDD 循环执行的任务清单。
 >
 > 约束：严格 Doc/Spec First + TDD（RED → GREEN → REFACTOR），并在 `docs/worklog.md` 记录命令与结果。
 
@@ -94,4 +94,3 @@ TDD 建议：
 验收点：
 - 新主线入口清晰，旧资产可追溯但不干扰
 - `DOCS_INDEX.md`、worklog、任务总结同步更新
-

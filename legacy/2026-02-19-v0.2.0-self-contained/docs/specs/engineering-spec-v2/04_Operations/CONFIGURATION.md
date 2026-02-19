@@ -2,7 +2,7 @@
 
 > 目标：定义 `RuntimeConfig` 字段、默认值、风险与约束，保证“可复刻运行”。
 >
-> 真相源：`instructcontext/CODEX_PROMPT.md`（runtime/engine.py 注释）
+> 真相源：`instructcontext/1-true-CODEX_PROMPT.md`（runtime/engine.py 注释）
 
 ---
 

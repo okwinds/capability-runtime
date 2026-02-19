@@ -18,7 +18,7 @@
 
 ## 3) 最小可交付形态（v0.2.0）
 
-以 `instructcontext/CODEX_PROMPT.md` 为准，v0.2.0 最小闭环包含：
+以 `instructcontext/1-true-CODEX_PROMPT.md` 为准，v0.2.0 最小闭环包含：
 
 - 协议层（protocol/）：能力、技能、智能体、工作流、执行上下文。
 - 运行时层（runtime/）：注册表、执行引擎、循环控制、执行守卫。
@@ -39,4 +39,3 @@
 - 本轮为破坏式升级（目标版本 v0.2.0）。
 - 旧 bridge-only 主入口与旧类型体系整体归档到 `legacy/`（可追溯，但不干扰新主线）。
 - `projects/agently-skills-web-prototype/` 保留不动。
-

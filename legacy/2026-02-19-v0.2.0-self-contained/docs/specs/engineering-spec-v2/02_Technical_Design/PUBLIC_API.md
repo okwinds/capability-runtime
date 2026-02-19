@@ -4,7 +4,7 @@
 
 ## 1) 对外导出清单（以 v0.2.0 为目标）
 
-以 `instructcontext/CODEX_PROMPT.md` 的 `__init__.py` 为准，对外导出分组如下：
+以 `instructcontext/1-true-CODEX_PROMPT.md` 的 `__init__.py` 为准，对外导出分组如下：
 
 ### Protocol
 
@@ -49,4 +49,3 @@
 ## 4) 假设（Assumptions）
 
 - 若实现阶段需要新增对外导出，必须先更新本文件与 requirements/test traceability，再写代码（Doc/Spec First）。
-

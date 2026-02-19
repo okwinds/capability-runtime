@@ -1,7 +1,7 @@
 # PRD 校验报告（PRD Validation Report, v2）
 
 **PRD**：`docs/prd/agently-skills-runtime-capability-runtime.prd.md`  
-**关键真相源**：`instructcontext/CODEX_PROMPT.md`  
+**关键真相源**：`instructcontext/1-true-CODEX_PROMPT.md`  
 **结论**：PASS（可进入工程规格与实现阶段）
 
 > 说明：本项目属于“框架/运行时/适配器”，PRD 校验的重点是：边界是否清晰、需求是否可落地、验收是否可测试、迁移是否可追溯。
@@ -52,4 +52,3 @@
 ## 9) 假设（Assumptions）
 
 - ✅ 上游依赖可用性：允许 adapter 相关测试通过 mock 或集成用例（可选）覆盖；protocol/runtime 必须独立可回归。
-

@@ -2,7 +2,7 @@
 
 > 目标：定义离线回归命令与测试覆盖范围，作为“功能完成”的门禁。
 >
-> 真相源：`instructcontext/CODEX_PROMPT.md`（Step 5 测试清单）
+> 真相源：`instructcontext/1-true-CODEX_PROMPT.md`（Step 5 测试清单）
 
 ---
 
@@ -77,4 +77,3 @@ pytest -q tests/scenarios
 ## 4) 假设（Assumptions）
 
 - adapter 的真实上游执行细节不作为 v0.2.0 的硬门禁；但分发与协议一致性必须由 mock 测试锁定。
-

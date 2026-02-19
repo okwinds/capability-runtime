@@ -2,13 +2,13 @@
 
 ## 方式一：直接使用（推荐）
 
-将 `CODEX_PROMPT.md` 放到仓库根目录，然后：
+将 `instructcontext/1-true-CODEX_PROMPT.md` 复制到仓库根目录为 `CODEX_PROMPT.md`，然后：
 
 ```bash
 cd /path/to/agently-skills-runtime
 
-# 将 CODEX_PROMPT.md 复制到仓库根目录
-cp CODEX_PROMPT.md ./CODEX_PROMPT.md
+# 将 instructcontext 下的真相源 Prompt 复制到仓库根目录
+cp instructcontext/1-true-CODEX_PROMPT.md ./CODEX_PROMPT.md
 
 # 使用 codex cli 执行
 codex --model claude-sonnet-4-20250514 \
@@ -17,10 +17,10 @@ codex --model claude-sonnet-4-20250514 \
 
 ## 方式二：通过 AGENTS.md（如果你的仓库支持）
 
-将 `CODEX_PROMPT.md` 的核心内容放到仓库根目录的 `AGENTS.md` 中，Codex 会自动读取。
+将 `instructcontext/1-true-CODEX_PROMPT.md` 的核心内容放到仓库根目录的 `AGENTS.md` 中，Codex 会自动读取。
 
 ```bash
-cp CODEX_PROMPT.md ./AGENTS.md
+cp instructcontext/1-true-CODEX_PROMPT.md ./AGENTS.md
 codex "按照 AGENTS.md 的规格实施框架重构"
 ```
 

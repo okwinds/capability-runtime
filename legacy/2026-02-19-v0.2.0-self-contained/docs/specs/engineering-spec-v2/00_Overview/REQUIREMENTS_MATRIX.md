@@ -1,6 +1,6 @@
 # 需求矩阵（Requirements Matrix, v2）
 
-> 目的：把 PRD 与 `instructcontext/CODEX_PROMPT.md` 的要求拆成可实现、可测试、可追溯的条目。
+> 目的：把 PRD 与 `instructcontext/1-true-CODEX_PROMPT.md` 的要求拆成可实现、可测试、可追溯的条目。
 >
 > Owner 口径：
 > - **Protocol（This Repo）**：协议层类型定义（不依赖上游）
@@ -36,4 +36,3 @@
 | NFR-003 | 上游零侵入 | 不 fork、不侵入上游；adapters 只用 Public API | P0 | `02_Technical_Design/ARCHITECTURE.md` |
 | NFR-004 | 通用性 | 不绑业务，不强制 domain JSON 输出 | P0 | PRD Non-goals + 设计边界说明 |
 | NFR-005 | 异常可诊断 | 错误类型与抛出场景可追踪，测试覆盖关键边界 | P0 | `02_Technical_Design/ERROR_CATALOG.md` + tests |
-

@@ -2,7 +2,7 @@
 
 > 目标：把 `SkillSpec.inject_to` 的行为从“字段存在但未落地”提升为**可回归**的最小能力，使 capability runtime 的“Skill ↔ Agent”互嵌关系在协议层之外也有明确执行语义。
 >
-> 真相源：`instructcontext/CODEX_PROMPT.md` + `instructcontext/agently-skills-runtime-spec-v1.md`
+> 真相源：`instructcontext/1-true-CODEX_PROMPT.md` + `instructcontext/1-true-agently-skills-runtime-spec-v1.md`
 
 ---
 
@@ -70,4 +70,3 @@
 ```bash
 .venv/bin/python -m pytest -q
 ```
-

@@ -2,7 +2,7 @@
 
 > 目标：把 v0.2.0 所需的 `dataclass/Enum/Exception` 字段清单写成“实现级”规格，便于直接照抄实现与单测断言。
 >
-> 真相源：`instructcontext/CODEX_PROMPT.md`
+> 真相源：`instructcontext/1-true-CODEX_PROMPT.md`
 
 ---
 

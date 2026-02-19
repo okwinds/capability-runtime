@@ -4,7 +4,7 @@
 
 ## 1) 模块拆分与职责
 
-按 `instructcontext/CODEX_PROMPT.md`，目标包结构为：
+按 `instructcontext/1-true-CODEX_PROMPT.md`，目标包结构为：
 
 - `agently_skills_runtime/protocol/`：能力协议（纯类型定义；零上游依赖）
 - `agently_skills_runtime/runtime/`：能力运行时（注册表、执行引擎、循环控制、守卫；零上游依赖）
@@ -72,4 +72,3 @@ flowchart LR
 ## 5) 假设（Assumptions）
 
 - `reporting/*` 在 v0.2.0 可以以“最小可用”落地（例如以 JSON 可序列化 dict 承载事件聚合），不作为 protocol/runtime 的硬依赖。
-

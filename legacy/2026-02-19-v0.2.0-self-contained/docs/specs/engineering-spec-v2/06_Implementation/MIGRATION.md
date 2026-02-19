@@ -21,7 +21,7 @@
 2. 旧资产必须可追溯（保留原始文件与说明，不“悄悄消失”）
 3. 归档后索引可检索（`DOCS_INDEX.md` 必须更新）
 
-归档范围（按 `instructcontext/CODEX_PROMPT.md` 的处置决策）：
+归档范围（按 `instructcontext/1-true-CODEX_PROMPT.md` 的处置决策）：
 
 - 旧实现入口：
   - `src/agently_skills_runtime/runtime.py`
@@ -64,4 +64,3 @@
 ## 5) 假设（Assumptions）
 
 - 归档的旧实现不再作为新主线依赖；若业务方仍需旧 API，必须通过显式引用 legacy 路径实现临时过渡，并在后续版本清理。
-

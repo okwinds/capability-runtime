@@ -10,7 +10,7 @@
 
 优先级从高到低：
 
-1. `instructcontext/CODEX_PROMPT.md`（本轮重构的关键真相源）
+1. `instructcontext/1-true-CODEX_PROMPT.md`（本轮重构的关键真相源）
 2. PRD：`docs/prd/agently-skills-runtime-capability-runtime.prd.md`
 3. 本目录下 v2 工程规格（本文件及其链接文档）
 
