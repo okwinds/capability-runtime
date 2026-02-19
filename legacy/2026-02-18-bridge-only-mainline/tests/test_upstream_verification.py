@@ -28,7 +28,7 @@ class _FakeAgent:
     def __init__(self, events: List[AgentEvent]):
         self._events = events
 
-    async def run_stream_async(self, task: str, run_id: str | None = None):
+    async def run_stream_async(self, task: str, run_id: str | None = None, initial_history=None):
         for ev in self._events:
             yield ev
 

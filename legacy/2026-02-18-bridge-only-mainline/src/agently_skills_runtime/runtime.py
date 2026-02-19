@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import importlib
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Protocol, TypedDict
 
 import yaml
 
@@ -41,6 +43,44 @@ from .types import NodeReportV2, NodeResultV2
 PreflightMode = Literal["error", "warn", "off"]
 BackendMode = Literal["agently_openai_compatible", "sdk_openai_chat_completions"]
 UpstreamVerificationMode = Literal["off", "warn", "strict"]
+SchemaGateMode = Literal["off", "warn", "error"]
+
+
+class SchemaGateError(TypedDict):
+    """SchemaGate 错误条目（脱敏后摘要）。"""
+
+    path: str
+    kind: str
+    message: str
+
+
+class SchemaGateResult(TypedDict, total=False):
+    """SchemaGate 返回结果（由 Host 提供）。"""
+
+    mode: SchemaGateMode
+    ok: bool
+    schema_id: Optional[str]
+    normalized_payload: Optional[Dict[str, Any]]
+    errors: List[SchemaGateError]
+
+
+class SchemaGate(Protocol):
+    """SchemaGate：由宿主注入的可选校验门。"""
+
+    def validate(self, *, final_output: str, node_report: NodeReportV2, context: Dict[str, Any]) -> SchemaGateResult:
+        """校验输出并返回结果摘要（不得泄露敏感信息）。"""
+
+        ...
+
+
+class BridgeHook(Protocol):
+    """BridgeHook：由宿主注入的扩展点 hook（bridge core 不实现业务）。"""
+
+    def before_run(self, context: Dict[str, Any]) -> None: ...
+
+    def after_engine_event(self, context: Dict[str, Any], event: Any) -> None: ...
+
+    def before_return_result(self, context: Dict[str, Any], node_result: NodeResultV2) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -80,6 +120,9 @@ class AgentlySkillsRuntime:
         approval_provider: Optional[ApprovalProvider] = None,
         human_io: Optional[HumanIOProvider] = None,
         cancel_checker: Optional[Any] = None,
+        hooks: Optional[List[BridgeHook]] = None,
+        schema_gate: Optional[SchemaGate] = None,
+        schema_gate_mode: SchemaGateMode = "off",
     ) -> None:
         """
         构造 runtime。
@@ -100,6 +143,9 @@ class AgentlySkillsRuntime:
         self._human_io = human_io
         self._cancel_checker = cancel_checker
         self._triggerflow_runner = triggerflow_runner
+        self._hooks = list(hooks or [])
+        self._schema_gate = schema_gate
+        self._schema_gate_mode: SchemaGateMode = schema_gate_mode
 
         if self._config.backend_mode == "agently_openai_compatible":
             requester_factory = build_openai_compatible_requester_factory(agently_agent=agently_agent)
@@ -120,6 +166,66 @@ class AgentlySkillsRuntime:
             raise ValueError(f"unknown backend_mode: {self._config.backend_mode!r}")
 
         self._agent: Optional[Agent] = None
+
+    @staticmethod
+    def _sha256_text(text: str) -> str:
+        """对文本取 sha256（用于可观测摘要，不落明文）。"""
+
+        return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _truncate_text(text: str, *, max_chars: int = 200) -> str:
+        """截断文本（用于 meta/error 摘要，避免泄露与膨胀）。"""
+
+        s = str(text or "")
+        return s if len(s) <= max_chars else (s[: max_chars - 3] + "...")
+
+    def _record_hook_invocation(
+        self,
+        *,
+        meta: Dict[str, Any],
+        name: str,
+        ok: bool,
+        duration_ms: int,
+        error_kind: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """把 hook 调用摘要记录到 NodeReport.meta（不抛异常）。"""
+
+        meta.setdefault("extension_trace", [])
+        if isinstance(meta.get("extension_trace"), list):
+            meta["extension_trace"].append(
+                {"name": name, "ok": ok, "duration_ms": duration_ms, "error_kind": error_kind}
+            )
+        if not ok and error_message:
+            meta.setdefault("extension_errors", [])
+            if isinstance(meta.get("extension_errors"), list):
+                meta["extension_errors"].append(
+                    {
+                        "name": name,
+                        "error_kind": error_kind or "exception",
+                        "message": self._truncate_text(error_message),
+                    }
+                )
+
+    def _safe_call_hook(self, *, meta: Dict[str, Any], name: str, fn) -> None:  # type: ignore[no-untyped-def]
+        """安全调用 hook：记录耗时与异常，不影响主流程。"""
+
+        started = time.monotonic()
+        try:
+            fn()
+            dur_ms = int((time.monotonic() - started) * 1000)
+            self._record_hook_invocation(meta=meta, name=name, ok=True, duration_ms=dur_ms)
+        except Exception as exc:
+            dur_ms = int((time.monotonic() - started) * 1000)
+            self._record_hook_invocation(
+                meta=meta,
+                name=name,
+                ok=False,
+                duration_ms=dur_ms,
+                error_kind=type(exc).__name__,
+                error_message=str(exc),
+            )
 
     @staticmethod
     def _module_file_path(module_name: str) -> Optional[Path]:
@@ -328,14 +434,35 @@ class AgentlySkillsRuntime:
             details={"issues": [dataclasses.asdict(i) for i in issues]},
         )
 
-    async def run_async(self, task: str, *, run_id: Optional[str] = None) -> NodeResultV2:
+    async def run_async(
+        self,
+        task: str,
+        *,
+        run_id: Optional[str] = None,
+        initial_history: Optional[List[Dict[str, Any]]] = None,
+        session_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
+    ) -> NodeResultV2:
         """
         运行一次任务并返回 NodeResult（异步）。
 
         参数：
         - `task`：任务文本
         - `run_id`：可选 run_id；不传则由 SDK 生成
+        - `initial_history`：宿主注入的历史消息/上下文（会话恢复 / RAG 注入）
+        - `session_id`：宿主侧会话标识（写入 NodeReport.meta）
+        - `turn_id`：宿主侧 turn 标识（写入 NodeReport.meta，字段名为 host_turn_id）
         """
+
+        bridge_meta: Dict[str, Any] = {
+            "initial_history_injected": initial_history is not None,
+            "task_sha256": self._sha256_text(task),
+            "task_len": len(task or ""),
+        }
+        if session_id is not None:
+            bridge_meta["session_id"] = session_id
+        if turn_id is not None:
+            bridge_meta["host_turn_id"] = turn_id
 
         preflight_issues: List[FrameworkIssue] = []
         upstream_issues: List[FrameworkIssue] = []
@@ -358,6 +485,7 @@ class AgentlySkillsRuntime:
                     meta={
                         "upstream_issues": [dataclasses.asdict(i) for i in upstream_issues],
                         "upstream_verification_mode": "strict",
+                        **bridge_meta,
                     },
                 )
                 return NodeResultV2(final_output="Upstream fork verification failed.", node_report=report, events_path=None, artifacts=[])
@@ -378,14 +506,38 @@ class AgentlySkillsRuntime:
                     activated_skills=[],
                     tool_calls=[],
                     artifacts=[],
-                    meta={"preflight_issues": [dataclasses.asdict(i) for i in issues]},
+                    meta={"preflight_issues": [dataclasses.asdict(i) for i in issues], **bridge_meta},
                 )
                 return NodeResultV2(final_output="Skills preflight failed.", node_report=report, events_path=None, artifacts=[])
 
-        events = []
+        hook_context: Dict[str, Any] = {
+            "run_id": run_id,
+            "session_id": session_id,
+            "host_turn_id": turn_id,
+        }
+
+        events: List[Any] = []
         agent = self._get_or_create_agent()
-        async for ev in agent.run_stream_async(task, run_id=run_id):
+        saw_before_run = False
+        async for ev in agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
             events.append(ev)
+
+            if not saw_before_run and ev.type == "run_started":
+                hook_context["run_id"] = ev.run_id
+                for h in self._hooks:
+                    fn = getattr(h, "before_run", None)
+                    if callable(fn):
+                        self._safe_call_hook(meta=bridge_meta, name="before_run", fn=lambda fn=fn: fn(hook_context))
+                saw_before_run = True
+
+            for h in self._hooks:
+                fn = getattr(h, "after_engine_event", None)
+                if callable(fn):
+                    self._safe_call_hook(
+                        meta=bridge_meta,
+                        name="after_engine_event",
+                        fn=lambda fn=fn, ev=ev: fn(hook_context, ev),
+                    )
 
         report = NodeReportBuilder().build(events=events)
         if preflight_issues and self._config.preflight_mode == "warn":
@@ -402,14 +554,77 @@ class AgentlySkillsRuntime:
             elif ev.type in ("run_failed", "run_cancelled"):
                 final_output = str(ev.payload.get("message") or "")
 
-        return NodeResultV2(
+        for k, v in bridge_meta.items():
+            if v is None:
+                continue
+            report.meta.setdefault(k, v)
+
+        # Schema Gate（可选，默认 off）
+        if self._schema_gate is not None and self._schema_gate_mode != "off" and report.status == "success":
+            try:
+                sg = self._schema_gate.validate(final_output=final_output, node_report=report, context=dict(hook_context))
+                errors_raw = sg.get("errors") or []
+                errors_out: List[Dict[str, Any]] = []
+                if isinstance(errors_raw, list):
+                    for e in errors_raw[:20]:
+                        if not isinstance(e, dict):
+                            continue
+                        errors_out.append(
+                            {
+                                "path": str(e.get("path") or ""),
+                                "kind": str(e.get("kind") or ""),
+                                "message": self._truncate_text(str(e.get("message") or "")),
+                            }
+                        )
+
+                ok = bool(sg.get("ok"))
+                report.meta["schema_gate"] = {
+                    "mode": self._schema_gate_mode,
+                    "ok": ok,
+                    "schema_id": sg.get("schema_id"),
+                    "error_count": len(errors_out),
+                    "errors": errors_out,
+                }
+                if self._schema_gate_mode == "error" and not ok:
+                    report.meta["schema_gate_overrode_status"] = True
+                    report.status = "failed"
+                    report.reason = "schema_validation_error"
+            except Exception as exc:
+                report.meta["schema_gate"] = {
+                    "mode": self._schema_gate_mode,
+                    "ok": False,
+                    "schema_id": None,
+                    "error_count": 1,
+                    "errors": [{"path": "", "kind": type(exc).__name__, "message": self._truncate_text(str(exc))}],
+                }
+                if self._schema_gate_mode == "error":
+                    report.meta["schema_gate_overrode_status"] = True
+                    report.status = "failed"
+                    report.reason = "schema_validation_error"
+
+        node_result = NodeResultV2(
             final_output=final_output,
             node_report=report,
             events_path=report.events_path,
             artifacts=[],
         )
 
-    def run(self, task: str, *, run_id: Optional[str] = None) -> NodeResultV2:
+        for h in self._hooks:
+            fn = getattr(h, "before_return_result", None)
+            if callable(fn):
+                self._safe_call_hook(meta=bridge_meta, name="before_return_result", fn=lambda fn=fn: fn(hook_context, node_result))
+
+        return node_result
+
+    def run(
+        self,
+        task: str,
+        *,
+        run_id: Optional[str] = None,
+        initial_history: Optional[List[Dict[str, Any]]] = None,
+        session_id: Optional[str] = None,
+        turn_id: Optional[str] = None,
+    ) -> NodeResultV2:
         """
         同步运行一次任务（便捷包装）。
 
@@ -420,5 +635,13 @@ class AgentlySkillsRuntime:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.run_async(task, run_id=run_id))
+            return asyncio.run(
+                self.run_async(
+                    task,
+                    run_id=run_id,
+                    initial_history=initial_history,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                )
+            )
         raise RuntimeError("run() cannot be called from a running event loop; use run_async() instead.")

@@ -1,17 +1,61 @@
 """
-agently-skills-runtime
+agently-skills-runtime（v0.2.0 主线）
 
-本包提供一个“桥接适配层”，把：
-- 上游 Agently（TriggerFlow + provider 配置/网络传输层）
-- 上游 skills-runtime-sdk-python（agent_sdk：skills/tools/approvals/WAL/事件）
+本包提供一个“面向能力（Capability-oriented）”的运行时框架：
+- 协议层（protocol/）：纯 dataclass/Enum 的能力声明与执行上下文；不依赖上游。
+- 运行时（runtime/）：能力注册、依赖校验、递归/循环守卫与执行分发；不依赖上游。
+- 适配器（adapters/）：桥接上游能力（可依赖上游，但只使用 Public API）。
 
-组合成一个可在 TriggerFlow 节点内调用的生产级 runtime。
-
-对齐规格入口：
-- `docs/specs/engineering-spec/SPEC_INDEX.md`
+注意：
+- 本仓库主线为破坏式升级（v0.2.0），旧 bridge-only 实现已归档到 `legacy/`。
 """
 
-from .runtime import AgentlySkillsRuntime
-from .types import NodeReportV2, NodeResultV2
+from .protocol.agent import AgentIOSchema, AgentSpec
+from .protocol.capability import (
+    CapabilityKind,
+    CapabilityRef,
+    CapabilityResult,
+    CapabilitySpec,
+    CapabilityStatus,
+)
+from .protocol.context import ExecutionContext, RecursionLimitError
+from .protocol.skill import SkillDispatchRule, SkillSpec
+from .protocol.workflow import (
+    ConditionalStep,
+    InputMapping,
+    LoopStep,
+    ParallelStep,
+    Step,
+    WorkflowSpec,
+    WorkflowStep,
+)
+from .runtime.engine import CapabilityRuntime, RuntimeConfig
+from .runtime.guards import LoopBreakerError
+from .runtime.registry import CapabilityRegistry
 
-__all__ = ["AgentlySkillsRuntime", "NodeReportV2", "NodeResultV2"]
+__all__ = [
+    # Protocol
+    "CapabilitySpec",
+    "CapabilityKind",
+    "CapabilityRef",
+    "CapabilityResult",
+    "CapabilityStatus",
+    "SkillSpec",
+    "SkillDispatchRule",
+    "AgentSpec",
+    "AgentIOSchema",
+    "WorkflowSpec",
+    "Step",
+    "LoopStep",
+    "ParallelStep",
+    "ConditionalStep",
+    "InputMapping",
+    "WorkflowStep",
+    "ExecutionContext",
+    "RecursionLimitError",
+    # Runtime
+    "CapabilityRuntime",
+    "RuntimeConfig",
+    "CapabilityRegistry",
+    "LoopBreakerError",
+]

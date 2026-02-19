@@ -1,17 +1,13 @@
-# agently-skills-runtime bridge 示例配置（主线）
+# agently-skills-runtime v0.2.0 示例配置（RuntimeConfig）
 #
 # 说明：
-# - 本文件只描述 bridge 层“最小集成视角”（workspace_root、SDK overlays、preflight、backend_mode、upstream 校验）。
-# - SDK 的完整配置（Strict Catalog / spaces / sources / llm / safety / tools 等）由 `sdk_config_paths` 指向的 overlays 决定。
+# - v0.2.0 主线的 protocol/runtime 不依赖上游；
+# - 本文件仅提供 RuntimeConfig 的 YAML 形态示例；
+# - `agently_agent` 等“运行期对象”无法在 YAML 中表达，应由宿主代码注入。
 
 workspace_root: "."
 sdk_config_paths:
-  - "./config/sdk.local.yaml"  # 示例：你的 SDK overlays（路径可自定义，后者覆盖前者）
-preflight_mode: "error"  # error|warn|off（生产推荐 error）
-backend_mode: "agently_openai_compatible"  # agently_openai_compatible|sdk_openai_chat_completions
-
-# 上游 fork 校验（可选）：off|warn|strict
-upstream_verification_mode: "warn"
-# 推荐填入你的 fork 根目录；strict 模式下建议必填
-agently_fork_root: "../Agently"
-skills_runtime_sdk_fork_root: "../skills-runtime-sdk"
+  - "./config/sdk.local.yaml"  # 示例：你的 SDK overlays（路径可自定义；后者覆盖前者）
+preflight_mode: "error"  # error|warn|off（仅保留字段；框架不定义人机交互）
+max_loop_iterations: 200
+max_depth: 10

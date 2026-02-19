@@ -4,6 +4,8 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.tmp/
+.pip-cache/
 dist/
 build/
 *.egg-info/
@@ -19,18 +21,6 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
-
-# repo-level docs / notes (do not track)
-/docs/
-/legacy/
-
-# repo root markdown files only (do not ignore all *.md)
-/AGENTS.md
-/DOCS_INDEX.md
-/DOCS_INDEX_TEMPLATE.md
-/README.md
-/TASK_SUMMARY_TEMPLATE.md
-/WORKLOG_TEMPLATE.md
 
 .runtime/
 artifacts/
