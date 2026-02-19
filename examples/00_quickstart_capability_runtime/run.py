@@ -1,3 +1,5 @@
+"""快速体验 CapabilityRuntime + SkillAdapter 的离线示例。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -43,4 +45,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

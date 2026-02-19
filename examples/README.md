@@ -1,10 +1,41 @@
-# examples/（示例索引）
+# agently-skills-runtime Examples
 
-本目录提供**离线可运行**的最小示例，用于快速理解本框架的“声明 → 注册 → 组合 → 执行”使用方式。
+渐进式示例库。每个目录独立可运行。
 
-## 示例列表
+## 快速开始
 
-- `examples/00_quickstart_capability_runtime/`：30 秒体验（纯离线，不依赖真实 LLM）
+```bash
+pip install -e ".[dev]"
+```
+
+立即可运行（已存在）：
+
+```bash
+python examples/00_quickstart_capability_runtime/run.py
+```
+
+基础示例（BATCH1 已补齐 `run.py`，可直接运行）：
+
+```bash
+python examples/01_declare_and_run/run.py
+```
+
+## 示例索引
+
+| # | 目录 | 演示内容 | 需要 LLM |
+|---|------|---------|---------|
+| 00 | 00_quickstart_capability_runtime | 30 秒离线体验 CapabilityRuntime（已可运行） | ❌ |
+| 01 | 01_declare_and_run | 最小 AgentSpec 声明 + mock 执行 | ❌ |
+| 02 | 02_workflow_sequential | 3 个 Agent 顺序执行 + InputMapping | ❌ |
+| 03 | 03_workflow_loop | LoopStep：对列表中每个元素调用 Agent | ❌ |
+| 04 | 04_workflow_parallel | ParallelStep：多个 Agent 并行执行 | ❌ |
+| 05 | 05_workflow_conditional | ConditionalStep：条件分支 | ❌ |
+| 06 | 06_skill_injection | Skill 注入 Agent（BATCH 2） | ❌ |
+| 07 | 07_skill_dispatch | Skill dispatch_rules 调度（BATCH 2） | ❌ |
+| 08 | 08_nested_workflow | Workflow 嵌套 Workflow（BATCH 2） | ❌ |
+| 09 | 09_full_scenario_mock | 完整场景模拟（BATCH 3） | ❌ |
+| 10 | 10_bridge_wiring | 真实 LLM 接线（BATCH 3） | ✅ |
+| 11 | 11_agent_domain_starter | Agent Domain 脚手架（BATCH 4） | ✅ |
 
 ## 参考应用（非示例）
 
