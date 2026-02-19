@@ -1,13 +1,25 @@
-# agently-skills-runtime v0.2.0 示例配置（RuntimeConfig）
+# agently-skills-runtime v0.3.0 示例配置（BridgeConfigModel）
 #
 # 说明：
-# - v0.2.0 主线的 protocol/runtime 不依赖上游；
-# - 本文件仅提供 RuntimeConfig 的 YAML 形态示例；
-# - `agently_agent` 等“运行期对象”无法在 YAML 中表达，应由宿主代码注入。
+# - 本仓库主线为“胶水层”：依赖上游 Agently + skills-runtime-sdk；
+# - 本文件仅提供 bridge 配置形态示例；
+# - `agently_agent` / `HumanIOProvider` / `TriggerFlowRunner` 等运行期对象无法在 YAML 中表达，需由宿主注入。
 
 workspace_root: "."
+
+# 上游 SDK overlays（后者覆盖前者）
 sdk_config_paths:
-  - "./config/sdk.local.yaml"  # 示例：你的 SDK overlays（路径可自定义；后者覆盖前者）
-preflight_mode: "error"  # error|warn|off（仅保留字段；框架不定义人机交互）
-max_loop_iterations: 200
-max_depth: 10
+  - "./config/sdk.local.yaml"
+
+# 生产 gate：发现任何 issue 是否 fail-closed
+preflight_mode: "error" # error|warn|off
+
+# LLM backend 选择：
+# - agently_openai_compatible：复用 Agently OpenAICompatible requester（推荐）
+# - sdk_openai_chat_completions：使用 SDK 原生 OpenAI backend（必要时兜底）
+backend_mode: "agently_openai_compatible"
+
+# 上游 fork 校验：是否校验当前 import 的模块来自预期 fork 根目录
+upstream_verification_mode: "warn" # off|warn|strict
+agently_fork_root: null
+skills_runtime_sdk_fork_root: null

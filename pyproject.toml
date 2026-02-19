@@ -1,12 +1,15 @@
 [project]
 name = "agently-skills-runtime"
-version = "0.2.0"
-description = "Capability-oriented runtime for composing Skill/Agent/Workflow, with upstream adapters."
+version = "0.3.0"
+description = "Bridge/glue layer that composes Agently (LLM/TriggerFlow) with skills-runtime-sdk (skills/tools/WAL/events)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 dependencies = [
-  "PyYAML",
+  "PyYAML>=6",
+  "pydantic>=2,<3",
+  "agently>=4.0.0",
+  "skills-runtime-sdk>=0.1.0",
 ]
 
 [project.optional-dependencies]
