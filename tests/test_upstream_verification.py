@@ -9,7 +9,7 @@ import pytest
 from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.core.errors import FrameworkError, FrameworkIssue
 
-from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
 
 
 class _FakeRequester:
@@ -34,7 +34,7 @@ class _FakeAgent:
 
 
 def _patch_requester_factory(monkeypatch):
-    import agently_skills_runtime.runtime as runtime_mod
+    import agently_skills_runtime.bridge as runtime_mod
 
     def _fake_factory(*, agently_agent):
         return lambda: _FakeRequester()
@@ -79,7 +79,7 @@ def test_verify_upstreams_strict_reports_missing_roots(monkeypatch, tmp_path):
 
 
 def test_verify_upstreams_warn_with_matching_roots_has_no_issues(monkeypatch, tmp_path):
-    import agently_skills_runtime.runtime as runtime_mod
+    import agently_skills_runtime.bridge as runtime_mod
 
     agently_root = (tmp_path / "agently").resolve()
     sdk_root = (tmp_path / "skills-runtime-sdk").resolve()
@@ -105,7 +105,7 @@ def test_verify_upstreams_warn_with_matching_roots_has_no_issues(monkeypatch, tm
 
 
 def test_verify_upstreams_warn_reports_mismatch(monkeypatch, tmp_path):
-    import agently_skills_runtime.runtime as runtime_mod
+    import agently_skills_runtime.bridge as runtime_mod
 
     def _fake_import(name: str):
         if name == "agently":
@@ -130,7 +130,7 @@ def test_verify_upstreams_warn_reports_mismatch(monkeypatch, tmp_path):
 
 
 def test_verify_upstreams_warn_reports_import_error(monkeypatch, tmp_path):
-    import agently_skills_runtime.runtime as runtime_mod
+    import agently_skills_runtime.bridge as runtime_mod
 
     def _fake_import(name: str):
         raise ImportError(name)

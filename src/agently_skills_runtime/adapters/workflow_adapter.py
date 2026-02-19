@@ -1,0 +1,237 @@
+"""Workflow 适配器：WorkflowSpec → 步骤编排执行。"""
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Dict, List
+
+from ..protocol.capability import CapabilityResult, CapabilityStatus
+from ..protocol.context import ExecutionContext
+from ..protocol.workflow import (
+    ConditionalStep,
+    InputMapping,
+    LoopStep,
+    ParallelStep,
+    Step,
+    WorkflowSpec,
+)
+
+
+class WorkflowAdapter:
+    """
+    Workflow 适配器。
+
+    不依赖任何上游——所有执行都通过 runtime._execute() 递归回 Engine。
+    """
+
+    async def execute(
+        self,
+        *,
+        spec: WorkflowSpec,
+        input: Dict[str, Any],
+        context: ExecutionContext,
+        runtime: Any,  # CapabilityRuntime
+    ) -> CapabilityResult:
+        """
+        执行 WorkflowSpec。
+
+        流程：
+        1. 合并 input 到 context bag
+        2. 遍历 steps，按类型分发执行
+        3. 每步结果缓存到 context.step_outputs
+        4. 步骤失败 → 立即返回
+        5. 全部完成 → 解析 output_mappings 构造最终输出
+        """
+        context.bag.update(input)
+
+        for step in spec.steps:
+            result = await self._execute_step(step, context=context, runtime=runtime)
+            if result.status == CapabilityStatus.FAILED:
+                return result
+
+        output = self._resolve_output_mappings(spec.output_mappings, context)
+        if output is None:
+            output = dict(context.step_outputs)
+
+        return CapabilityResult(status=CapabilityStatus.SUCCESS, output=output)
+
+    async def _execute_step(
+        self,
+        step: Any,
+        *,
+        context: ExecutionContext,
+        runtime: Any,
+    ) -> CapabilityResult:
+        """按步骤类型分发执行。"""
+        if isinstance(step, Step):
+            return await self._execute_basic_step(step, context=context, runtime=runtime)
+        if isinstance(step, LoopStep):
+            return await self._execute_loop_step(step, context=context, runtime=runtime)
+        if isinstance(step, ParallelStep):
+            return await self._execute_parallel_step(step, context=context, runtime=runtime)
+        if isinstance(step, ConditionalStep):
+            return await self._execute_conditional_step(
+                step, context=context, runtime=runtime
+            )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error=f"Unknown step type: {type(step).__name__}",
+        )
+
+    async def _execute_basic_step(
+        self,
+        step: Step,
+        *,
+        context: ExecutionContext,
+        runtime: Any,
+    ) -> CapabilityResult:
+        """执行基础步骤。"""
+        step_input = self._resolve_input_mappings(step.input_mappings, context)
+
+        target_spec = runtime.registry.get_or_raise(step.capability.id)
+        result = await runtime._execute(target_spec, input=step_input, context=context)
+
+        context.step_outputs[step.id] = result.output
+        return result
+
+    async def _execute_loop_step(
+        self,
+        step: LoopStep,
+        *,
+        context: ExecutionContext,
+        runtime: Any,
+    ) -> CapabilityResult:
+        """执行循环步骤。"""
+        items = context.resolve_mapping(step.iterate_over)
+        if not isinstance(items, list):
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=(
+                    f"LoopStep '{step.id}': iterate_over resolved to "
+                    f"{type(items).__name__}, expected list"
+                ),
+            )
+
+        target_spec = runtime.registry.get_or_raise(step.capability.id)
+
+        async def execute_item(item: Any, idx: int) -> CapabilityResult:
+            item_context = ExecutionContext(
+                run_id=context.run_id,
+                parent_context=context,
+                depth=context.depth,
+                max_depth=context.max_depth,
+                bag={**context.bag, "__current_item__": item},
+                step_outputs=dict(context.step_outputs),
+                call_chain=list(context.call_chain),
+            )
+            step_input = self._resolve_input_mappings(step.item_input_mappings, item_context)
+            if not step_input:
+                step_input = item if isinstance(item, dict) else {"item": item}
+            return await runtime._execute(target_spec, input=step_input, context=item_context)
+
+        result = await runtime.loop_controller.run_loop(
+            items=items,
+            max_iterations=step.max_iterations,
+            execute_fn=execute_item,
+            fail_strategy=step.fail_strategy,
+        )
+
+        context.step_outputs[step.id] = result.output
+        return result
+
+    async def _execute_parallel_step(
+        self,
+        step: ParallelStep,
+        *,
+        context: ExecutionContext,
+        runtime: Any,
+    ) -> CapabilityResult:
+        """执行并行步骤。"""
+        tasks = [self._execute_step(branch, context=context, runtime=runtime) for branch in step.branches]
+
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        branch_results: List[CapabilityResult] = []
+        for r in raw_results:
+            if isinstance(r, Exception):
+                branch_results.append(
+                    CapabilityResult(status=CapabilityStatus.FAILED, error=str(r))
+                )
+            else:
+                branch_results.append(r)
+
+        if step.join_strategy == "all_success":
+            failed = [r for r in branch_results if r.status == CapabilityStatus.FAILED]
+            if failed:
+                return CapabilityResult(
+                    status=CapabilityStatus.FAILED,
+                    output=[r.output for r in branch_results],
+                    error=(
+                        f"ParallelStep '{step.id}': "
+                        f"{len(failed)}/{len(branch_results)} branches failed"
+                    ),
+                )
+        elif step.join_strategy == "any_success":
+            if not any(r.status == CapabilityStatus.SUCCESS for r in branch_results):
+                return CapabilityResult(
+                    status=CapabilityStatus.FAILED,
+                    output=[r.output for r in branch_results],
+                    error=f"ParallelStep '{step.id}': no branch succeeded",
+                )
+
+        context.step_outputs[step.id] = [r.output for r in branch_results]
+        return CapabilityResult(
+            status=CapabilityStatus.SUCCESS,
+            output=[r.output for r in branch_results],
+        )
+
+    async def _execute_conditional_step(
+        self,
+        step: ConditionalStep,
+        *,
+        context: ExecutionContext,
+        runtime: Any,
+    ) -> CapabilityResult:
+        """执行条件步骤。"""
+        condition_value = context.resolve_mapping(step.condition_source)
+        condition_key = str(condition_value) if condition_value is not None else ""
+
+        branch = step.branches.get(condition_key, step.default)
+        if branch is None:
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=(
+                    f"ConditionalStep '{step.id}': no branch for "
+                    f"condition '{condition_key}' and no default"
+                ),
+            )
+
+        result = await self._execute_step(branch, context=context, runtime=runtime)
+        context.step_outputs[step.id] = result.output
+        return result
+
+    @staticmethod
+    def _resolve_input_mappings(
+        mappings: List[InputMapping],
+        context: ExecutionContext,
+    ) -> Dict[str, Any]:
+        """解析输入映射列表。"""
+        result: Dict[str, Any] = {}
+        for m in mappings:
+            value = context.resolve_mapping(m.source)
+            result[m.target_field] = value
+        return result
+
+    @staticmethod
+    def _resolve_output_mappings(
+        mappings: List[InputMapping],
+        context: ExecutionContext,
+    ) -> Any:
+        """解析输出映射列表。"""
+        if not mappings:
+            return None
+        result: Dict[str, Any] = {}
+        for m in mappings:
+            value = context.resolve_mapping(m.source)
+            result[m.target_field] = value
+        return result
+

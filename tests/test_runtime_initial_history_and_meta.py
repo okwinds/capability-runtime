@@ -4,8 +4,8 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-import agently_skills_runtime.runtime as runtime_mod
-from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+import agently_skills_runtime.bridge as runtime_mod
+from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
 
 
 class _FakeRequester:

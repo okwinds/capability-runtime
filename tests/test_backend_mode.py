@@ -9,7 +9,7 @@ import pytest
 from agent_sdk.config.defaults import load_default_config_dict
 from agent_sdk.config.loader import load_config_dicts
 
-from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
 
 
 class _FakeAgent:
@@ -33,7 +33,7 @@ def test_runtime_unknown_backend_mode_raises(tmp_path):
 def test_sdk_backend_mode_does_not_call_agently_requester_factory(monkeypatch, tmp_path):
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "build_openai_compatible_requester_factory", lambda **_: (_ for _ in ()).throw(AssertionError))
     AgentlySkillsRuntime(agently_agent=object(), config=cfg)
@@ -42,7 +42,7 @@ def test_sdk_backend_mode_does_not_call_agently_requester_factory(monkeypatch, t
 def test_sdk_backend_mode_passes_openai_backend_to_agent(monkeypatch, tmp_path):
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "Agent", _FakeAgent)
     rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg)
@@ -58,7 +58,7 @@ def test_sdk_backend_mode_uses_env_store_as_api_key_override(monkeypatch, tmp_pa
 
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "Agent", _FakeAgent)
     rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg, env_store={key_name: "k"})
@@ -69,7 +69,7 @@ def test_sdk_backend_mode_uses_env_store_as_api_key_override(monkeypatch, tmp_pa
 def test_sdk_backend_mode_does_not_require_agently_agent_shape(monkeypatch, tmp_path):
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "Agent", _FakeAgent)
     rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg)
@@ -79,7 +79,7 @@ def test_sdk_backend_mode_does_not_require_agently_agent_shape(monkeypatch, tmp_
 def test_sdk_backend_mode_api_key_override_can_be_none(monkeypatch, tmp_path):
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "Agent", _FakeAgent)
     rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg, env_store={})
@@ -105,7 +105,7 @@ def test_agently_backend_mode_calls_requester_factory(monkeypatch, tmp_path):
 
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="agently_openai_compatible")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "build_openai_compatible_requester_factory", _factory)
     monkeypatch.setattr(rt_mod, "AgentlyChatBackend", _FakeAgentlyChatBackend)
@@ -120,7 +120,7 @@ def test_agently_backend_mode_calls_requester_factory(monkeypatch, tmp_path):
 def test_preflight_does_not_create_agent(monkeypatch, tmp_path):
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     def _boom(*args: Any, **kwargs: Any) -> None:
         raise AssertionError("Agent must not be constructed during preflight")
@@ -135,7 +135,7 @@ def test_preflight_does_not_create_agent(monkeypatch, tmp_path):
 def test_run_uses_lazy_agent_construction(monkeypatch, tmp_path):
     cfg = AgentlySkillsRuntimeConfig(workspace_root=tmp_path, config_paths=[], backend_mode="sdk_openai_chat_completions")
 
-    import agently_skills_runtime.runtime as rt_mod
+    import agently_skills_runtime.bridge as rt_mod
 
     # Ensure __init__ does not create the Agent eagerly.
     created: Dict[str, bool] = {"created": False}

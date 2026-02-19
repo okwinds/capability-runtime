@@ -1,17 +1,86 @@
-"""
-agently-skills-runtime
+"""agently-skills-runtime: 桥接胶水层 + 能力组织层。"""
+from __future__ import annotations
 
-本包提供一个“桥接适配层”，把：
-- 上游 Agently（TriggerFlow + provider 配置/网络传输层）
-- 上游 skills-runtime-sdk-python（agent_sdk：skills/tools/approvals/WAL/事件）
-
-组合成一个可在 TriggerFlow 节点内调用的生产级 runtime。
-
-对齐规格入口：
-- `docs/specs/engineering-spec/SPEC_INDEX.md`
-"""
-
-from .runtime import AgentlySkillsRuntime
+# === 桥接层导出（保持向后兼容）===
+from .bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from .config import BridgeConfigModel
 from .types import NodeReportV2, NodeResultV2
 
-__all__ = ["AgentlySkillsRuntime", "NodeReportV2", "NodeResultV2"]
+# === Protocol 导出 ===
+from .protocol.agent import AgentIOSchema, AgentSpec
+from .protocol.capability import (
+    CapabilityKind,
+    CapabilityRef,
+    CapabilityResult,
+    CapabilitySpec,
+    CapabilityStatus,
+)
+from .protocol.context import ExecutionContext, RecursionLimitError
+from .protocol.skill import SkillDispatchRule, SkillSpec
+from .protocol.workflow import (
+    ConditionalStep,
+    InputMapping,
+    LoopStep,
+    ParallelStep,
+    Step,
+    WorkflowSpec,
+    WorkflowStep,
+)
+
+# === Runtime 导出 ===
+from .runtime.engine import AdapterProtocol, CapabilityRuntime, RuntimeConfig
+from .runtime.guards import ExecutionGuards, LoopBreakerError
+from .runtime.loop import LoopController
+from .runtime.registry import CapabilityRegistry
+
+# === Adapter 导出 ===
+from .adapters.agent_adapter import AgentAdapter
+from .adapters.skill_adapter import SkillAdapter
+from .adapters.workflow_adapter import WorkflowAdapter
+
+# === 错误导出 ===
+from .errors import AdapterNotFoundError, AgentlySkillsRuntimeError, CapabilityNotFoundError
+
+__all__ = [
+    # Bridge
+    "AgentlySkillsRuntime",
+    "AgentlySkillsRuntimeConfig",
+    "NodeReportV2",
+    "NodeResultV2",
+    "BridgeConfigModel",
+    # Protocol
+    "CapabilityKind",
+    "CapabilityRef",
+    "CapabilitySpec",
+    "CapabilityStatus",
+    "CapabilityResult",
+    "SkillSpec",
+    "SkillDispatchRule",
+    "AgentSpec",
+    "AgentIOSchema",
+    "WorkflowSpec",
+    "Step",
+    "LoopStep",
+    "ParallelStep",
+    "ConditionalStep",
+    "InputMapping",
+    "WorkflowStep",
+    "ExecutionContext",
+    "RecursionLimitError",
+    # Runtime
+    "CapabilityRuntime",
+    "RuntimeConfig",
+    "AdapterProtocol",
+    "CapabilityRegistry",
+    "ExecutionGuards",
+    "LoopBreakerError",
+    "LoopController",
+    # Adapters
+    "AgentAdapter",
+    "WorkflowAdapter",
+    "SkillAdapter",
+    # Errors
+    "AgentlySkillsRuntimeError",
+    "AdapterNotFoundError",
+    "CapabilityNotFoundError",
+]

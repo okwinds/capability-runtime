@@ -42,7 +42,7 @@ from pathlib import Path
 import agently
 
 from agently_skills_runtime import AgentlySkillsRuntime
-from agently_skills_runtime.runtime import AgentlySkillsRuntimeConfig
+from agently_skills_runtime.bridge import AgentlySkillsRuntimeConfig
 
 
 async def main() -> None:

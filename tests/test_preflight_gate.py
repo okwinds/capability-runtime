@@ -6,8 +6,8 @@ import pytest
 from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.core.errors import FrameworkError, FrameworkIssue
 
-import agently_skills_runtime.runtime as runtime_mod
-from agently_skills_runtime.runtime import (
+import agently_skills_runtime.bridge as runtime_mod
+from agently_skills_runtime.bridge import (
     AgentlySkillsRuntime,
     AgentlySkillsRuntimeConfig,
     AgentlySkillsRuntimeConfig as RuntimeCfg,
