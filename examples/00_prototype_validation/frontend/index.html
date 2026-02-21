@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prototype Validator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              mono: ['"JetBrains Mono"', '"Fira Code"', 'monospace'],
+            },
+          },
+        },
+      };
+    </script>
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap"
+    />
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  </head>
+  <body class="bg-slate-900 text-slate-100 font-mono">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useEffect, useMemo, useRef, useState } = React;
+
+      const EVENT_TYPES = [
+        "step_start",
+        "step_complete",
+        "loop_item",
+        "parallel_start",
+        "branch_complete",
+        "conditional_route",
+        "workflow_complete",
+        "error",
+      ];
+
+      const DAG_STEPS = [
+        "parse",
+        "section-loop",
+        "parallel-review-step",
+        "route-by-severity",
+        "compile",
+        "tone",
+        "facts",
+        "summarize-positive",
+        "report-critical",
+        "summarize-neutral",
+      ];
+
+      const EMPTY_STEP_STATE = DAG_STEPS.reduce((acc, key) => {
+        acc[key] = "pending";
+        return acc;
+      }, {});
+
+      function colorByStatus(status) {
+        if (status === "running") return "bg-sky-300 text-slate-900";
+        if (status === "success") return "bg-green-300 text-slate-900";
+        if (status === "failed") return "bg-red-300 text-slate-900";
+        if (status === "skipped") return "bg-amber-300 text-slate-900";
+        return "bg-slate-300 text-slate-900";
+      }
+
+      function mapEventStatus(status) {
+        if (!status) return "pending";
+        const s = String(status).toLowerCase();
+        if (s.includes("success")) return "success";
+        if (s.includes("fail")) return "failed";
+        if (s.includes("skip")) return "skipped";
+        if (s.includes("run")) return "running";
+        return "pending";
+      }
+
+      function fmtClock(ts) {
+        if (!ts) return "--:--:--";
+        const date = new Date(ts);
+        if (Number.isNaN(date.getTime())) return "--:--:--";
+        return date.toLocaleTimeString();
+      }
+
+      function App() {
+        const [mode, setMode] = useState("mock");
+        const [config, setConfig] = useState({ base_url: "", api_key: "", model: "" });
+        const [apiKeySaved, setApiKeySaved] = useState(false);
+        const [scenario, setScenario] = useState("neutral");
+        const [customInput, setCustomInput] = useState("");
+        const [capabilities, setCapabilities] = useState([]);
+        const [stepState, setStepState] = useState({ ...EMPTY_STEP_STATE });
+        const [logs, setLogs] = useState([]);
+        const [result, setResult] = useState(null);
+        const [running, setRunning] = useState(false);
+        const [runId, setRunId] = useState("");
+        const [notice, setNotice] = useState("");
+        const [error, setError] = useState("");
+        const [expanded, setExpanded] = useState({});
+
+        const sourceRef = useRef(null);
+        const logsEndRef = useRef(null);
+
+        useEffect(() => {
+          bootstrap();
+          return () => {
+            if (sourceRef.current) {
+              sourceRef.current.close();
+            }
+          };
+        }, []);
+
+        useEffect(() => {
+          if (logsEndRef.current) {
+            logsEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
+          }
+        }, [logs]);
+
+        async function bootstrap() {
+          await Promise.all([fetchConfig(), fetchCapabilities()]);
+        }
+
+        async function fetchConfig() {
+          try {
+            const response = await fetch("/api/config");
+            const data = await response.json();
+            setMode(data.mode || "mock");
+            setConfig((prev) => ({
+              ...prev,
+              base_url: data.base_url || "",
+              model: data.model || "",
+              api_key: "",
+            }));
+            setApiKeySaved(Boolean(data.api_key_present));
+          } catch (err) {
+            setError(`Load config failed: ${err.message}`);
+          }
+        }
+
+        async function fetchCapabilities() {
+          try {
+            const response = await fetch("/api/capabilities");
+            const data = await response.json();
+            setCapabilities(data.capabilities || []);
+          } catch (err) {
+            setError(`Load capabilities failed: ${err.message}`);
+          }
+        }
+
+        function appendLog(type, data) {
+          setLogs((prev) => {
+            const next = [
+              ...prev,
+              {
+                ts: data.ts || new Date().toISOString(),
+                type,
+                data,
+              },
+            ];
+            return next.slice(-300);
+          });
+        }
+
+        function resetRunView() {
+          setStepState({ ...EMPTY_STEP_STATE });
+          setLogs([]);
+          setResult(null);
+          setExpanded({});
+          setError("");
+          setNotice("");
+        }
+
+        function patchStep(stepId, status) {
+          if (!stepId) return;
+          setStepState((prev) => ({ ...prev, [stepId]: status }));
+        }
+
+        function connectEventStream(nextRunId) {
+          if (sourceRef.current) {
+            sourceRef.current.close();
+          }
+          const source = new EventSource(`/api/run/${nextRunId}/events`);
+          sourceRef.current = source;
+
+          EVENT_TYPES.forEach((eventType) => {
+            source.addEventListener(eventType, (event) => {
+              const data = JSON.parse(event.data || "{}");
+              appendLog(eventType, data);
+
+              if (eventType === "step_start") {
+                patchStep(data.step_id, "running");
+              }
+
+              if (eventType === "step_complete") {
+                patchStep(data.step_id, mapEventStatus(data.status));
+              }
+
+              if (eventType === "loop_item") {
+                patchStep("section-loop", mapEventStatus(data.status));
+              }
+
+              if (eventType === "parallel_start") {
+                patchStep("parallel-review-step", "running");
+              }
+
+              if (eventType === "branch_complete") {
+                patchStep(data.branch_id, mapEventStatus(data.status));
+              }
+
+              if (eventType === "conditional_route") {
+                patchStep("route-by-severity", "running");
+                if (data.selected_branch === "default") {
+                  patchStep("summarize-neutral", "running");
+                }
+                if (data.selected_branch === "critical") {
+                  patchStep("report-critical", "running");
+                }
+                if (data.selected_branch === "positive") {
+                  patchStep("summarize-positive", "running");
+                }
+              }
+
+              if (eventType === "workflow_complete" && data.workflow_id === "content-analysis") {
+                setRunning(false);
+                patchStep("route-by-severity", mapEventStatus(data.status));
+                patchStep("compile", mapEventStatus(data.status));
+                if (data.output) {
+                  setResult(data.output);
+                }
+                setNotice(`Run ${nextRunId} completed with ${data.status}`);
+                source.close();
+              }
+
+              if (eventType === "error") {
+                setError(data.message || "Unknown runtime error");
+              }
+            });
+          });
+
+          source.onerror = () => {
+            appendLog("error", { ts: new Date().toISOString(), message: "SSE disconnected" });
+          };
+        }
+
+        async function switchMode(nextMode) {
+          setError("");
+          setNotice("");
+          try {
+            const response = await fetch("/api/mode", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ mode: nextMode }),
+            });
+            if (!response.ok) {
+              const payload = await response.json();
+              throw new Error(payload.detail || "switch mode failed");
+            }
+            setMode(nextMode);
+            setNotice(`Switched to ${nextMode.toUpperCase()} mode`);
+          } catch (err) {
+            setError(err.message);
+            await fetchConfig();
+          }
+        }
+
+        async function saveConfig() {
+          setError("");
+          setNotice("");
+          try {
+            const body = {
+              base_url: config.base_url,
+              model: config.model,
+            };
+            if (config.api_key.trim()) {
+              body.api_key = config.api_key.trim();
+            }
+
+            const response = await fetch("/api/config", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.detail || "save config failed");
+            }
+            setConfig((prev) => ({ ...prev, api_key: "" }));
+            setApiKeySaved(Boolean(data.api_key_present));
+            setNotice("LLM config saved");
+          } catch (err) {
+            setError(err.message);
+          }
+        }
+
+        async function runAnalysis() {
+          setRunning(true);
+          resetRunView();
+          try {
+            const body = { scenario };
+            if (scenario === "custom") {
+              body.custom_input = customInput;
+            }
+            const response = await fetch("/api/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+              throw new Error(data.detail || "run failed");
+            }
+            setRunId(data.run_id);
+            setNotice(`Run started: ${data.run_id}`);
+            connectEventStream(data.run_id);
+          } catch (err) {
+            setRunning(false);
+            setError(err.message);
+          }
+        }
+
+        const groupedCapabilities = useMemo(() => {
+          const grouped = { agent: [], skill: [], workflow: [] };
+          capabilities.forEach((item) => {
+            grouped[item.kind] = grouped[item.kind] || [];
+            grouped[item.kind].push(item);
+          });
+          return grouped;
+        }, [capabilities]);
+
+        const resultKeys = [
+          "parsed_content",
+          "section_analyses",
+          "review_results",
+          "severity_summary",
+          "final_report",
+        ];
+
+        return (
+          <div className="min-h-screen bg-slate-900 text-slate-100">
+            <header className="border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+              <div>
+                <h1 className="text-xl font-bold text-sky-400">agently-skills-runtime Prototype Validator</h1>
+                <p className="text-xs text-slate-400 mt-1">Skill / Agent / Workflow capability coverage</p>
+              </div>
+              <div className="flex items-center gap-3 text-sm">
+                <button
+                  className={`px-3 py-1 rounded border ${
+                    mode === "mock" ? "bg-sky-500 text-slate-900 border-sky-400" : "border-slate-600"
+                  }`}
+                  onClick={() => switchMode("mock")}
+                >
+                  Mock Mode
+                </button>
+                <button
+                  className={`px-3 py-1 rounded border ${
+                    mode === "real" ? "bg-sky-500 text-slate-900 border-sky-400" : "border-slate-600"
+                  }`}
+                  onClick={() => switchMode("real")}
+                >
+                  Real LLM Mode
+                </button>
+              </div>
+            </header>
+
+            <main className="p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-[320px,1fr] gap-4">
+              <aside className="space-y-4">
+                <section className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <h2 className="text-sm font-semibold text-sky-300">LLM Config</h2>
+                  <div className="mt-3 space-y-3 text-xs">
+                    <label className="block">
+                      <span className="text-slate-300">Base URL</span>
+                      <input
+                        disabled={mode === "mock"}
+                        value={config.base_url}
+                        onChange={(e) => setConfig((prev) => ({ ...prev, base_url: e.target.value }))}
+                        className="mt-1 w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 disabled:opacity-50"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-slate-300">API Key</span>
+                      <input
+                        type="password"
+                        disabled={mode === "mock"}
+                        placeholder={apiKeySaved ? "•••••• (saved)" : "Enter API key"}
+                        value={config.api_key}
+                        onChange={(e) => setConfig((prev) => ({ ...prev, api_key: e.target.value }))}
+                        className="mt-1 w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 disabled:opacity-50"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-slate-300">Model</span>
+                      <input
+                        disabled={mode === "mock"}
+                        value={config.model}
+                        onChange={(e) => setConfig((prev) => ({ ...prev, model: e.target.value }))}
+                        className="mt-1 w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 disabled:opacity-50"
+                      />
+                    </label>
+                    <button
+                      disabled={mode === "mock"}
+                      onClick={saveConfig}
+                      className="w-full bg-sky-500 text-slate-900 rounded px-3 py-1 font-semibold disabled:opacity-40"
+                    >
+                      Save Config
+                    </button>
+                  </div>
+                </section>
+
+                <section className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <h2 className="text-sm font-semibold text-sky-300">Scenario</h2>
+                  <div className="mt-3 space-y-2 text-xs">
+                    {["neutral", "critical", "positive", "custom"].map((name) => (
+                      <label key={name} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          checked={scenario === name}
+                          onChange={() => setScenario(name)}
+                        />
+                        <span className="capitalize">{name}</span>
+                      </label>
+                    ))}
+                    {scenario === "custom" && (
+                      <textarea
+                        value={customInput}
+                        onChange={(e) => setCustomInput(e.target.value)}
+                        placeholder="Paste custom content for analysis"
+                        className="w-full min-h-[100px] mt-2 bg-slate-900 border border-slate-600 rounded px-2 py-1"
+                      />
+                    )}
+                  </div>
+                  <button
+                    onClick={runAnalysis}
+                    disabled={running}
+                    className="mt-3 w-full bg-emerald-400 text-slate-900 rounded px-3 py-2 text-sm font-bold disabled:opacity-50"
+                  >
+                    {running ? "Running..." : "Run Analysis"}
+                  </button>
+                </section>
+
+                <section className="bg-slate-800 border border-slate-700 rounded-xl p-4 text-xs">
+                  <h2 className="text-sm font-semibold text-sky-300">Capability Registry</h2>
+                  <p className="mt-1 text-slate-400">{capabilities.length} registered</p>
+                  {[
+                    ["agent", "Agents"],
+                    ["skill", "Skills"],
+                    ["workflow", "Workflows"],
+                  ].map(([key, label]) => (
+                    <details key={key} className="mt-2">
+                      <summary className="cursor-pointer text-slate-200">
+                        {label}: {(groupedCapabilities[key] || []).length}
+                      </summary>
+                      <div className="mt-1 space-y-1">
+                        {(groupedCapabilities[key] || []).map((item) => (
+                          <div key={item.id} className="bg-slate-900 border border-slate-700 rounded p-2">
+                            <div className="text-sky-300">{item.id}</div>
+                            <div className="text-slate-400">{item.name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                </section>
+              </aside>
+
+              <section className="space-y-4">
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <h2 className="text-sm font-semibold text-sky-300">Workflow DAG</h2>
+                  <div className="mt-4 space-y-4 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {[
+                        ["parse", "parse"],
+                        ["section-loop", "section-loop"],
+                        ["parallel-review-step", "parallel-review"],
+                        ["route-by-severity", "route"],
+                        ["compile", "compile"],
+                      ].map(([id, label], index) => (
+                        <React.Fragment key={id}>
+                          <div className={`px-3 py-2 rounded border border-slate-700 ${colorByStatus(stepState[id])}`}>
+                            {label}
+                          </div>
+                          {index < 4 && <span className="text-slate-500">→</span>}
+                        </React.Fragment>
+                      ))}
+                    </div>
+
+                    <div>
+                      <div className="text-slate-400 mb-1">parallel-review branches</div>
+                      <div className="flex items-center gap-2">
+                        <div className={`px-3 py-2 rounded border border-slate-700 ${colorByStatus(stepState.tone)}`}>tone</div>
+                        <div className={`px-3 py-2 rounded border border-slate-700 ${colorByStatus(stepState.facts)}`}>facts</div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="text-slate-400 mb-1">conditional branches</div>
+                      <div className="flex flex-wrap gap-2">
+                        <div className={`px-3 py-2 rounded border border-slate-700 ${colorByStatus(stepState["summarize-positive"])} `}>positive</div>
+                        <div className={`px-3 py-2 rounded border border-slate-700 ${colorByStatus(stepState["report-critical"])} `}>critical</div>
+                        <div className={`px-3 py-2 rounded border border-slate-700 ${colorByStatus(stepState["summarize-neutral"])} `}>default</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <h2 className="text-sm font-semibold text-sky-300">Live Logs</h2>
+                  <div className="mt-3 max-h-[260px] overflow-auto bg-slate-900 border border-slate-700 rounded p-3 text-xs">
+                    {logs.length === 0 && <div className="text-slate-500">No events yet.</div>}
+                    {logs.map((item, index) => (
+                      <div key={`${item.ts}-${index}`} className="mb-1">
+                        <span className="text-slate-500">[{fmtClock(item.ts)}]</span>
+                        <span className="text-sky-300 ml-2">{item.type}</span>
+                        <span className="text-slate-300 ml-2">{JSON.stringify(item.data)}</span>
+                      </div>
+                    ))}
+                    <div ref={logsEndRef} />
+                  </div>
+                </div>
+
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+                  <h2 className="text-sm font-semibold text-sky-300">Result</h2>
+                  <div className="mt-3 space-y-2 text-xs">
+                    {runId && <div className="text-slate-400">Run ID: {runId}</div>}
+                    {notice && <div className="text-emerald-300">{notice}</div>}
+                    {error && <div className="text-red-300">{error}</div>}
+                    {!result && <div className="text-slate-500">Waiting for workflow_complete...</div>}
+                    {result &&
+                      resultKeys.map((key) => (
+                        <div key={key} className="border border-slate-700 rounded">
+                          <button
+                            className="w-full text-left px-3 py-2 bg-slate-900"
+                            onClick={() =>
+                              setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))
+                            }
+                          >
+                            {expanded[key] ? "▾" : "▸"} {key}
+                          </button>
+                          {expanded[key] && (
+                            <pre className="px-3 py-2 overflow-auto text-[11px] bg-slate-950 text-slate-200">
+                              {JSON.stringify(result[key], null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </section>
+            </main>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
