@@ -69,6 +69,28 @@ async def test_uri_skill_blocked():
 
 
 @pytest.mark.asyncio
+async def test_file_skill_path_traversal_blocked(tmp_path):
+    workspace_root = tmp_path / "root"
+    workspace_root.mkdir()
+    (workspace_root / "ok.md").write_text("ok", encoding="utf-8")
+
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not read", encoding="utf-8")
+
+    spec = SkillSpec(
+        base=CapabilitySpec(id="s_path", kind=CapabilityKind.SKILL, name="file_escape"),
+        source="../secret.txt",
+        source_type="file",
+    )
+    adapter = SkillAdapter(workspace_root=str(workspace_root))
+    rt = CapabilityRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.FAILED
+
+
+@pytest.mark.asyncio
 async def test_uri_skill_file_allowed(tmp_path):
     skill_file = tmp_path / "skill.md"
     skill_file.write_text("file uri ok", encoding="utf-8")
@@ -172,3 +194,36 @@ async def test_dispatch_rule_triggered():
     assert result2.metadata.get("dispatched") is None or len(
         result2.metadata.get("dispatched", [])
     ) == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rule_priority_is_applied():
+    """当多个规则同时命中时，应按 priority（desc）稳定执行。"""
+
+    class EchoAdapter:
+        async def execute(self, *, spec, input, context, runtime):
+            return CapabilityResult(status=CapabilityStatus.SUCCESS, output=spec.base.id)
+
+    skill = SkillSpec(
+        base=CapabilitySpec(id="s_pri", kind=CapabilityKind.SKILL, name="s_pri"),
+        source="content",
+        source_type="inline",
+        dispatch_rules=[
+            SkillDispatchRule(condition="trigger", target=CapabilityRef(id="LOW"), priority=1),
+            SkillDispatchRule(condition="trigger", target=CapabilityRef(id="HIGH"), priority=10),
+        ],
+    )
+    low = AgentSpec(base=CapabilitySpec(id="LOW", kind=CapabilityKind.AGENT, name="LOW"))
+    high = AgentSpec(base=CapabilitySpec(id="HIGH", kind=CapabilityKind.AGENT, name="HIGH"))
+
+    rt = CapabilityRuntime()
+    rt.set_adapter(CapabilityKind.AGENT, EchoAdapter())
+    rt.set_adapter(CapabilityKind.SKILL, SkillAdapter())
+    rt.registry.register(skill)
+    rt.registry.register(low)
+    rt.registry.register(high)
+
+    ctx = ExecutionContext(run_id="r1", bag={"trigger": True})
+    result = await SkillAdapter().execute(spec=skill, input={}, context=ctx, runtime=rt)
+    dispatched = result.metadata.get("dispatched", [])
+    assert [d.get("target") for d in dispatched] == ["HIGH", "LOW"]

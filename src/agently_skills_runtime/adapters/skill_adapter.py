@@ -1,7 +1,6 @@
 """Skill 适配器：SkillSpec → 内容加载 + 可选 dispatch。"""
 from __future__ import annotations
 
-import os
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -72,7 +71,11 @@ class SkillAdapter:
 
         # 2) 检查 dispatch_rules
         dispatched_results = []
-        for rule in spec.dispatch_rules:
+        # 约束：多个规则命中时按 priority（desc）稳定执行；同优先级按声明顺序。
+        ordered_rules = [
+            r for _, r in sorted(enumerate(spec.dispatch_rules), key=lambda it: (-int(it[1].priority), it[0]))
+        ]
+        for rule in ordered_rules:
             if self._evaluate_condition(rule.condition, context):
                 try:
                     target_spec = runtime.registry.get_or_raise(rule.target.id)
@@ -170,9 +173,14 @@ class SkillAdapter:
         if spec.source_type == "inline":
             return spec.source
         if spec.source_type == "file":
-            path = os.path.join(self._workspace_root, spec.source)
-            with open(path, "r", encoding="utf-8") as f:
-                return f.read()
+            # 安全约束：只允许读取 workspace_root 内的文件，禁止路径穿越/绝对路径逃逸。
+            root = Path(self._workspace_root).expanduser().resolve()
+            target = (root / str(spec.source or "")).expanduser().resolve()
+            try:
+                target.relative_to(root)
+            except Exception as exc:
+                raise PermissionError("Skill file path must be within workspace_root") from exc
+            return target.read_text(encoding="utf-8")
         if spec.source_type == "uri":
             return self._load_uri_content(spec.source)
         raise ValueError(f"Unknown source_type: {spec.source_type}")

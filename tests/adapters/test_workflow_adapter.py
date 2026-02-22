@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+import asyncio
 
 from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -138,6 +139,54 @@ async def test_parallel_step():
     result = await rt.run("WF-P", input={"data": "test"})
     assert result.status == CapabilityStatus.SUCCESS
     assert len(result.output["p1"]) == 2
+    # 并行分支的内部 step_id 不应污染顶层输出（否则分支细节泄露到外部契约）。
+    assert "b1" not in result.output
+    assert "b2" not in result.output
+
+
+@pytest.mark.asyncio
+async def test_parallel_step_context_bag_is_isolated_between_branches():
+    """
+    回归护栏：并行分支不应共享同一个 ExecutionContext（尤其是 bag/step_outputs），
+    否则一个分支对 bag 的写入会泄露到另一个分支并导致非确定性行为。
+    """
+
+    class BagMutatingAdapter:
+        async def execute(self, *, spec, input, context, runtime):
+            if spec.base.id == "A":
+                context.bag["leak"] = "A"
+                return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True})
+            if spec.base.id == "B":
+                # 让 A 先写入（若共享 context，B 将看到 leak）
+                await asyncio.sleep(0)
+                if "leak" in context.bag:
+                    return CapabilityResult(status=CapabilityStatus.FAILED, error="context leak detected")
+                return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True})
+            return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True})
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-P-ISO", kind=CapabilityKind.WORKFLOW, name="parallel-iso"),
+        steps=[
+            ParallelStep(
+                id="p1",
+                branches=[
+                    Step(id="b1", capability=CapabilityRef(id="A")),
+                    Step(id="b2", capability=CapabilityRef(id="B")),
+                ],
+                join_strategy="all_success",
+            ),
+        ],
+    )
+
+    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
+    rt.set_adapter(CapabilityKind.AGENT, BagMutatingAdapter())
+    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
+    rt.register(_make_agent("A"))
+    rt.register(_make_agent("B"))
+    rt.register(wf)
+
+    result = await rt.run("WF-P-ISO")
+    assert result.status == CapabilityStatus.SUCCESS
 
 
 @pytest.mark.asyncio
@@ -248,4 +297,3 @@ async def test_iterate_over_not_list():
     result = await rt.run("WF-X", input={"items": "not-a-list"})
     assert result.status == CapabilityStatus.FAILED
     assert "expected list" in (result.error or "").lower()
-

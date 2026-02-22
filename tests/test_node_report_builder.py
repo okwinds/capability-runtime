@@ -67,6 +67,7 @@ def test_report_marks_requires_approval_when_approval_requested():
     assert rep.reason == "approval_pending"
     assert rep.tool_calls[0].requires_approval is True
     assert rep.tool_calls[0].approval_key == "k1"
+    assert rep.meta["approval_inference"]["requires_approval_call_ids"] == ["c1"]
 
 
 def test_report_records_approval_decision_and_clears_pending():
@@ -102,6 +103,7 @@ def test_report_correlates_approval_events_without_call_id_via_step_id():
     assert rep.tool_calls[0].approval_key == "k1"
     assert rep.tool_calls[0].approval_decision == "approved"
     assert rep.tool_calls[0].approval_reason == "ok"
+    assert rep.meta["approval_inference"]["requires_approval_call_ids"] == ["c1"]
 
 
 @pytest.mark.parametrize(
@@ -131,6 +133,16 @@ def test_report_cancelled_maps_to_incomplete_and_cancelled_reason():
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "incomplete"
     assert rep.reason == "cancelled"
+
+
+def test_report_budget_exceeded_maps_to_incomplete_and_budget_exceeded_reason():
+    events = [
+        _ev("run_started"),
+        _ev("run_failed", payload={"error_kind": "budget_exceeded", "message": "budget exceeded", "events_path": "wal.jsonl"}),
+    ]
+    rep = NodeReportBuilder().build(events=events)
+    assert rep.status == "incomplete"
+    assert rep.reason == "budget_exceeded"
 
 
 def test_report_missing_events_path_sets_meta_flag():

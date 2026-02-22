@@ -80,6 +80,7 @@ class NodeReportBuilder:
         # call_id -> aggregated fields
         tool_calls: Dict[str, Dict[str, Any]] = {}
         approval_pending: set[str] = set()
+        requires_approval_inferred: set[str] = set()
 
         # 兼容 SDK 默认 approvals 事件形态：
         # - tool_call_requested payload 带 call_id/name
@@ -136,6 +137,8 @@ class NodeReportBuilder:
                 if call_id and tool:
                     t = _ensure_tool(call_id, name=tool)
                     t["requires_approval"] = True
+                    # Bridge 无法稳定读取 tool spec 时，只能通过 approval_* 事件推断 requires_approval。
+                    requires_approval_inferred.add(call_id)
                     if isinstance(approval_key, str) and approval_key:
                         t["approval_key"] = approval_key
                     approval_pending.add(call_id)
@@ -153,6 +156,7 @@ class NodeReportBuilder:
                 if call_id and tool:
                     t = _ensure_tool(call_id, name=tool)
                     t["requires_approval"] = True
+                    requires_approval_inferred.add(call_id)
                     if isinstance(decision, str) and decision:
                         t["approval_decision"] = decision
                     if isinstance(reason, str) and reason:
@@ -184,9 +188,13 @@ class NodeReportBuilder:
                 if ev.type == "run_completed":
                     completion_status = "success"
                 elif ev.type == "run_failed":
-                    completion_status = "failed"
                     final_error_kind = ev.payload.get("error_kind") if isinstance(ev.payload.get("error_kind"), str) else None
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
+                    # 对齐契约：预算耗尽属于“未完成”而非“失败”（Host 可能需要走补偿/降级）。
+                    if final_error_kind == "budget_exceeded":
+                        completion_status = "incomplete"
+                    else:
+                        completion_status = "failed"
                 else:
                     completion_status = "incomplete"
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
@@ -223,7 +231,10 @@ class NodeReportBuilder:
             else:
                 reason = "unknown"
         elif status == "incomplete":
-            reason = "cancelled" if completion_reason == "run_cancelled" else "unknown"
+            if final_error_kind == "budget_exceeded":
+                reason = "budget_exceeded"
+            else:
+                reason = "cancelled" if completion_reason == "run_cancelled" else "unknown"
 
         tool_reports = [
             NodeToolCallReport.model_validate(item) for item in tool_calls.values() if isinstance(item, dict)
@@ -248,6 +259,16 @@ class NodeReportBuilder:
             meta={
                 "missing_events_path": events_path is None,
                 "final_message": final_message,
+                **(
+                    {
+                        "approval_inference": {
+                            "requires_approval_call_ids": sorted(requires_approval_inferred),
+                            "source": "events_only",
+                        }
+                    }
+                    if requires_approval_inferred
+                    else {}
+                ),
             },
         )
         return report

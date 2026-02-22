@@ -66,7 +66,8 @@ async def test_run_async_preflight_error_returns_failed_node_report(monkeypatch)
     assert out.node_report.status == "failed"
     assert out.node_report.reason == "skill_config_error"
     assert out.node_report.completion_reason == "preflight_failed"
-    assert "preflight_issues" in out.node_report.meta
+    assert out.node_report.meta["skill_issue"]["code"] == "SKILL_PREFLIGHT_FAILED"
+    assert out.node_report.meta["skill_issue"]["details"]["issues"][0]["code"] == "X"
 
 
 @pytest.mark.asyncio

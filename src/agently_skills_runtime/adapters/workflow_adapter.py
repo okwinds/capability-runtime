@@ -146,7 +146,25 @@ class WorkflowAdapter:
         runtime: Any,
     ) -> CapabilityResult:
         """执行并行步骤。"""
-        tasks = [self._execute_step(branch, context=context, runtime=runtime) for branch in step.branches]
+        # 并行分支必须隔离执行上下文：
+        # - 允许读取“并行之前”的 step_outputs（作为输入映射来源）
+        # - 禁止把分支内部 step_outputs 泄露到父级（避免污染对外输出与产生隐式依赖）
+        branch_contexts = [
+            ExecutionContext(
+                run_id=context.run_id,
+                parent_context=context,
+                depth=context.depth,
+                max_depth=context.max_depth,
+                bag=dict(context.bag),
+                step_outputs=dict(context.step_outputs),
+                call_chain=list(context.call_chain),
+            )
+            for _ in step.branches
+        ]
+        tasks = [
+            self._execute_step(branch, context=branch_ctx, runtime=runtime)
+            for branch, branch_ctx in zip(step.branches, branch_contexts)
+        ]
 
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -234,4 +252,3 @@ class WorkflowAdapter:
             value = context.resolve_mapping(m.source)
             result[m.target_field] = value
         return result
-

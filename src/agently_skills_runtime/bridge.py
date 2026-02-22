@@ -478,6 +478,8 @@ class AgentlySkillsRuntime:
             "turn_id": None,
             "session_id": session_id,
             "host_turn_id": turn_id,
+            # hook_context 允许宿主侧做观测/审计/调试；默认仅给截断版，避免泄露与膨胀。
+            "task": self._truncate_text(task, max_chars=200),
             "task_sha256": bridge_meta.get("task_sha256"),
             "initial_history_injected": bridge_meta.get("initial_history_injected"),
             "config_snapshot": {
@@ -546,6 +548,7 @@ class AgentlySkillsRuntime:
             return node_result
 
         if preflight_issues and self._config.preflight_mode == "error":
+            issues_payload = [dataclasses.asdict(i) for i in preflight_issues]
             report = NodeReportV2(
                 status="failed",
                 reason="skill_config_error",
@@ -557,7 +560,17 @@ class AgentlySkillsRuntime:
                 activated_skills=[],
                 tool_calls=[],
                 artifacts=[],
-                meta={"preflight_issues": [dataclasses.asdict(i) for i in preflight_issues], **bridge_meta},
+                meta={
+                    # 对齐契约：preflight 失败时应提供 `meta.skill_issue={code,message,details}`。
+                    "skill_issue": {
+                        "code": "SKILL_PREFLIGHT_FAILED",
+                        "message": "Skills preflight failed.",
+                        "details": {"issues": issues_payload},
+                    },
+                    # 兼容保留：保留旧字段，避免历史用例断链。
+                    "preflight_issues": issues_payload,
+                    **bridge_meta,
+                },
             )
             node_result = NodeResultV2(final_output="Skills preflight failed.", node_report=report, events_path=None, artifacts=[])
             for h in self._hooks:

@@ -47,7 +47,7 @@ class _Hook:
         self.called.append(("after_preflight", len(list(issues or []))))
 
     def before_run(self, context):
-        self.called.append(("before_run", context.get("run_id")))
+        self.called.append(("before_run", context.get("run_id"), context.get("task")))
 
     def before_engine_start_turn(self, context):
         self.called.append(("before_engine_start_turn", context.get("turn_id")))
@@ -118,7 +118,7 @@ async def test_hooks_are_called_and_trace_is_recorded(monkeypatch):
     assert out.node_report.status == "success"
     assert ("before_preflight", None) in hook.called
     assert any(x[0] == "after_preflight" for x in hook.called)
-    assert ("before_run", "r1") in hook.called
+    assert ("before_run", "r1", "hi") in hook.called
     assert any(x[0] == "after_engine_event" for x in hook.called)
     assert any(x[0] == "before_return_result" for x in hook.called)
 
