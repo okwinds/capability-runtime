@@ -13,7 +13,7 @@ from typing import Any, Dict, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-RunMode = Literal["demo", "real"]
+RunMode = Literal["demo", "demo_rag_pre_run", "demo_rag_tool", "real"]
 RunStatus = Literal["queued", "running", "waiting_approval", "completed", "failed"]
 
 
@@ -85,4 +85,3 @@ class ApprovalDecisionRequest(BaseModel):
 
     decision: Literal["approve", "deny"]
     reason: str = ""
-

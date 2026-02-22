@@ -23,6 +23,7 @@ from .approvals import ApprovalBroker, WebHumanIOProvider
 from .demo import InProcessFlowRunner, build_demo_agent
 from .event_log import RunEventLog
 from .models import RunEvent, RunSnapshot, RunStatus, StartFlowRequest, StartSkillTaskRequest
+from .rag import RAG_DEMO_TOOL_QUERY, build_demo_rag_provider, build_rag_injected_messages, build_rag_meta
 from .settings import RunMode, Settings
 
 
@@ -155,20 +156,47 @@ class RunService:
             rec.status = "running"
             self._emit(rec, type="run_started", payload={"mode": req.mode})
 
-            if req.mode == "demo":
+            if req.mode in ("demo", "demo_rag_pre_run", "demo_rag_tool"):
                 runner = InProcessFlowRunner()
+                rag_provider = build_demo_rag_provider()
                 agent = build_demo_agent(
                     workspace_root=self._settings.workspace_root,
                     sdk_config_paths=self._settings.sdk_config_paths,
                     human_io=human_io,
                     runner=runner,
+                    demo_mode=req.mode,
+                    rag_provider=rag_provider,
                 )
                 events: List[AgentEvent] = []
                 final_output = ""
+                initial_history: Optional[List[Dict[str, Any]]] = None
+                rag_meta: Optional[Dict[str, Any]] = None
+
+                if req.mode == "demo_rag_pre_run":
+                    rag_query = req.task.strip() or "RAG pre-run demo"
+                    rag_top_k = 2
+                    rag_result = rag_provider.retrieve(query=rag_query, top_k=rag_top_k)
+                    initial_history = build_rag_injected_messages(query=rag_query, rag_result=rag_result)
+                    rag_meta = build_rag_meta(
+                        mode="pre_run",
+                        query=rag_query,
+                        top_k=rag_top_k,
+                        rag_result=rag_result,
+                    )
+                elif req.mode == "demo_rag_tool":
+                    rag_query = RAG_DEMO_TOOL_QUERY
+                    rag_top_k = 2
+                    rag_result = rag_provider.retrieve(query=rag_query, top_k=rag_top_k)
+                    rag_meta = build_rag_meta(
+                        mode="tool",
+                        query=rag_query,
+                        top_k=rag_top_k,
+                        rag_result=rag_result,
+                    )
 
                 async def _run() -> None:
                     nonlocal final_output
-                    async for ev in agent.run_stream_async(req.task, run_id=rec.run_id):
+                    async for ev in agent.run_stream_async(req.task, run_id=rec.run_id, initial_history=initial_history):
                         events.append(ev)
                         # 脱敏展示：只把事件类型与少量字段推给前端
                         self._emit(rec, type=f"sdk:{ev.type}", payload={"event_type": ev.type})
@@ -179,6 +207,8 @@ class RunService:
 
                 asyncio.run(_run())
                 report = NodeReportBuilder().build(events=events)
+                if rag_meta is not None:
+                    report.meta["rag"] = rag_meta
                 rec.final_output = final_output
                 rec.node_report = report.model_dump(by_alias=True)
                 rec.events_path = report.events_path
