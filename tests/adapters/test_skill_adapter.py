@@ -69,6 +69,66 @@ async def test_uri_skill_blocked():
 
 
 @pytest.mark.asyncio
+async def test_uri_skill_file_allowed(tmp_path):
+    skill_file = tmp_path / "skill.md"
+    skill_file.write_text("file uri ok", encoding="utf-8")
+
+    uri = skill_file.resolve().as_uri()
+    allow_prefix = tmp_path.resolve().as_uri().rstrip("/") + "/"
+
+    spec = SkillSpec(
+        base=CapabilitySpec(id="s_file", kind=CapabilityKind.SKILL, name="uri_file"),
+        source=uri,
+        source_type="uri",
+    )
+    adapter = SkillAdapter(uri_allowlist=[allow_prefix])
+    rt = CapabilityRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.SUCCESS
+    assert result.output == "file uri ok"
+
+
+@pytest.mark.asyncio
+async def test_uri_skill_https_allowed_via_injected_fetcher():
+    calls = []
+
+    def fetcher(uri: str, *, max_bytes: int) -> str:
+        calls.append({"uri": uri, "max_bytes": max_bytes})
+        return "https uri ok"
+
+    spec = SkillSpec(
+        base=CapabilitySpec(id="s_https", kind=CapabilityKind.SKILL, name="uri_https"),
+        source="https://example.com/skills/s1.md",
+        source_type="uri",
+    )
+    adapter = SkillAdapter(uri_allowlist=["https://example.com/skills/"], uri_fetcher=fetcher)
+    rt = CapabilityRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.SUCCESS
+    assert result.output == "https uri ok"
+    assert calls and calls[0]["uri"] == "https://example.com/skills/s1.md"
+
+
+@pytest.mark.asyncio
+async def test_uri_skill_scheme_not_allowed():
+    spec = SkillSpec(
+        base=CapabilitySpec(id="s_ftp", kind=CapabilityKind.SKILL, name="uri_ftp"),
+        source="ftp://example.com/skill",
+        source_type="uri",
+    )
+    adapter = SkillAdapter(uri_allowlist=["ftp://example.com/"])
+    rt = CapabilityRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.FAILED
+
+
+@pytest.mark.asyncio
 async def test_dispatch_rule_triggered():
     """dispatch_rule 触发时调用目标能力。"""
 
@@ -112,4 +172,3 @@ async def test_dispatch_rule_triggered():
     assert result2.metadata.get("dispatched") is None or len(
         result2.metadata.get("dispatched", [])
     ) == 0
-

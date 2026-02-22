@@ -27,7 +27,7 @@ def test_integration_skills_sources_redis_pgsql_scan_smoke(tmp_path: Path, monke
         pytest.skip(
             "未配置 integration DSN。请设置："
             "`AGENTLY_SKILLS_RUNTIME_TEST_REDIS_URL` 与 `AGENTLY_SKILLS_RUNTIME_TEST_PG_DSN`。"
-            "推荐：先运行 `../skills-runtime-sdk/scripts/integration/skills_sources_docker.sh` 启动服务。"
+            "推荐：先运行 `scripts/integration/run_skills_sources_smoke.sh` 一键启动服务并初始化 schema。"
         )
 
     try:
@@ -75,6 +75,6 @@ def test_integration_skills_sources_redis_pgsql_scan_smoke(tmp_path: Path, monke
     except Exception as e:
         pytest.skip(
             "redis/pgsql services 可用但 schema/table 未准备好，或连接失败。"
-            "请运行 `../skills-runtime-sdk/scripts/integration/skills_sources_docker.sh` 初始化后重试。"
+            "请运行 `scripts/integration/run_skills_sources_smoke.sh` 初始化后重试。"
             f"原始错误：{e}"
         )

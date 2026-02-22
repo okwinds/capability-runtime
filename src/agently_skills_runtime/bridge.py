@@ -19,6 +19,7 @@ import asyncio
 import dataclasses
 import hashlib
 import importlib
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,11 +77,19 @@ class SchemaGate(Protocol):
 class BridgeHook(Protocol):
     """BridgeHook：由宿主注入的扩展点 hook（bridge core 不实现业务）。"""
 
+    def before_preflight(self, context: Dict[str, Any]) -> None: ...
+
+    def after_preflight(self, context: Dict[str, Any], issues: List[FrameworkIssue]) -> None: ...
+
     def before_run(self, context: Dict[str, Any]) -> None: ...
+
+    def before_engine_start_turn(self, context: Dict[str, Any]) -> None: ...
 
     def after_engine_event(self, context: Dict[str, Any], event: Any) -> None: ...
 
     def before_return_result(self, context: Dict[str, Any], node_result: NodeResultV2) -> None: ...
+
+    def on_error(self, context: Dict[str, Any], error: Exception) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -464,80 +473,164 @@ class AgentlySkillsRuntime:
         if turn_id is not None:
             bridge_meta["host_turn_id"] = turn_id
 
+        hook_context: Dict[str, Any] = {
+            "run_id": run_id,
+            "turn_id": None,
+            "session_id": session_id,
+            "host_turn_id": turn_id,
+            "task_sha256": bridge_meta.get("task_sha256"),
+            "initial_history_injected": bridge_meta.get("initial_history_injected"),
+            "config_snapshot": {
+                "workspace_root": str(self._config.workspace_root),
+                "config_paths": [str(p) for p in self._config.config_paths],
+                "preflight_mode": self._config.preflight_mode,
+                "backend_mode": self._config.backend_mode,
+                "upstream_verification_mode": self._config.upstream_verification_mode,
+                "schema_gate_mode": self._schema_gate_mode,
+            },
+        }
+
+        for h in self._hooks:
+            fn = getattr(h, "before_preflight", None)
+            if callable(fn):
+                self._safe_call_hook(meta=bridge_meta, name="before_preflight", fn=lambda fn=fn: fn(hook_context))
+
         preflight_issues: List[FrameworkIssue] = []
         upstream_issues: List[FrameworkIssue] = []
 
         # upstream fork 校验 gate（strict fail-closed，warn 仅可观测）
         if self._config.upstream_verification_mode != "off":
             upstream_issues = self.verify_upstreams()
-            if upstream_issues and self._config.upstream_verification_mode == "strict":
-                report = NodeReportV2(
-                    status="failed",
-                    reason="upstream_dependency_error",
-                    completion_reason="upstream_verification_failed",
-                    engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                    bridge={"name": "agently-skills-runtime"},
-                    run_id=run_id or "upstream",
-                    events_path=None,
-                    activated_skills=[],
-                    tool_calls=[],
-                    artifacts=[],
-                    meta={
-                        "upstream_issues": [dataclasses.asdict(i) for i in upstream_issues],
-                        "upstream_verification_mode": "strict",
-                        **bridge_meta,
-                    },
-                )
-                return NodeResultV2(final_output="Upstream fork verification failed.", node_report=report, events_path=None, artifacts=[])
 
         # preflight gate（生产默认 fail-closed；零 I/O）
         if self._config.preflight_mode != "off":
-            issues = self.preflight()
-            preflight_issues = issues
-            if issues and self._config.preflight_mode == "error":
-                report = NodeReportV2(
-                    status="failed",
-                    reason="skill_config_error",
-                    completion_reason="preflight_failed",
-                    engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                    bridge={"name": "agently-skills-runtime"},
-                    run_id=run_id or "preflight",
-                    events_path=None,
-                    activated_skills=[],
-                    tool_calls=[],
-                    artifacts=[],
-                    meta={"preflight_issues": [dataclasses.asdict(i) for i in issues], **bridge_meta},
-                )
-                return NodeResultV2(final_output="Skills preflight failed.", node_report=report, events_path=None, artifacts=[])
+            preflight_issues = self.preflight()
 
-        hook_context: Dict[str, Any] = {
-            "run_id": run_id,
-            "session_id": session_id,
-            "host_turn_id": turn_id,
-        }
+        for h in self._hooks:
+            fn = getattr(h, "after_preflight", None)
+            if callable(fn):
+                issues = [*upstream_issues, *preflight_issues]
+                self._safe_call_hook(
+                    meta=bridge_meta,
+                    name="after_preflight",
+                    fn=lambda fn=fn, issues=issues: fn(hook_context, issues),
+                )
+
+        if upstream_issues and self._config.upstream_verification_mode == "strict":
+            report = NodeReportV2(
+                status="failed",
+                reason="upstream_dependency_error",
+                completion_reason="upstream_verification_failed",
+                engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
+                bridge={"name": "agently-skills-runtime"},
+                run_id=run_id or "upstream",
+                events_path=None,
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={
+                    "upstream_issues": [dataclasses.asdict(i) for i in upstream_issues],
+                    "upstream_verification_mode": "strict",
+                    **bridge_meta,
+                },
+            )
+            node_result = NodeResultV2(final_output="Upstream fork verification failed.", node_report=report, events_path=None, artifacts=[])
+            for h in self._hooks:
+                fn = getattr(h, "before_return_result", None)
+                if callable(fn):
+                    self._safe_call_hook(
+                        meta=report.meta,
+                        name="before_return_result",
+                        fn=lambda fn=fn, node_result=node_result: fn(hook_context, node_result),
+                    )
+            return node_result
+
+        if preflight_issues and self._config.preflight_mode == "error":
+            report = NodeReportV2(
+                status="failed",
+                reason="skill_config_error",
+                completion_reason="preflight_failed",
+                engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
+                bridge={"name": "agently-skills-runtime"},
+                run_id=run_id or "preflight",
+                events_path=None,
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={"preflight_issues": [dataclasses.asdict(i) for i in preflight_issues], **bridge_meta},
+            )
+            node_result = NodeResultV2(final_output="Skills preflight failed.", node_report=report, events_path=None, artifacts=[])
+            for h in self._hooks:
+                fn = getattr(h, "before_return_result", None)
+                if callable(fn):
+                    self._safe_call_hook(
+                        meta=report.meta,
+                        name="before_return_result",
+                        fn=lambda fn=fn, node_result=node_result: fn(hook_context, node_result),
+                    )
+            return node_result
 
         events: List[Any] = []
         agent = self._get_or_create_agent()
         saw_before_run = False
-        async for ev in agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
-            events.append(ev)
+        saw_before_turn = False
+        try:
+            async for ev in agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
+                events.append(ev)
 
-            if not saw_before_run and ev.type == "run_started":
-                hook_context["run_id"] = ev.run_id
+                if not saw_before_run and ev.type == "run_started":
+                    hook_context["run_id"] = ev.run_id
+                    for h in self._hooks:
+                        fn = getattr(h, "before_run", None)
+                        if callable(fn):
+                            self._safe_call_hook(meta=bridge_meta, name="before_run", fn=lambda fn=fn: fn(hook_context))
+                    saw_before_run = True
+
+                if not saw_before_turn and getattr(ev, "turn_id", None):
+                    hook_context["turn_id"] = ev.turn_id
+                    for h in self._hooks:
+                        fn = getattr(h, "before_engine_start_turn", None)
+                        if callable(fn):
+                            self._safe_call_hook(meta=bridge_meta, name="before_engine_start_turn", fn=lambda fn=fn: fn(hook_context))
+                    saw_before_turn = True
+
                 for h in self._hooks:
-                    fn = getattr(h, "before_run", None)
+                    fn = getattr(h, "after_engine_event", None)
                     if callable(fn):
-                        self._safe_call_hook(meta=bridge_meta, name="before_run", fn=lambda fn=fn: fn(hook_context))
-                saw_before_run = True
-
+                        self._safe_call_hook(
+                            meta=bridge_meta,
+                            name="after_engine_event",
+                            fn=lambda fn=fn, ev=ev: fn(hook_context, ev),
+                        )
+        except Exception as exc:
             for h in self._hooks:
-                fn = getattr(h, "after_engine_event", None)
+                fn = getattr(h, "on_error", None)
                 if callable(fn):
-                    self._safe_call_hook(
-                        meta=bridge_meta,
-                        name="after_engine_event",
-                        fn=lambda fn=fn, ev=ev: fn(hook_context, ev),
-                    )
+                    self._safe_call_hook(meta=bridge_meta, name="on_error", fn=lambda fn=fn, exc=exc: fn(hook_context, exc))
+
+            report = NodeReportV2(
+                status="failed",
+                reason="bridge_error",
+                completion_reason="bridge_exception",
+                engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
+                bridge={"name": "agently-skills-runtime"},
+                run_id=str(hook_context.get("run_id") or run_id or "bridge"),
+                events_path=None,
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={
+                    "error_kind": type(exc).__name__,
+                    "message": self._truncate_text(str(exc)),
+                    **bridge_meta,
+                },
+            )
+            node_result = NodeResultV2(final_output="Bridge runtime error.", node_report=report, events_path=None, artifacts=[])
+            for h in self._hooks:
+                fn = getattr(h, "before_return_result", None)
+                if callable(fn):
+                    self._safe_call_hook(meta=report.meta, name="before_return_result", fn=lambda fn=fn: fn(hook_context, node_result))
+            return node_result
 
         report = NodeReportBuilder().build(events=events)
         if preflight_issues and self._config.preflight_mode == "warn":
@@ -578,13 +671,21 @@ class AgentlySkillsRuntime:
                         )
 
                 ok = bool(sg.get("ok"))
-                report.meta["schema_gate"] = {
+                out_gate: Dict[str, Any] = {
                     "mode": self._schema_gate_mode,
                     "ok": ok,
                     "schema_id": sg.get("schema_id"),
                     "error_count": len(errors_out),
                     "errors": errors_out,
                 }
+                normalized_payload = sg.get("normalized_payload")
+                if isinstance(normalized_payload, dict):
+                    # 默认不落明文，只记录摘要，便于审计与跨系统引用（由 Host 自行存储 payload）。
+                    raw = json.dumps(normalized_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                    out_gate["normalized_payload_sha256"] = self._sha256_text(raw.decode("utf-8"))
+                    out_gate["normalized_payload_bytes"] = len(raw)
+                    out_gate["normalized_payload_top_keys"] = list(normalized_payload.keys())[:20]
+                report.meta["schema_gate"] = out_gate
                 if self._schema_gate_mode == "error" and not ok:
                     report.meta["schema_gate_overrode_status"] = True
                     report.status = "failed"
@@ -612,7 +713,7 @@ class AgentlySkillsRuntime:
         for h in self._hooks:
             fn = getattr(h, "before_return_result", None)
             if callable(fn):
-                self._safe_call_hook(meta=bridge_meta, name="before_return_result", fn=lambda fn=fn: fn(hook_context, node_result))
+                self._safe_call_hook(meta=report.meta, name="before_return_result", fn=lambda fn=fn: fn(hook_context, node_result))
 
         return node_result
 
