@@ -15,6 +15,16 @@ from ..protocol.workflow import (
     WorkflowSpec,
 )
 
+def _to_step_result_dict(result: CapabilityResult) -> Dict[str, Any]:
+    """把 CapabilityResult 归一为 workflow step_results 的最小可编排结构。"""
+
+    return {
+        "status": getattr(result.status, "value", str(result.status)),
+        "output": result.output,
+        "error": result.error,
+        "report": result.report,
+    }
+
 
 class WorkflowAdapter:
     """
@@ -91,6 +101,7 @@ class WorkflowAdapter:
         result = await runtime._execute(target_spec, input=step_input, context=context)
 
         context.step_outputs[step.id] = result.output
+        context.step_results[step.id] = _to_step_result_dict(result)
         return result
 
     async def _execute_loop_step(
@@ -121,6 +132,7 @@ class WorkflowAdapter:
                 max_depth=context.max_depth,
                 bag={**context.bag, "__current_item__": item},
                 step_outputs=dict(context.step_outputs),
+                step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),
             )
             step_input = self._resolve_input_mappings(step.item_input_mappings, item_context)
@@ -136,6 +148,7 @@ class WorkflowAdapter:
         )
 
         context.step_outputs[step.id] = result.output
+        context.step_results[step.id] = _to_step_result_dict(result)
         return result
 
     async def _execute_parallel_step(
@@ -157,6 +170,7 @@ class WorkflowAdapter:
                 max_depth=context.max_depth,
                 bag=dict(context.bag),
                 step_outputs=dict(context.step_outputs),
+                step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),
             )
             for _ in step.branches
@@ -197,10 +211,12 @@ class WorkflowAdapter:
                 )
 
         context.step_outputs[step.id] = [r.output for r in branch_results]
-        return CapabilityResult(
+        aggregated = CapabilityResult(
             status=CapabilityStatus.SUCCESS,
             output=[r.output for r in branch_results],
         )
+        context.step_results[step.id] = _to_step_result_dict(aggregated)
+        return aggregated
 
     async def _execute_conditional_step(
         self,
@@ -225,6 +241,7 @@ class WorkflowAdapter:
 
         result = await self._execute_step(branch, context=context, runtime=runtime)
         context.step_outputs[step.id] = result.output
+        context.step_results[step.id] = _to_step_result_dict(result)
         return result
 
     @staticmethod

@@ -22,6 +22,7 @@ from agently_skills_runtime.protocol.workflow import (
     WorkflowSpec,
 )
 from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
+from agently_skills_runtime.types import NodeReportV2
 
 
 class EchoAdapter:
@@ -228,6 +229,72 @@ async def test_conditional_step():
     result = await rt.run("WF-C")
     assert result.status == CapabilityStatus.SUCCESS
     assert result.output["branch"]["genre"] == "ROMANCE"
+
+
+@pytest.mark.asyncio
+async def test_conditional_step_can_route_by_step_report_status():
+    """
+    回归护栏：多 Agent 编排应能基于控制面证据（例如 NodeReport.status）做路由，
+    而不是解析自由文本输出。
+    """
+
+    class ReportClassifierAdapter:
+        async def execute(self, *, spec, input, context, runtime):
+            _ = input
+            _ = context
+            _ = runtime
+            if spec.base.id == "CLASSIFIER":
+                report = NodeReportV2(
+                    status="needs_approval",
+                    reason="approval_pending",
+                    completion_reason="run_cancelled",
+                    engine={"name": "skills-runtime-sdk", "module": "agent_sdk"},
+                    bridge={"name": "agently-skills-runtime"},
+                    run_id="r1",
+                    events_path="wal.jsonl",
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                )
+                return CapabilityResult(
+                    status=CapabilityStatus.SUCCESS,
+                    output={"category": "romance"},
+                    report=report,
+                )
+            return CapabilityResult(
+                status=CapabilityStatus.SUCCESS,
+                output={"genre": spec.base.id},
+            )
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-C-REPORT", kind=CapabilityKind.WORKFLOW, name="cond-report"),
+        steps=[
+            Step(id="classify", capability=CapabilityRef(id="CLASSIFIER")),
+            ConditionalStep(
+                id="branch",
+                condition_source="result.classify.report.status",
+                branches={
+                    "needs_approval": Step(id="rom", capability=CapabilityRef(id="ROMANCE")),
+                    "success": Step(id="act", capability=CapabilityRef(id="ACTION")),
+                },
+            ),
+        ],
+        output_mappings=[
+            InputMapping(source="step.rom.genre", target_field="genre"),
+        ],
+    )
+
+    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
+    rt.set_adapter(CapabilityKind.AGENT, ReportClassifierAdapter())
+    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
+    for id in ["CLASSIFIER", "ROMANCE", "ACTION"]:
+        rt.register(_make_agent(id))
+    rt.register(wf)
+
+    result = await rt.run("WF-C-REPORT")
+    assert result.status == CapabilityStatus.SUCCESS
+    assert result.output["genre"] == "ROMANCE"
 
 
 @pytest.mark.asyncio

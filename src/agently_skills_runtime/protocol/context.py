@@ -31,6 +31,8 @@ class ExecutionContext:
     max_depth: int = 10
     bag: Dict[str, Any] = field(default_factory=dict)
     step_outputs: Dict[str, Any] = field(default_factory=dict)
+    # step_id -> {status, output, error, report}（面向编排的执行证据；不落盘）
+    step_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     call_chain: List[str] = field(default_factory=list)
 
     def child(self, capability_id: str) -> ExecutionContext:
@@ -57,6 +59,7 @@ class ExecutionContext:
             max_depth=self.max_depth,
             bag=dict(self.bag),
             step_outputs={},
+            step_results={},
             call_chain=self.call_chain + [capability_id],
         )
 
@@ -69,12 +72,24 @@ class ExecutionContext:
         - "previous.{key}" → 最后一个 step_output 的 [key]
         - "step.{step_id}.{key}" → self.step_outputs[step_id][key]
         - "step.{step_id}" → self.step_outputs[step_id]（整体）
+        - "result.{step_id}" → self.step_results[step_id]（整体）
+        - "result.{step_id}.status" → self.step_results[step_id]["status"]
+        - "result.{step_id}.report.status" → self.step_results[step_id]["report"].status（若存在）
         - "literal.{value}" → 字面量字符串
         - "item" → self.bag["__current_item__"]
         - "item.{key}" → self.bag["__current_item__"][key]
 
         找不到时返回 None（不抛异常）。
         """
+
+        def _resolve_one(obj: Any, key: str) -> Any:
+            """对 dict/对象做一层 key/attribute 解析；取不到返回 None。"""
+
+            if obj is None:
+                return None
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
 
         if expression.startswith("context."):
             key = expression[len("context.") :]
@@ -101,6 +116,15 @@ class ExecutionContext:
             if isinstance(out, dict):
                 return out.get(key)
             return None
+
+        if expression.startswith("result."):
+            rest = expression[len("result.") :]
+            parts = rest.split(".")
+            step_id = parts[0]
+            cur: Any = self.step_results.get(step_id)
+            for key in parts[1:]:
+                cur = _resolve_one(cur, key)
+            return cur
 
         if expression.startswith("literal."):
             return expression[len("literal.") :]
