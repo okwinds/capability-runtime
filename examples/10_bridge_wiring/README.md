@@ -16,7 +16,7 @@
 
 ```bash
 pip install -e ".[dev]"
-pip install agently>=4.0.7
+pip install agently>=4.0.8
 ```
 
 2. 准备环境变量

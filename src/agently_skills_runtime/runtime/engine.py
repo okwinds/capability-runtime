@@ -35,7 +35,7 @@ class AdapterProtocol(Protocol):
     Adapter 执行协议。所有 Adapter 必须实现此接口。
 
     参数说明：
-    - spec: 具体的 Spec（AgentSpec/WorkflowSpec/SkillSpec）
+    - spec: 具体的 Spec（AgentSpec/WorkflowSpec）
     - input: 输入参数字典
     - context: 执行上下文
     - runtime: CapabilityRuntime 实例（供 Adapter 回调 _execute 实现递归调度）
@@ -195,4 +195,3 @@ class CapabilityRuntime:
     def guards(self) -> ExecutionGuards:
         """供 Adapter 使用的全局守卫。"""
         return self._guards
-

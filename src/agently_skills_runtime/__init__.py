@@ -16,7 +16,6 @@ from .protocol.capability import (
     CapabilityStatus,
 )
 from .protocol.context import ExecutionContext, RecursionLimitError
-from .protocol.skill import SkillDispatchRule, SkillSpec
 from .protocol.workflow import (
     ConditionalStep,
     InputMapping,
@@ -35,7 +34,6 @@ from .runtime.registry import CapabilityRegistry
 
 # === Adapter 导出 ===
 from .adapters.agent_adapter import AgentAdapter
-from .adapters.skill_adapter import SkillAdapter
 from .adapters.workflow_adapter import WorkflowAdapter
 
 # === 错误导出 ===
@@ -54,8 +52,6 @@ __all__ = [
     "CapabilitySpec",
     "CapabilityStatus",
     "CapabilityResult",
-    "SkillSpec",
-    "SkillDispatchRule",
     "AgentSpec",
     "AgentIOSchema",
     "WorkflowSpec",
@@ -78,7 +74,6 @@ __all__ = [
     # Adapters
     "AgentAdapter",
     "WorkflowAdapter",
-    "SkillAdapter",
     # Errors
     "AgentlySkillsRuntimeError",
     "AdapterNotFoundError",

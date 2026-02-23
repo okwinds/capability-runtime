@@ -11,7 +11,6 @@ from .capability import (
     CapabilityStatus,
 )
 from .context import ExecutionContext, RecursionLimitError
-from .skill import SkillDispatchRule, SkillSpec
 from .workflow import (
     ConditionalStep,
     InputMapping,
@@ -28,8 +27,6 @@ __all__ = [
     "CapabilitySpec",
     "CapabilityStatus",
     "CapabilityResult",
-    "SkillSpec",
-    "SkillDispatchRule",
     "AgentSpec",
     "AgentIOSchema",
     "WorkflowSpec",

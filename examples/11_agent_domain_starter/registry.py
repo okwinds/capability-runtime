@@ -4,14 +4,12 @@ from __future__ import annotations
 from agently_skills_runtime import CapabilityRuntime
 
 from agents import angle_writer, editor, topic_analyst
-from skills import writing_style
 from workflows import content_creation
 
 ALL_SPECS = [
     topic_analyst.spec,
     angle_writer.spec,
     editor.spec,
-    writing_style.spec,
     content_creation.spec,
 ]
 

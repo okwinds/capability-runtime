@@ -9,13 +9,15 @@
 11_agent_domain_starter/
 ├── agents/        # AgentSpec 定义
 ├── workflows/     # WorkflowSpec 定义
-├── skills/        # SkillSpec 定义（含 inject_to）
 ├── storage/       # 产物存储
 ├── registry.py    # 一键注册
 ├── mock_adapter.py
 ├── main.py        # --mock / --real
 └── .env.example
 ```
+
+> 说明（方案2）：本仓库不再提供 `SkillSpec/SkillAdapter`。如需 skills，请用 `agent_sdk` 的 Strict Catalog + strict mention + overlays 方式接入，
+> 并通过 `AgentlySkillsRuntime.preflight()` / `preflight_or_raise()` 做开发机 gate（见工程规格）。
 
 ## 运行方式
 
@@ -35,7 +37,7 @@ python examples/11_agent_domain_starter/main.py --mock
 
 ```bash
 pip install -e ".[dev]"
-pip install agently>=4.0.7
+pip install agently>=4.0.8
 ```
 
 2. 准备环境变量：

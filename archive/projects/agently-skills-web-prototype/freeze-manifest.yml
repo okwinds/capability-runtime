@@ -15,7 +15,7 @@ python: ">=3.10"
 packages:
   agently:
     source: "pypi"
-    version: "4.0.7"
+    version: "4.0.8"
   skills-runtime-sdk-python:
     source: "pypi"
     version: "0.1.2"

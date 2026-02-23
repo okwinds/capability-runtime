@@ -6,6 +6,7 @@ import pytest
 from agently_skills_runtime.protocol.agent import AgentSpec
 from agently_skills_runtime.protocol.capability import (
     CapabilityKind,
+    CapabilityRef,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
@@ -128,11 +129,11 @@ async def test_validate():
     rt.register(
         AgentSpec(
             base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
-            skills=["missing-skill"],
+            collaborators=[CapabilityRef(id="missing-collaborator")],
         )
     )
     missing = rt.validate()
-    assert "missing-skill" in missing
+    assert "missing-collaborator" in missing
 
 
 @pytest.mark.asyncio
@@ -167,4 +168,3 @@ async def test_guards_reset_each_run():
     r2 = await rt.run("A")
     assert r2.status == CapabilityStatus.SUCCESS
     assert rt.guards.counter == 5
-

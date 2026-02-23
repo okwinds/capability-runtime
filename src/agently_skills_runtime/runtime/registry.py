@@ -5,10 +5,9 @@ from typing import Dict, List, Optional, Set, Union
 
 from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityKind, CapabilitySpec
-from ..protocol.skill import SkillSpec
 from ..protocol.workflow import ConditionalStep, LoopStep, ParallelStep, Step, WorkflowSpec
 
-AnySpec = Union[SkillSpec, AgentSpec, WorkflowSpec]
+AnySpec = Union[AgentSpec, WorkflowSpec]
 
 
 def _get_base(spec: AnySpec) -> CapabilitySpec:
@@ -70,12 +69,10 @@ class CapabilityRegistry:
         校验所有能力的依赖是否已注册。
 
         检查范围：
-        - AgentSpec.skills 中引用的 Skill ID
         - AgentSpec.collaborators / callable_workflows 中引用的能力 ID
         - WorkflowSpec 中所有 Step/LoopStep 的 capability.id
         - ParallelStep.branches 内的步骤
         - ConditionalStep.branches/default 内的步骤
-        - SkillSpec.dispatch_rules 中引用的 target.id
 
         返回：缺失的 ID 列表（空列表表示全部满足）
         """
@@ -83,9 +80,6 @@ class CapabilityRegistry:
 
         for spec in self._store.values():
             if isinstance(spec, AgentSpec):
-                for skill_id in spec.skills:
-                    if skill_id not in self._store:
-                        missing.add(skill_id)
                 for ref in spec.collaborators:
                     if ref.id not in self._store:
                         missing.add(ref.id)
@@ -95,11 +89,6 @@ class CapabilityRegistry:
 
             elif isinstance(spec, WorkflowSpec):
                 self._collect_step_deps(spec.steps, missing)
-
-            elif isinstance(spec, SkillSpec):
-                for rule in spec.dispatch_rules:
-                    if rule.target.id not in self._store:
-                        missing.add(rule.target.id)
 
         return sorted(missing)
 
@@ -122,12 +111,3 @@ class CapabilityRegistry:
                 if step.default and isinstance(step.default, (Step, LoopStep)):
                     if step.default.capability.id not in self._store:
                         missing.add(step.default.capability.id)
-
-    def find_skills_injecting_to(self, agent_id: str) -> List[SkillSpec]:
-        """查找所有声明了 inject_to 包含指定 agent_id 的 SkillSpec。"""
-        result = []
-        for spec in self._store.values():
-            if isinstance(spec, SkillSpec) and agent_id in spec.inject_to:
-                result.append(spec)
-        return result
-

@@ -3,16 +3,16 @@
 本目录提供 `agently-skills-runtime` 的**示例配置**，用于帮助你复刻运行环境与集成形态。
 
 重要说明：
-- v0.3.0 主线为**胶水层（bridge/glue layer）**：依赖上游 Agently + skills-runtime-sdk，以获得真实执行闭环（LLM/TriggerFlow + skills/tools/WAL/事件）。
+- 当前主线为**胶水层（bridge/glue layer）**：依赖上游 Agently + skills-runtime-sdk，以获得真实执行闭环（LLM/TriggerFlow + skills/tools/WAL/事件）。
 - 示例只表达“形态”，不绑定任何具体业务；不要在仓库内提交真实 secrets。
 
 ## 文件说明
 
 - `config/default.yaml`
-  - v0.3.0 bridge 配置（`BridgeConfigModel`）的 YAML 形态示例（字段以 `src/agently_skills_runtime/config.py` 为准）。
+  - bridge 配置（`BridgeConfigModel`）的 YAML 形态示例（字段以 `src/agently_skills_runtime/config.py` 为准）。
   - 用法：宿主读取 YAML → 构造 `BridgeConfigModel` → `to_runtime_config()` → 再把 paths 解析为 `AgentlySkillsRuntimeConfig`（Path 类型）。
 - `config/sdk.example.yaml`
-  - 上游 SDK overlays 示例（Strict Catalog：spaces + sources + scan/injection）。
+  - 上游 SDK overlays 示例（Strict Catalog：spaces + sources + scan/mention）。
   - 仅用于表达形态；实际 schema 以上游 SDK 文档与实现为准。
 
 ## 使用方式（示例）
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import yaml
 
-from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from agently_skills_runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
 from agently_skills_runtime.config import BridgeConfigModel, resolve_paths
 
 # 1) 读取 YAML（示例）

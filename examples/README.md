@@ -30,12 +30,12 @@ python examples/01_declare_and_run/run.py
 | 03 | 03_workflow_loop | LoopStep：对列表中每个元素调用 Agent | ❌ |
 | 04 | 04_workflow_parallel | ParallelStep：多个 Agent 并行执行 | ❌ |
 | 05 | 05_workflow_conditional | ConditionalStep：条件分支 | ❌ |
-| 06 | 06_skill_injection | Skill 注入 Agent（BATCH 2） | ❌ |
-| 07 | 07_skill_dispatch | Skill dispatch_rules 调度（BATCH 2） | ❌ |
 | 08 | 08_nested_workflow | Workflow 嵌套 Workflow（BATCH 2） | ❌ |
 | 09 | 09_full_scenario_mock | 完整场景模拟（BATCH 3） | ❌ |
 | 10 | 10_bridge_wiring | 真实 LLM 接线（BATCH 3） | ✅ |
-| 11 | 11_agent_domain_starter | Agent Domain 脚手架（BATCH 4） | ✅ |
+| 11 | 11_agent_domain_starter | Agent Domain 脚手架（BATCH 4；不含 SkillSpec） | ✅ |
+
+> 注（方案2）：`06_skill_injection` / `07_skill_dispatch` 已不再提供可运行实现，仅保留迁移说明与指引。
 
 ## 参考应用（非示例）
 

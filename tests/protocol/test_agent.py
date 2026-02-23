@@ -11,7 +11,6 @@ def test_agent_spec_minimal():
         base=CapabilitySpec(id="MA-013", kind=CapabilityKind.AGENT, name="单角色设计师"),
     )
     assert spec.base.id == "MA-013"
-    assert spec.skills == []
     assert spec.tools == []
     assert spec.loop_compatible is False
     assert spec.llm_config is None
@@ -27,7 +26,6 @@ def test_agent_spec_full():
             name="单角色设计师",
             tags=["TP2"],
         ),
-        skills=["story-tpl", "char-tpl"],
         tools=["web_search"],
         collaborators=[CapabilityRef(id="MA-014")],
         callable_workflows=[CapabilityRef(id="WF-001D")],
@@ -41,7 +39,6 @@ def test_agent_spec_full():
         prompt_template="设计角色：{角色定位}",
         system_prompt="你是角色设计专家",
     )
-    assert len(spec.skills) == 2
     assert spec.loop_compatible is True
     assert spec.input_schema.required == ["角色定位"]
     assert spec.llm_config["model"] == "deepseek-chat"

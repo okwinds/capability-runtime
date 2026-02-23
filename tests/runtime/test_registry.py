@@ -1,11 +1,14 @@
-"""CapabilityRegistry 单元测试。"""
+"""CapabilityRegistry 单元测试（方案2：仅 Agent/Workflow 原语）。"""
 from __future__ import annotations
 
 import pytest
 
 from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
-from agently_skills_runtime.protocol.skill import SkillDispatchRule, SkillSpec
+from agently_skills_runtime.protocol.capability import (
+    CapabilityKind,
+    CapabilityRef,
+    CapabilitySpec,
+)
 from agently_skills_runtime.protocol.workflow import (
     ConditionalStep,
     LoopStep,
@@ -16,30 +19,28 @@ from agently_skills_runtime.protocol.workflow import (
 from agently_skills_runtime.runtime.registry import CapabilityRegistry
 
 
-def _make_agent(id: str, skills=None, collaborators=None, callable_workflows=None) -> AgentSpec:
+def _make_agent(id: str, collaborators=None, callable_workflows=None) -> AgentSpec:
+    """构造最小 AgentSpec。"""
     return AgentSpec(
         base=CapabilitySpec(id=id, kind=CapabilityKind.AGENT, name=id),
-        skills=skills or [],
         collaborators=collaborators or [],
         callable_workflows=callable_workflows or [],
     )
 
 
-def _make_skill(id: str, inject_to=None, dispatch_rules=None) -> SkillSpec:
-    return SkillSpec(
-        base=CapabilitySpec(id=id, kind=CapabilityKind.SKILL, name=id),
-        source="inline content",
-        source_type="inline",
-        inject_to=inject_to or [],
-        dispatch_rules=dispatch_rules or [],
-    )
-
-
 def _make_workflow(id: str, steps=None) -> WorkflowSpec:
+    """构造最小 WorkflowSpec。"""
     return WorkflowSpec(
         base=CapabilitySpec(id=id, kind=CapabilityKind.WORKFLOW, name=id),
         steps=steps or [],
     )
+
+
+class TestProtocolGuards:
+    def test_capability_kind_rejects_skill_value(self) -> None:
+        """方案2：Protocol 不再暴露 SKILL 原语，避免形成第二套 skills 体系。"""
+        with pytest.raises(ValueError):
+            CapabilityKind("skill")
 
 
 class TestRegistryCRUD:
@@ -69,23 +70,22 @@ class TestRegistryCRUD:
     def test_list_all(self):
         reg = CapabilityRegistry()
         reg.register(_make_agent("A"))
-        reg.register(_make_skill("B"))
+        reg.register(_make_workflow("WF"))
         assert len(reg.list_all()) == 2
 
     def test_list_by_kind(self):
         reg = CapabilityRegistry()
         reg.register(_make_agent("A"))
         reg.register(_make_agent("B"))
-        reg.register(_make_skill("C"))
+        reg.register(_make_workflow("WF"))
         assert len(reg.list_by_kind(CapabilityKind.AGENT)) == 2
-        assert len(reg.list_by_kind(CapabilityKind.SKILL)) == 1
-        assert len(reg.list_by_kind(CapabilityKind.WORKFLOW)) == 0
+        assert len(reg.list_by_kind(CapabilityKind.WORKFLOW)) == 1
 
     def test_list_ids(self):
         reg = CapabilityRegistry()
         reg.register(_make_agent("A"))
-        reg.register(_make_skill("B"))
-        assert sorted(reg.list_ids()) == ["A", "B"]
+        reg.register(_make_workflow("WF"))
+        assert sorted(reg.list_ids()) == ["A", "WF"]
 
     def test_has(self):
         reg = CapabilityRegistry()
@@ -105,17 +105,6 @@ class TestValidateDependencies:
     def test_no_dependencies_all_ok(self):
         reg = CapabilityRegistry()
         reg.register(_make_agent("A"))
-        assert reg.validate_dependencies() == []
-
-    def test_agent_missing_skill(self):
-        reg = CapabilityRegistry()
-        reg.register(_make_agent("A", skills=["missing-skill"]))
-        assert reg.validate_dependencies() == ["missing-skill"]
-
-    def test_agent_skill_present(self):
-        reg = CapabilityRegistry()
-        reg.register(_make_skill("s1"))
-        reg.register(_make_agent("A", skills=["s1"]))
         assert reg.validate_dependencies() == []
 
     def test_agent_missing_collaborator(self):
@@ -173,51 +162,18 @@ class TestValidateDependencies:
         reg.register(wf)
         assert sorted(reg.validate_dependencies()) == ["A", "D"]
 
-    def test_skill_dispatch_rule_missing_target(self):
+    def test_complex_mixed_dependencies(self) -> None:
+        """同时覆盖 Agent 的 ref 依赖与 Workflow step 依赖收集。"""
         reg = CapabilityRegistry()
-        reg.register(
-            _make_skill(
-                "s1",
-                dispatch_rules=[
-                    SkillDispatchRule(condition="x", target=CapabilityRef(id="MISSING")),
-                ],
-            )
-        )
-        assert reg.validate_dependencies() == ["MISSING"]
-
-    def test_complex_mixed_dependencies(self):
-        reg = CapabilityRegistry()
-        reg.register(_make_skill("sk1"))
-        reg.register(_make_agent("A", skills=["sk1", "sk2"]))
+        reg.register(_make_agent("A", collaborators=[CapabilityRef(id="B")]))
         reg.register(
             _make_workflow(
                 "WF",
                 steps=[
                     Step(id="s1", capability=CapabilityRef(id="A")),
-                    Step(id="s2", capability=CapabilityRef(id="B")),
+                    Step(id="s2", capability=CapabilityRef(id="C")),
                 ],
             )
         )
-        assert sorted(reg.validate_dependencies()) == ["B", "sk2"]
-
-
-class TestFindSkillsInjectingTo:
-    def test_find_matching(self):
-        reg = CapabilityRegistry()
-        s1 = _make_skill("s1", inject_to=["MA-013", "MA-014"])
-        s2 = _make_skill("s2", inject_to=["MA-013"])
-        s3 = _make_skill("s3", inject_to=["MA-015"])
-        reg.register(s1)
-        reg.register(s2)
-        reg.register(s3)
-        result = reg.find_skills_injecting_to("MA-013")
-        assert len(result) == 2
-        ids = [s.base.id for s in result]
-        assert "s1" in ids
-        assert "s2" in ids
-
-    def test_find_no_match(self):
-        reg = CapabilityRegistry()
-        reg.register(_make_skill("s1", inject_to=["MA-015"]))
-        assert reg.find_skills_injecting_to("MA-013") == []
+        assert sorted(reg.validate_dependencies()) == ["B", "C"]
 

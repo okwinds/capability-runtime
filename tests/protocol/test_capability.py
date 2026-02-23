@@ -12,7 +12,6 @@ from agently_skills_runtime.protocol.capability import (
 
 
 def test_capability_kind_values():
-    assert CapabilityKind.SKILL == "skill"
     assert CapabilityKind.AGENT == "agent"
     assert CapabilityKind.WORKFLOW == "workflow"
 
@@ -36,7 +35,7 @@ def test_capability_spec_construction():
 
 
 def test_capability_spec_defaults():
-    spec = CapabilitySpec(id="x", kind=CapabilityKind.SKILL, name="x")
+    spec = CapabilitySpec(id="x", kind=CapabilityKind.AGENT, name="x")
     assert spec.description == ""
     assert spec.version == "0.1.0"
     assert spec.tags == []

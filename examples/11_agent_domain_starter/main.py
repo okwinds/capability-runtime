@@ -95,7 +95,7 @@ async def build_real_runtime(example_dir: Path) -> CapabilityRuntime | None:
     except ModuleNotFoundError:
         print("=== 11 agent_domain_starter / real ===")
         print("环境变量已齐全，但未安装 agently，已安全退出（exit code 0）。")
-        print("安装：pip install agently>=4.0.7")
+        print("安装：pip install agently>=4.0.8")
         return None
 
     Agently.set_settings(

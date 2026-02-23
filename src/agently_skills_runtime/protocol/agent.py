@@ -29,7 +29,6 @@ class AgentSpec:
 
     参数：
     - base: 公共能力字段
-    - skills: 装载的 Skill ID 列表
     - tools: 注册的 Tool 名称列表
     - collaborators: 可协作的其他 Agent 引用
     - callable_workflows: 可调用的 Workflow 引用
@@ -42,7 +41,6 @@ class AgentSpec:
     """
 
     base: CapabilitySpec
-    skills: List[str] = field(default_factory=list)
     tools: List[str] = field(default_factory=list)
     collaborators: List[CapabilityRef] = field(default_factory=list)
     callable_workflows: List[CapabilityRef] = field(default_factory=list)

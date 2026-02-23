@@ -21,7 +21,8 @@ def test_agently_openai_compatible_requester_generate_request_data_smoke():
         import agently  # type: ignore
     except ModuleNotFoundError:
         # 尝试复用本地 sibling fork（推荐开发态结构：<Code>/Agently）
-        repo_root = Path(__file__).resolve().parents[2]
+        # __file__ = <repo>/tests/<file>.py，因此 repo_root 应为 parents[1]（而不是 parents[2]）。
+        repo_root = Path(__file__).resolve().parents[1]
         code_root = repo_root.parent
         local_agently = code_root / "Agently"
         if local_agently.exists():
@@ -31,7 +32,7 @@ def test_agently_openai_compatible_requester_generate_request_data_smoke():
         except ModuleNotFoundError:
             pytest.skip(
                 "未安装 agently，且未发现本地 sibling fork `../Agently`。"
-                "可用：`pip install agently==4.0.7`，或 `pip install -e ../Agently`（把 Agently repo 放到同级目录）。"
+                "可用：`pip install agently==4.0.8`，或 `pip install -e ../Agently`（把 Agently repo 放到同级目录）。"
             )
 
     import agently as agently_mod  # type: ignore

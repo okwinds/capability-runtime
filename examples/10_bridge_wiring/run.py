@@ -3,7 +3,7 @@ Bridge 接线示例：通过 agently-skills-runtime 调用真实 LLM。
 
 前置条件：
   1. pip install -e ".[dev]"
-  2. pip install agently>=4.0.7
+  2. pip install agently>=4.0.8
   3. cp examples/10_bridge_wiring/.env.example examples/10_bridge_wiring/.env
   4. 编辑 .env 填入真实的 API key 和 endpoint
 
@@ -69,7 +69,7 @@ async def main() -> None:
     except ModuleNotFoundError:
         print("=== 10 bridge_wiring ===")
         print("环境变量已齐全，但无法导入 agently，已退出（exit code 0）。")
-        print("安装：pip install agently>=4.0.7")
+        print("安装：pip install agently>=4.0.8")
         print("降级：python examples/10_bridge_wiring/run_mock_fallback.py")
         return
 

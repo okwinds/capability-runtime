@@ -11,7 +11,6 @@ from agently_skills_runtime.protocol.capability import (
     CapabilityStatus,
 )
 from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.protocol.skill import SkillSpec
 from agently_skills_runtime.runtime.registry import CapabilityRegistry
 
 
@@ -128,62 +127,19 @@ async def test_system_prompt_as_initial_history():
     assert captured["initial_history"][0]["role"] == "system"
     assert captured["initial_history"][0]["content"] == "你是专家"
 
-
-@pytest.mark.asyncio
-async def test_skill_injection():
-    skill = SkillSpec(
-        base=CapabilitySpec(id="sk1", kind=CapabilityKind.SKILL, name="模板"),
-        source="这是模板内容",
-        source_type="inline",
-    )
-    spec = AgentSpec(
-        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
-        skills=["sk1"],
-    )
-
-    captured = {}
-
-    async def capture_runner(task, *, initial_history=None):
-        captured["task"] = task
-        return "result"
-
-    adapter = AgentAdapter(runner=capture_runner)
-    rt = FakeRuntime()
-    rt.registry.register(skill)
-    ctx = ExecutionContext(run_id="r1")
-
-    await adapter.execute(spec=spec, input={"task": "x"}, context=ctx, runtime=rt)
-    assert "模板内容" in captured["task"]
-    assert "[Skill: 模板]" in captured["task"]
+def test_agent_adapter_init_has_no_skill_content_loader_param() -> None:
+    """方案2：AgentAdapter 不再支持 Skill 内容注入参数。"""
+    with pytest.raises(TypeError):
+        AgentAdapter(runner=mock_runner, skill_content_loader=lambda _s: "x")  # type: ignore[arg-type]
 
 
-@pytest.mark.asyncio
-async def test_inject_to_skill():
-    """测试 SkillSpec.inject_to 自动注入。"""
-    skill = SkillSpec(
-        base=CapabilitySpec(id="sk2", kind=CapabilityKind.SKILL, name="自动注入"),
-        source="自动注入的内容",
-        source_type="inline",
-        inject_to=["A"],
-    )
-    spec = AgentSpec(
-        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
-        skills=[],
-    )
-
-    captured = {}
-
-    async def capture_runner(task, *, initial_history=None):
-        captured["task"] = task
-        return "result"
-
-    adapter = AgentAdapter(runner=capture_runner)
-    rt = FakeRuntime()
-    rt.registry.register(skill)
-    ctx = ExecutionContext(run_id="r1")
-
-    await adapter.execute(spec=spec, input={"task": "x"}, context=ctx, runtime=rt)
-    assert "自动注入的内容" in captured["task"]
+def test_agent_spec_has_no_skills_field() -> None:
+    """方案2：AgentSpec 不再声明 skills 字段，避免读者误解本仓在自带 skills 引擎。"""
+    with pytest.raises(TypeError):
+        AgentSpec(  # type: ignore[call-arg]
+            base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+            skills=["sk1"],
+        )
 
 
 @pytest.mark.asyncio

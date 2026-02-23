@@ -14,7 +14,7 @@
 ### A.1 `CapabilityKind`（枚举）
 
 - 定义：`src/agently_skills_runtime/protocol/capability.py`
-- 值：`skill / agent / workflow`
+- 值：`agent / workflow`
 
 ### A.2 `CapabilitySpec`（公共能力字段）
 
@@ -54,33 +54,21 @@
 | `duration_ms` | `Optional[float]` | `None` | 耗时（ms） |
 | `metadata` | `Dict[str, Any]` | `{}` | 扩展信息 |
 
-## B) Skill（元能力：注入 + 可选调度）
+## B) skills（上游引擎能力：`agent_sdk`）
 
-> 定义：`src/agently_skills_runtime/protocol/skill.py`
+> 真相源：`skills-runtime-sdk-python`（模块 `agent_sdk`）  
+> 本仓口径：**不再提供** `SkillSpec/SkillAdapter`；skills 的发现/mention/sources/preflight/tools/approvals/WAL 全部以 SDK 为准。
 
-### B.1 `SkillDispatchRule`
+桥接层中与 skills 相关的“可依赖入口”：
 
-| 字段 | 类型 | 默认值 | 语义（地面真相） |
-|---|---|---|---|
-| `condition` | `str` | （必填） | 当前语义是 **context bag key**，以 `bool(context.bag.get(condition))` 判断 |
-| `target` | `CapabilityRef` | （必填） | 被调度的目标能力 |
-| `priority` | `int` | `0` | 数值越大越优先（同优先级按声明顺序） |
-| `metadata` | `Dict[str, Any]` | `{}` | 扩展字段 |
+- `AgentlySkillsRuntime.preflight()`：零 I/O 的接入门禁（返回 issues 列表）
+- `AgentlySkillsRuntime.preflight_or_raise()`：生产默认 fail-closed（issues 非空则抛聚合错误）
 
-### B.2 `SkillSpec`
+参考文档（建议从这里拿“应该怎么配”而不是猜）：
 
-| 字段 | 类型 | 默认值 | 说明 |
-|---|---|---|---|
-| `base` | `CapabilitySpec` | （必填） | 公共能力字段（kind=skill） |
-| `source` | `str` | （必填） | 内容来源（见 `source_type`） |
-| `source_type` | `str` | `"file"` | `"file" \| "inline" \| "uri"` |
-| `dispatch_rules` | `List[SkillDispatchRule]` | `[]` | 调度规则（可空） |
-| `inject_to` | `List[str]` | `[]` | **Agent ID 列表**，用于自动注入 |
-
-`source_type` 约定（Adapter 语义）：
-- `file`：把 `source` 当作相对 `workspace_root` 的文件路径
-- `inline`：把 `source` 当作正文文本
-- `uri`：默认禁用（安全原因，需要 allowlist 才能启用）
+- `docs/internal/specs/engineering-spec/02_Technical_Design/SKILLS_SYSTEM.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/SKILLS_PREFLIGHT.md`
+- `docs/internal/specs/engineering-spec/04_Operations/CONFIGURATION.md`
 
 ## C) Agent（元能力：被 Adapter 委托执行）
 
@@ -98,7 +86,6 @@
 | 字段 | 类型 | 默认值 | 说明 |
 |---|---|---|---|
 | `base` | `CapabilitySpec` | （必填） | 公共能力字段（kind=agent） |
-| `skills` | `List[str]` | `[]` | 显式装载 Skill ID 列表 |
 | `tools` | `List[str]` | `[]` | Tool 名称列表（桥接层可用） |
 | `collaborators` | `List[CapabilityRef]` | `[]` | 可协作 Agent 引用 |
 | `callable_workflows` | `List[CapabilityRef]` | `[]` | 可调用 Workflow 引用 |
@@ -215,7 +202,6 @@
 - `register(spec)`：重复 ID 覆盖（last-write-wins）
 - `get(id)` / `get_or_raise(id)`
 - `validate_dependencies()`：返回缺失依赖 ID 列表（排序后）
-- `find_skills_injecting_to(agent_id)`：返回 `inject_to` 包含该 Agent ID 的所有 `SkillSpec`
 
 ### F.3 `ExecutionGuards`（全局迭代熔断）
 
@@ -264,22 +250,15 @@ Adapter 必须实现：
 > 入口：`src/agently_skills_runtime/adapters/*_adapter.py`  
 > 导出面：`src/agently_skills_runtime/adapters/__init__.py`
 
-### G.1 `SkillAdapter`（内容加载 + dispatch_rules）
-
-地面真相（关键语义）：
-- 执行成功时 `CapabilityResult.output == content(str)`
-- `dispatch_rules` 命中时，调度结果写入 `CapabilityResult.metadata["dispatched"]`
-- `condition` 的判断：`bool(context.bag.get(condition))`
-
-### G.2 `AgentAdapter`（Skill 合并注入 + runner 委托）
+### G.1 `AgentAdapter`（runner 委托）
 
 地面真相（关键语义）：
 - 若未注入 `runner`：直接返回 FAILED（error 文本明确）
-- 合并 skill IDs：`spec.skills + registry.find_skills_injecting_to(spec.base.id)`
-- Skill 内容默认取 `SkillSpec.source`（除非注入 `skill_content_loader`）
 - `prompt_template` 存在时优先 `.format(**input)`；缺 key 则退化为“模板 + 输入 JSON”
+- `system_prompt` 会被注入为 `initial_history[0]`（role=system）
+- 方案2：不再提供 Skill 原语，因此 **不做** Skill 内容注入/调度
 
-### G.3 `WorkflowAdapter`（Step 编排）
+### G.2 `WorkflowAdapter`（Step 编排）
 
 地面真相（关键语义）：
 - 执行开始时：`context.bag.update(input)`

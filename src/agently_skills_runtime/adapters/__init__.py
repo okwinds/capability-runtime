@@ -7,11 +7,9 @@ from __future__ import annotations
 
 # 新增能力适配器
 from .agent_adapter import AgentAdapter
-from .skill_adapter import SkillAdapter
 from .workflow_adapter import WorkflowAdapter
 
 __all__ = [
     "AgentAdapter",
     "WorkflowAdapter",
-    "SkillAdapter",
 ]

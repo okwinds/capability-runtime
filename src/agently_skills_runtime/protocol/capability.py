@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 class CapabilityKind(str, Enum):
     """能力种类。"""
 
-    SKILL = "skill"
     AGENT = "agent"
     WORKFLOW = "workflow"
 
@@ -36,7 +35,7 @@ class CapabilitySpec:
 
     参数：
     - id: 全局唯一 ID（如 "MA-013"、"WF-001D"）
-    - kind: 能力种类（skill/agent/workflow）
+    - kind: 能力种类（agent/workflow）
     - name: 人类可读名称（如 "单角色设计师"）
     - description: 描述（可为空）
     - version: 语义化版本（默认 "0.1.0"）

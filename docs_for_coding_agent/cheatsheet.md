@@ -2,12 +2,13 @@
 
 > 面向：编码智能体（Codex CLI / Claude Code / 其他）  
 > 目标：用**最少上下文**跑通“声明 → 注册 → 校验 → 执行 / 编排”的最小闭环。  
-> 前置：已阅读 `archive/instructcontext/5-true-CODEX_CONTEXT_BRIEF.md`（三元对等 / 协议独立 / 业务无关）。
+> 前置：已阅读 `archive/instructcontext/5-true-CODEX_CONTEXT_BRIEF.md`（桥接主线 / 协议独立 / 业务无关）。
 
 ## 0) 核心共识
 
-- 三元对等：Skill / Agent / Workflow 是对等的能力原语（共享 `CapabilitySpec`）
-- 互嵌可组合：三者可以互相嵌套（Workflow step 可调用 Agent/Skill/Workflow；Skill 可注入或调度）
+- 能力原语收敛：本仓库对外的 Protocol 原语仅 **Agent / Workflow**（共享 `CapabilitySpec`）
+- skills 真相源：skills 的发现/mention/sources/preflight/tools/approvals/WAL 全部以 `skills-runtime-sdk-python`（模块 `agent_sdk`）为准
+- 互嵌可组合：Workflow step 可调用 Agent/Workflow；顶层编排入口默认是 Agently TriggerFlow（生态入口）
 - 标准流程：声明 → 注册 → 校验 → 执行（`register` → `validate` → `run`）
 - 协议独立：`protocol/` 层只放 dataclass/Enum/类型声明，不依赖上游（便于审计与回归）
 - 委托执行：框架负责组织与调度；真实执行由 Adapter 委托给上游或 mock（示例默认离线 mock）
@@ -42,7 +43,6 @@ from agently_skills_runtime.protocol.capability import (
     CapabilitySpec, CapabilityKind, CapabilityRef,
     CapabilityResult, CapabilityStatus,
 )
-from agently_skills_runtime.protocol.skill import SkillSpec, SkillDispatchRule
 from agently_skills_runtime.protocol.agent import AgentSpec, AgentIOSchema
 from agently_skills_runtime.protocol.workflow import (
     WorkflowSpec,
@@ -63,7 +63,6 @@ from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConf
 ```python
 from agently_skills_runtime.adapters.agent_adapter import AgentAdapter
 from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
-from agently_skills_runtime.adapters.skill_adapter import SkillAdapter
 ```
 
 ### Reporting（证据链/控制面，可选）
