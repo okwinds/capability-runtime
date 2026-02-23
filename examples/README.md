@@ -34,6 +34,7 @@ python examples/01_declare_and_run/run.py
 | 09 | 09_full_scenario_mock | 完整场景模拟（BATCH 3） | ❌ |
 | 10 | 10_bridge_wiring | 真实 LLM 接线（BATCH 3） | ✅ |
 | 11 | 11_agent_domain_starter | Agent Domain 脚手架（BATCH 4；不含 SkillSpec） | ✅ |
+| 12 | 12_host_lifecycle_toolkit_mvr | Host 生命周期工具箱（MVR）：TurnDelta/HistoryAssembler/system 注入摘要/approvals profiles/resume helper | ❌ |
 
 > 注（方案2）：`06_skill_injection` / `07_skill_dispatch` 已不再提供可运行实现，仅保留迁移说明与指引。
 
