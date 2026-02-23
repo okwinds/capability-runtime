@@ -37,6 +37,7 @@ from agent_sdk.tools.protocol import HumanIOProvider
 
 from .adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend, build_openai_compatible_requester_factory
 from .adapters.triggerflow_tool import TriggerFlowRunner, TriggerFlowToolDeps, build_triggerflow_run_flow_tool
+from .adapters.upstream import register_agent_tool
 from .reporting.node_report import NodeReportBuilder
 from .types import NodeReportV2, NodeResultV2
 
@@ -388,9 +389,9 @@ class AgentlySkillsRuntime:
         # dev-ready 必备：TriggerFlow tool（宿主注入 runner 时启用）
         if self._triggerflow_runner is not None:
             spec, handler = build_triggerflow_run_flow_tool(deps=TriggerFlowToolDeps(runner=self._triggerflow_runner))
-            # SDK Agent 的扩展点：`_extra_tools` 会在每次 run 时被注册到 ToolRegistry。
+            # 上游公开扩展点优先；旧版兼容回退到 `_extra_tools`（见 adapters/upstream.py）。
             # 约束：只在首次构造 Agent 时注入，避免重复注册。
-            self._agent._extra_tools.append((spec, handler))  # type: ignore[attr-defined]
+            register_agent_tool(agent=self._agent, spec=spec, handler=handler, override=False)
 
         return self._agent
 
