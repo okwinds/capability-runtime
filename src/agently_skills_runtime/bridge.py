@@ -8,9 +8,9 @@ AgentlySkillsRuntime：桥接层主入口。
 - 运行并聚合事件为 NodeReport v2，返回 NodeResult
 
 对齐规格：
-- `docs/specs/engineering-spec/02_Technical_Design/PUBLIC_API.md`
-- `docs/specs/engineering-spec/02_Technical_Design/SKILLS_PREFLIGHT.md`
-- `docs/specs/engineering-spec/04_Operations/CONFIGURATION.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/PUBLIC_API.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/SKILLS_PREFLIGHT.md`
+- `docs/internal/specs/engineering-spec/04_Operations/CONFIGURATION.md`
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from agent_sdk.core.agent import Agent
 from agent_sdk.core.errors import FrameworkError, FrameworkIssue
 from agent_sdk.safety.approvals import ApprovalProvider
 from agent_sdk.skills.manager import SkillsManager
-from agent_sdk.tools.protocol import HumanIOProvider
+from agent_sdk.tools.protocol import HumanIOProvider, ToolSpec
 
 from .adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend, build_openai_compatible_requester_factory
 from .adapters.triggerflow_tool import TriggerFlowRunner, TriggerFlowToolDeps, build_triggerflow_run_flow_tool
@@ -176,6 +176,27 @@ class AgentlySkillsRuntime:
             raise ValueError(f"unknown backend_mode: {self._config.backend_mode!r}")
 
         self._agent: Optional[Agent] = None
+        self._pending_tools: List[Dict[str, Any]] = []
+
+    def register_tool(self, *, spec: ToolSpec, handler: Any, override: bool = False) -> None:
+        """
+        注册一个自定义 tool 到底层 SDK Agent（公共 API，推荐扩展点）。
+
+        参数：
+        - spec：`agent_sdk.tools.protocol.ToolSpec`
+        - handler：tool handler（同步函数；签名需兼容 SDK ToolRegistry）
+        - override：是否允许覆盖同名 tool（语义与上游对齐）
+
+        说明：
+        - 若 SDK Agent 尚未构造：先缓存，待首次 `_get_or_create_agent()` 时统一注入（保持懒加载）；
+        - 若 SDK Agent 已构造：立即注入。
+        """
+
+        if self._agent is None:
+            self._pending_tools.append({"spec": spec, "handler": handler, "override": bool(override)})
+            return
+
+        register_agent_tool(agent=self._agent, spec=spec, handler=handler, override=bool(override))
 
     @staticmethod
     def _sha256_text(text: str) -> str:
@@ -392,6 +413,17 @@ class AgentlySkillsRuntime:
             # 上游公开扩展点优先；旧版兼容回退到 `_extra_tools`（见 adapters/upstream.py）。
             # 约束：只在首次构造 Agent 时注入，避免重复注册。
             register_agent_tool(agent=self._agent, spec=spec, handler=handler, override=False)
+
+        # 宿主注入的自定义 tools（通过公共 API register_tool 缓存）
+        pending = list(self._pending_tools)
+        self._pending_tools.clear()
+        for item in pending:
+            spec = item.get("spec")
+            handler = item.get("handler")
+            override = bool(item.get("override"))
+            if spec is None or handler is None:
+                continue
+            register_agent_tool(agent=self._agent, spec=spec, handler=handler, override=override)
 
         return self._agent
 
