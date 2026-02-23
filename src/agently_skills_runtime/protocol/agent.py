@@ -37,7 +37,11 @@ class AgentSpec:
     - loop_compatible: 是否可被 LoopStep 循环调用
     - llm_config: LLM 覆盖配置
     - prompt_template: 可选的 prompt 模板（支持 {field} 占位符）
-    - system_prompt: 可选的 system prompt
+    - system_prompt: 可选的“Agent 级 system message”（用于该 Agent 的提示词组织）
+
+      注意：
+      - 这不是 Host 的 system/developer 级策略提示词注入通道；
+      - Host 级策略提示词应通过上游 `agent_sdk` 的 prompt/config overlays 注入（避免 `initial_history` 漂移）。
     """
 
     base: CapabilitySpec

@@ -40,7 +40,7 @@ class AgentAdapter:
 
         流程：
         1. 构造 task 文本（prompt_template + input + output_schema）
-        2. 构造 initial_history（如有 system_prompt）
+        2. 将 `system_prompt` 合入 task 文本（适配上游对 `initial_history` 的现实约束）
         3. 委托 runner 执行
         4. 包装返回值为 CapabilityResult
 
@@ -60,14 +60,9 @@ class AgentAdapter:
         # 1) 构造 task 文本
         task = self._build_task(spec=spec, input=input)
 
-        # 2) 构造 initial_history
-        initial_history = None
-        if spec.system_prompt:
-            initial_history = [{"role": "system", "content": spec.system_prompt}]
-
-        # 3) 委托 runner 执行
+        # 2) 委托 runner 执行
         try:
-            result = await self._runner(task, initial_history=initial_history)
+            result = await self._runner(task, initial_history=None)
         except Exception as exc:
             return CapabilityResult(
                 status=CapabilityStatus.FAILED,
@@ -85,6 +80,12 @@ class AgentAdapter:
     ) -> str:
         """从 AgentSpec + input 构造 task 文本。"""
         parts: List[str] = []
+
+        # system_prompt：Agent 级提示词片段（不走 initial_history，避免上游忽略 role=system）
+        if spec.system_prompt and str(spec.system_prompt).strip():
+            parts.append("系统指令（仅对本 Agent 生效）：")
+            parts.append(str(spec.system_prompt).strip())
+            parts.append("")  # 保持与后续正文分隔
 
         # prompt_template 优先
         if spec.prompt_template:

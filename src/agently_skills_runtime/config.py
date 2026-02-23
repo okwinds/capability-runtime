@@ -2,7 +2,7 @@
 配置胶水（Bridge Config → SDK overlays）。
 
 对齐规格：
-- `docs/specs/engineering-spec/04_Operations/CONFIGURATION.md`
+- `docs/internal/specs/engineering-spec/04_Operations/CONFIGURATION.md`
 """
 
 from __future__ import annotations

@@ -107,7 +107,7 @@ async def test_prompt_template_missing_key():
 
 
 @pytest.mark.asyncio
-async def test_system_prompt_as_initial_history():
+async def test_system_prompt_is_inlined_into_task_text():
     spec = AgentSpec(
         base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
         system_prompt="你是专家",
@@ -116,6 +116,7 @@ async def test_system_prompt_as_initial_history():
     captured = {}
 
     async def capture_runner(task, *, initial_history=None):
+        captured["task"] = task
         captured["initial_history"] = initial_history
         return "result"
 
@@ -124,8 +125,9 @@ async def test_system_prompt_as_initial_history():
     ctx = ExecutionContext(run_id="r1")
 
     await adapter.execute(spec=spec, input={"task": "x"}, context=ctx, runtime=rt)
-    assert captured["initial_history"][0]["role"] == "system"
-    assert captured["initial_history"][0]["content"] == "你是专家"
+    assert captured["initial_history"] is None
+    assert "系统指令（仅对本 Agent 生效）" in captured["task"]
+    assert "你是专家" in captured["task"]
 
 def test_agent_adapter_init_has_no_skill_content_loader_param() -> None:
     """方案2：AgentAdapter 不再支持 Skill 内容注入参数。"""

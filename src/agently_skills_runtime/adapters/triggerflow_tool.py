@@ -11,7 +11,7 @@ TriggerFlow tool：`triggerflow_run_flow`。
 - 审批证据链必须写入 WAL（`approval_requested/approval_decided`），并能被 NodeReport 聚合。
 
 对齐规格：
-- `docs/specs/engineering-spec/02_Technical_Design/TOOLS_BUILTINS.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/TOOLS_BUILTINS.md`
 """
 
 from __future__ import annotations
@@ -287,4 +287,3 @@ def build_triggerflow_run_flow_tool(*, deps: TriggerFlowToolDeps) -> Tuple[ToolS
         )
 
     return spec, handler
-

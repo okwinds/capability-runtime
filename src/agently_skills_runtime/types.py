@@ -6,7 +6,7 @@
 - NodeResult 是一次运行的对外返回值：final_output + node_report + events_path。
 
 对齐规格：
-- `docs/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
 """
 
 from __future__ import annotations

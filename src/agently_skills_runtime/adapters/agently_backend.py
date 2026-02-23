@@ -8,7 +8,7 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 - 解析阶段复用 SDK `ChatCompletionsSseParser`，确保 tool_calls delta 拼接口径不分叉。
 
 对齐规格：
-- `docs/specs/engineering-spec/02_Technical_Design/INTEGRATION_AGENTLY.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/INTEGRATION_AGENTLY.md`
 """
 
 from __future__ import annotations
