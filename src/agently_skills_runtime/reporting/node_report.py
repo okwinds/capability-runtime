@@ -2,7 +2,7 @@
 NodeReportBuilder：把 SDK `AgentEvent` 聚合为 NodeReport v2。
 
 对齐规格：
-- `docs/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
+- `docs/internal/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
 """
 
 from __future__ import annotations
@@ -245,7 +245,7 @@ class NodeReportBuilder:
             reason=reason,
             completion_reason=completion_reason or "",
             engine={
-                "name": "skills-runtime-sdk",
+                "name": "skills-runtime-sdk-python",
                 "module": "agent_sdk",
                 "version": _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
             },

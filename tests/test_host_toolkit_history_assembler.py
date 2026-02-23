@@ -10,7 +10,7 @@ def test_history_assembler_outputs_minimal_user_assistant_messages_only():
         status="success",
         reason=None,
         completion_reason="run_completed",
-        engine={"name": "skills-runtime-sdk", "module": "agent_sdk", "version": "0"},
+        engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk", "version": "0"},
         bridge={"name": "agently-skills-runtime", "version": "0"},
         run_id="r1",
         turn_id="t1",
@@ -31,4 +31,3 @@ def test_history_assembler_outputs_minimal_user_assistant_messages_only():
         {"role": "user", "content": "u2"},
         {"role": "assistant", "content": "a2"},
     ]
-

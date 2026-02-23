@@ -36,7 +36,7 @@ def test_system_prompt_evidence_hook_writes_meta_without_plaintext():
         status="success",
         reason=None,
         completion_reason="run_completed",
-        engine={"name": "skills-runtime-sdk", "module": "agent_sdk", "version": "0"},
+        engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk", "version": "0"},
         bridge={"name": "agently-skills-runtime", "version": "0"},
         run_id="r1",
         turn_id="t1",
@@ -54,4 +54,3 @@ def test_system_prompt_evidence_hook_writes_meta_without_plaintext():
     assert "system_prompt_injected" in node_result.node_report.meta
     assert node_result.node_report.meta.get("system_policy_id") == "p1"
     assert secret_marker not in meta_json
-

@@ -22,6 +22,7 @@ def test_report_success_from_run_completed():
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "success"
+    assert rep.engine.get("name") == "skills-runtime-sdk-python"
     assert rep.events_path == "wal.jsonl"
     assert rep.completion_reason == "run_completed"
 
