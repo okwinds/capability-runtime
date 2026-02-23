@@ -253,3 +253,86 @@ async def test_wrap_node_result_v2():
     assert result.output == "the output"
     assert result.report is not None
 
+
+@pytest.mark.asyncio
+async def test_wrap_node_result_v2_maps_needs_approval_to_pending() -> None:
+    class FakeNodeReport:
+        status = "needs_approval"
+        reason = "approval_pending"
+        meta = {"final_output": "ignored"}
+
+    class FakeNodeResult:
+        final_output = "the output"
+        node_report = FakeNodeReport()
+
+    async def nr_runner(task, *, initial_history=None):
+        return FakeNodeResult()
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+    )
+    adapter = AgentAdapter(runner=nr_runner)
+    rt = FakeRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.PENDING
+    assert result.error is None
+    assert result.report is not None
+    assert getattr(result.report, "status", None) == "needs_approval"
+
+
+@pytest.mark.asyncio
+async def test_wrap_node_result_v2_maps_incomplete_to_pending_by_default() -> None:
+    class FakeNodeReport:
+        status = "incomplete"
+        reason = "budget_exceeded"
+        meta = {"final_output": "ignored"}
+
+    class FakeNodeResult:
+        final_output = "the output"
+        node_report = FakeNodeReport()
+
+    async def nr_runner(task, *, initial_history=None):
+        return FakeNodeResult()
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+    )
+    adapter = AgentAdapter(runner=nr_runner)
+    rt = FakeRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.PENDING
+    assert result.error is None
+    assert result.report is not None
+    assert getattr(result.report, "status", None) == "incomplete"
+
+
+@pytest.mark.asyncio
+async def test_wrap_node_result_v2_maps_cancelled_to_cancelled() -> None:
+    class FakeNodeReport:
+        status = "incomplete"
+        reason = "cancelled"
+        meta = {"final_output": "ignored"}
+
+    class FakeNodeResult:
+        final_output = "the output"
+        node_report = FakeNodeReport()
+
+    async def nr_runner(task, *, initial_history=None):
+        return FakeNodeResult()
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+    )
+    adapter = AgentAdapter(runner=nr_runner)
+    rt = FakeRuntime()
+    ctx = ExecutionContext(run_id="r1")
+
+    result = await adapter.execute(spec=spec, input={}, context=ctx, runtime=rt)
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.error is None
+    assert result.report is not None
+    assert getattr(result.report, "reason", None) == "cancelled"

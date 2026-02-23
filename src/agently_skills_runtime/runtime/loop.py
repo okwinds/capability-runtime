@@ -55,7 +55,23 @@ class LoopController:
                     error=f"Loop iteration {idx} exception: {exc}",
                 )
 
-            if result.status == CapabilityStatus.FAILED:
+            if result.status != CapabilityStatus.SUCCESS:
+                # LoopStep 内部一旦出现非 success：
+                # - FAILED：按 fail_strategy 处理（abort/skip/collect）
+                # - PENDING/RUNNING/CANCELLED：不应被当作成功继续推进（否则会吞掉 needs_approval/incomplete 等语义）
+                if result.status in (CapabilityStatus.PENDING, CapabilityStatus.RUNNING, CapabilityStatus.CANCELLED):
+                    return CapabilityResult(
+                        status=result.status,
+                        output=results,
+                        error=result.error,
+                        report=result.report,
+                        metadata={
+                            "completed_iterations": idx,
+                            "total_planned": effective_max,
+                            "aborted_status": getattr(result.status, "value", str(result.status)),
+                        },
+                    )
+
                 if fail_strategy == "abort":
                     return CapabilityResult(
                         status=CapabilityStatus.FAILED,
@@ -86,4 +102,3 @@ class LoopController:
                 "skipped_errors": errors if errors else None,
             },
         )
-

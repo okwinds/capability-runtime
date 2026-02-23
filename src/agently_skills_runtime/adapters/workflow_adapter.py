@@ -55,7 +55,11 @@ class WorkflowAdapter:
 
         for step in spec.steps:
             result = await self._execute_step(step, context=context, runtime=runtime)
-            if result.status == CapabilityStatus.FAILED:
+            # Workflow 作为“编排胶水”，不应把非 success 的状态当作成功继续推进。
+            # - FAILED：明确失败
+            # - PENDING：needs_approval / incomplete 等需要外部介入
+            # - CANCELLED：取消
+            if result.status != CapabilityStatus.SUCCESS:
                 return result
 
         output = self._resolve_output_mappings(spec.output_mappings, context)
@@ -192,23 +196,64 @@ class WorkflowAdapter:
                 branch_results.append(r)
 
         if step.join_strategy == "all_success":
-            failed = [r for r in branch_results if r.status == CapabilityStatus.FAILED]
-            if failed:
-                return CapabilityResult(
-                    status=CapabilityStatus.FAILED,
+            non_success = [r for r in branch_results if r.status != CapabilityStatus.SUCCESS]
+            if non_success:
+                # 优先级：PENDING > FAILED > CANCELLED > RUNNING（避免误把 needs_approval 当成失败吞掉）
+                statuses = {r.status for r in non_success}
+                if CapabilityStatus.PENDING in statuses:
+                    overall = CapabilityStatus.PENDING
+                elif CapabilityStatus.FAILED in statuses:
+                    overall = CapabilityStatus.FAILED
+                elif CapabilityStatus.CANCELLED in statuses:
+                    overall = CapabilityStatus.CANCELLED
+                else:
+                    overall = CapabilityStatus.RUNNING
+
+                context.step_outputs[step.id] = [r.output for r in branch_results]
+                aggregated = CapabilityResult(
+                    status=overall,
                     output=[r.output for r in branch_results],
                     error=(
                         f"ParallelStep '{step.id}': "
-                        f"{len(failed)}/{len(branch_results)} branches failed"
-                    ),
+                        f"{len(non_success)}/{len(branch_results)} branches not success"
+                    )
+                    if overall == CapabilityStatus.FAILED
+                    else None,
+                    metadata={
+                        "branch_statuses": [
+                            getattr(r.status, "value", str(r.status)) for r in branch_results
+                        ]
+                    },
                 )
+                context.step_results[step.id] = _to_step_result_dict(aggregated)
+                return aggregated
         elif step.join_strategy == "any_success":
             if not any(r.status == CapabilityStatus.SUCCESS for r in branch_results):
-                return CapabilityResult(
-                    status=CapabilityStatus.FAILED,
+                statuses = {r.status for r in branch_results}
+                if CapabilityStatus.PENDING in statuses:
+                    overall = CapabilityStatus.PENDING
+                elif CapabilityStatus.CANCELLED in statuses:
+                    overall = CapabilityStatus.CANCELLED
+                elif CapabilityStatus.RUNNING in statuses:
+                    overall = CapabilityStatus.RUNNING
+                else:
+                    overall = CapabilityStatus.FAILED
+
+                context.step_outputs[step.id] = [r.output for r in branch_results]
+                aggregated = CapabilityResult(
+                    status=overall,
                     output=[r.output for r in branch_results],
-                    error=f"ParallelStep '{step.id}': no branch succeeded",
+                    error=f"ParallelStep '{step.id}': no branch succeeded"
+                    if overall == CapabilityStatus.FAILED
+                    else None,
+                    metadata={
+                        "branch_statuses": [
+                            getattr(r.status, "value", str(r.status)) for r in branch_results
+                        ]
+                    },
                 )
+                context.step_results[step.id] = _to_step_result_dict(aggregated)
+                return aggregated
 
         context.step_outputs[step.id] = [r.output for r in branch_results]
         aggregated = CapabilityResult(

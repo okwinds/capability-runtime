@@ -21,6 +21,7 @@ CapabilityRuntime
   - `async def runner(task: str, *, initial_history=None) -> Any`
 - `AgentlySkillsRuntime.run_async` 已满足该签名，可直接注入。
 - 输出以 `NodeResultV2` 返回；`AgentAdapter` 会自动包装成 `CapabilityResult`。
+  - 当 `node_report.status` 为 `needs_approval/incomplete` 时，`CapabilityResult.status` 会映射为 `pending`（取消则为 `cancelled`）；编排层应优先读取 `result.report.status/reason` 做分支或暂停策略。
 
 ## 接线三步法
 

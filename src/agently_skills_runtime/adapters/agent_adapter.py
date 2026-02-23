@@ -155,14 +155,29 @@ class AgentAdapter:
             output = getattr(result, "final_output", None)
             if output is None and hasattr(nr, "meta"):
                 output = nr.meta.get("final_output")
-            status = (
-                CapabilityStatus.SUCCESS
-                if getattr(nr, "status", None) == "success"
-                else CapabilityStatus.FAILED
-            )
-            error = (
-                getattr(nr, "reason", None) if status == CapabilityStatus.FAILED else None
-            )
+            node_status = getattr(nr, "status", None)
+            node_reason = getattr(nr, "reason", None)
+
+            # NodeReport 是控制面强结构：success/failed/incomplete/needs_approval。
+            # CapabilityStatus 是运行时统一状态：pending/running/success/failed/cancelled。
+            #
+            # 约束：
+            # - 不能把 needs_approval/incomplete 折叠成 FAILED（否则编排层会误判并丢失语义）；
+            # - FAILED 仅用于“明确失败”；其它非 success 的状态通过 report 暴露更细粒度语义。
+            if node_status == "success":
+                status = CapabilityStatus.SUCCESS
+            elif node_status == "failed":
+                status = CapabilityStatus.FAILED
+            elif node_status == "needs_approval":
+                status = CapabilityStatus.PENDING
+            elif node_status == "incomplete":
+                # incomplete 可能来自 cancel/budget/no-progress 等。
+                status = CapabilityStatus.CANCELLED if node_reason == "cancelled" else CapabilityStatus.PENDING
+            else:
+                # 未知状态：保守降级为 FAILED，避免 silent success。
+                status = CapabilityStatus.FAILED
+
+            error = node_reason if status == CapabilityStatus.FAILED else None
             return CapabilityResult(
                 status=status,
                 output=output,
@@ -177,4 +192,3 @@ class AgentAdapter:
             return CapabilityResult(status=CapabilityStatus.SUCCESS, output=result)
 
         return CapabilityResult(status=CapabilityStatus.SUCCESS, output=result)
-

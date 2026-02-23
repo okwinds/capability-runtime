@@ -70,6 +70,24 @@ async def test_abort_on_failure(controller):
 
 
 @pytest.mark.asyncio
+async def test_abort_on_pending(controller):
+    async def execute(item, idx):
+        if idx == 1:
+            return CapabilityResult(status=CapabilityStatus.PENDING, output=None)
+        return CapabilityResult(status=CapabilityStatus.SUCCESS, output=item)
+
+    result = await controller.run_loop(
+        items=["a", "b", "c"],
+        max_iterations=10,
+        execute_fn=execute,
+        fail_strategy="abort",
+    )
+    assert result.status == CapabilityStatus.PENDING
+    assert result.output == ["a"]
+    assert result.metadata["completed_iterations"] == 1
+
+
+@pytest.mark.asyncio
 async def test_skip_on_failure(controller):
     async def execute(item, idx):
         if idx == 1:
@@ -149,4 +167,3 @@ async def test_empty_items(controller):
     )
     assert result.status == CapabilityStatus.SUCCESS
     assert result.output == []
-

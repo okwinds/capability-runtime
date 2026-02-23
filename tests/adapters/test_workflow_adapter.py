@@ -346,6 +346,62 @@ async def test_step_failure_aborts_workflow():
 
 
 @pytest.mark.asyncio
+async def test_step_pending_aborts_workflow() -> None:
+    """
+    回归护栏：Workflow 不应把 PENDING 当作 SUCCESS 继续执行后续步骤，
+    否则 needs_approval/incomplete 等语义会被吞掉。
+    """
+
+    called = {"C": 0}
+
+    class PendingOnB:
+        async def execute(self, *, spec, input, context, runtime):
+            if spec.base.id == "B":
+                return CapabilityResult(
+                    status=CapabilityStatus.PENDING,
+                    output=None,
+                    error=None,
+                    report=NodeReportV2(
+                        status="needs_approval",
+                        reason="approval_pending",
+                        completion_reason="run_cancelled",
+                        engine={"name": "skills-runtime-sdk", "module": "agent_sdk"},
+                        bridge={"name": "agently-skills-runtime"},
+                        run_id="r1",
+                        events_path="wal.jsonl",
+                        activated_skills=[],
+                        tool_calls=[],
+                        artifacts=[],
+                        meta={},
+                    ),
+                )
+            if spec.base.id == "C":
+                called["C"] += 1
+                return CapabilityResult(status=CapabilityStatus.SUCCESS, output="ok")
+            return CapabilityResult(status=CapabilityStatus.SUCCESS, output="ok")
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-PEND", kind=CapabilityKind.WORKFLOW, name="pend"),
+        steps=[
+            Step(id="s1", capability=CapabilityRef(id="A")),
+            Step(id="s2", capability=CapabilityRef(id="B")),
+            Step(id="s3", capability=CapabilityRef(id="C")),  # 不应执行
+        ],
+    )
+
+    rt = CapabilityRuntime()
+    rt.set_adapter(CapabilityKind.AGENT, PendingOnB())
+    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
+    for id in ["A", "B", "C"]:
+        rt.register(_make_agent(id))
+    rt.register(wf)
+
+    result = await rt.run("WF-PEND")
+    assert result.status == CapabilityStatus.PENDING
+    assert called["C"] == 0
+
+
+@pytest.mark.asyncio
 async def test_iterate_over_not_list():
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-X", kind=CapabilityKind.WORKFLOW, name="bad-loop"),
