@@ -1,68 +1,80 @@
-import asyncio
 from pathlib import Path
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
 from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.core.errors import FrameworkError, FrameworkIssue
+from agent_sdk.core.errors import FrameworkIssue
 
-import agently_skills_runtime.bridge as runtime_mod
-from agently_skills_runtime.bridge import (
-    AgentlySkillsRuntime,
-    AgentlySkillsRuntimeConfig,
-    AgentlySkillsRuntimeConfig as RuntimeCfg,
+from agently_skills_runtime.config import RuntimeConfig
+from agently_skills_runtime.protocol.agent import AgentSpec
+from agently_skills_runtime.protocol.capability import (
+    CapabilityKind,
+    CapabilitySpec,
+    CapabilityStatus,
 )
+from agently_skills_runtime.protocol.context import ExecutionContext
+from agently_skills_runtime.runtime import Runtime
 
 
 class _FakeAgent:
-    def __init__(self, events):
-        self._events = list(events)
+    """离线 fake SDK Agent：回放固定事件，并记录 run_id/initial_history。"""
 
-    async def run_stream_async(self, task, *, run_id=None, initial_history=None):
-        for ev in self._events:
-            yield ev
+    last_instance = None
+
+    def __init__(self, **kwargs: Any) -> None:
+        _FakeAgent.last_instance = self
+        self.kwargs = kwargs
+        self.last_run_id: Optional[str] = None
+        self.last_initial_history: Optional[List[Dict[str, Any]]] = None
+
+    async def run_stream_async(
+        self,
+        task: str,
+        *,
+        run_id: Optional[str] = None,
+        initial_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> AsyncIterator[AgentEvent]:
+        _ = task
+        self.last_run_id = run_id
+        self.last_initial_history = initial_history
+
+        yield AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id=run_id or "r1", payload={})
+        yield AgentEvent(
+            type="run_completed",
+            ts="2026-02-10T00:00:01Z",
+            run_id=run_id or "r1",
+            payload={"final_output": "ok", "events_path": "wal.jsonl"},
+        )
 
 
-class _FakeRequester:
-    def generate_request_data(self):
-        return type(
-            "Req",
-            (),
-            {"data": {"messages": []}, "request_options": {}, "stream": True, "headers": {}, "client_options": {}, "request_url": "x"},
-        )()
-
-    async def request_model(self, request_data):
-        yield ("message", "[DONE]")
-
-
-def _patch_requester_factory(monkeypatch):
-    def fake_build(*, agently_agent):
-        return lambda: _FakeRequester()
-
-    monkeypatch.setattr(runtime_mod, "build_openai_compatible_requester_factory", fake_build)
-
-
-def _mk_runtime(monkeypatch, *, preflight_mode="error", config_paths=None):
-    _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
-        workspace_root=Path("."),
-        config_paths=[Path(p) for p in (config_paths or [])],
-        preflight_mode=preflight_mode,
+def _mk_runtime(monkeypatch: pytest.MonkeyPatch, *, preflight_mode: str, config_paths: Optional[List[Path]] = None) -> Runtime:
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            sdk_config_paths=list(config_paths or []),
+            preflight_mode=preflight_mode,  # type: ignore[arg-type]
+        )
     )
-    # agently_agent is unused after patching requester_factory
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    return rt
 
 
 @pytest.mark.asyncio
-async def test_run_async_preflight_error_returns_failed_node_report(monkeypatch):
+async def test_run_preflight_error_returns_failed_node_report(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="error")
     monkeypatch.setattr(
         rt,
-        "preflight",
+        "_preflight",
         lambda: [FrameworkIssue(code="X", message="m", details={"path": "skills.scan.ttlSecs"})],
     )
 
-    out = await rt.run_async("hi")
+    ctx = ExecutionContext(run_id="r-preflight-error")
+    out = await rt.run("A", context=ctx)
+    assert out.status == CapabilityStatus.FAILED
+    assert out.node_report is not None
     assert out.node_report.status == "failed"
     assert out.node_report.reason == "skill_config_error"
     assert out.node_report.completion_reason == "preflight_failed"
@@ -71,117 +83,78 @@ async def test_run_async_preflight_error_returns_failed_node_report(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_run_async_preflight_warn_injects_meta(monkeypatch):
+async def test_run_preflight_warn_injects_meta(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="warn")
     monkeypatch.setattr(
         rt,
-        "preflight",
+        "_preflight",
         lambda: [FrameworkIssue(code="X", message="m", details={"path": "skills.scan.ttlSecs"})],
     )
-
-    fake_events = [
-        AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
-        AgentEvent(
-            type="run_completed",
-            ts="2026-02-10T00:00:01Z",
-            run_id="r1",
-            payload={"final_output": "ok", "events_path": "wal.jsonl"},
-        ),
-    ]
-    monkeypatch.setattr(rt, "_get_or_create_agent", lambda: _FakeAgent(fake_events))
-
-    out = await rt.run_async("hi")
+    ctx = ExecutionContext(run_id="r-preflight-warn")
+    out = await rt.run("A", context=ctx)
+    assert out.node_report is not None
     assert out.node_report.status == "success"
     assert out.node_report.meta["preflight_mode"] == "warn"
     assert out.node_report.meta["preflight_issues"][0]["code"] == "X"
 
 
 @pytest.mark.asyncio
-async def test_run_async_preflight_off_does_not_call_preflight(monkeypatch):
+async def test_run_preflight_off_does_not_call_preflight(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="off")
-    monkeypatch.setattr(rt, "preflight", lambda: (_ for _ in ()).throw(RuntimeError("should not call")))
+    monkeypatch.setattr(rt, "_preflight", lambda: (_ for _ in ()).throw(RuntimeError("should not call")))
 
-    fake_events = [
-        AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
-        AgentEvent(
-            type="run_completed",
-            ts="2026-02-10T00:00:01Z",
-            run_id="r1",
-            payload={"final_output": "ok", "events_path": "wal.jsonl"},
-        ),
-    ]
-    monkeypatch.setattr(rt, "_get_or_create_agent", lambda: _FakeAgent(fake_events))
-
-    out = await rt.run_async("hi")
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-off"))
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.node_report is not None
     assert out.node_report.status == "success"
 
 
-def test_preflight_or_raise_raises_framework_error(monkeypatch):
-    rt = _mk_runtime(monkeypatch, preflight_mode="error")
-    monkeypatch.setattr(
-        rt,
-        "preflight",
-        lambda: [FrameworkIssue(code="X", message="m", details={"path": "skills.scan.ttlSecs"})],
-    )
-    with pytest.raises(FrameworkError) as ei:
-        rt.preflight_or_raise()
-    assert ei.value.code == "SKILL_PREFLIGHT_FAILED"
+@pytest.mark.asyncio
+async def test_run_preflight_error_does_not_fail_open_when_preflight_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    回归护栏：SkillsManager.preflight 抛异常时不得 fail-open。
 
+    期望：
+    - preflight_mode="error" 时仍应 fail-closed；
+    - NodeReport.meta 中包含最小披露的 preflight 异常摘要/issue。
+    """
 
-def test_preflight_or_raise_noop_when_no_issues(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="error")
-    monkeypatch.setattr(rt, "preflight", lambda: [])
-    rt.preflight_or_raise()
+
+    import agent_sdk.skills.manager as skills_manager_mod
+
+    def boom(_self) -> list[FrameworkIssue]:
+        raise RuntimeError("preflight boom")
+
+    monkeypatch.setattr(skills_manager_mod.SkillsManager, "preflight", boom, raising=True)
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-raise"))
+    assert out.status == CapabilityStatus.FAILED
+    assert out.node_report is not None
+    assert out.node_report.reason == "skill_config_error"
+
+    issue_details = out.node_report.meta.get("skill_issue", {}).get("details", {})
+    issues = issue_details.get("issues") or []
+    assert any(i.get("code") == "SKILL_PREFLIGHT_EXCEPTION" for i in issues)
 
 
 @pytest.mark.asyncio
-async def test_run_sync_wrapper_works_outside_event_loop(monkeypatch):
-    rt = _mk_runtime(monkeypatch, preflight_mode="off")
-    fake_events = [
-        AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
-        AgentEvent(
-            type="run_completed",
-            ts="2026-02-10T00:00:01Z",
-            run_id="r1",
-            payload={"final_output": "ok", "events_path": "wal.jsonl"},
-        ),
-    ]
-    monkeypatch.setattr(rt, "_get_or_create_agent", lambda: _FakeAgent(fake_events))
-
-    out = await asyncio.to_thread(rt.run, "hi")
-    assert out.final_output == "ok"
-
-
-@pytest.mark.asyncio
-async def test_run_sync_wrapper_raises_inside_event_loop(monkeypatch):
-    rt = _mk_runtime(monkeypatch, preflight_mode="off")
-    with pytest.raises(RuntimeError, match="running event loop"):
-        rt.run("hi")
-
-
-def test_preflight_detects_legacy_roots_overlay(tmp_path, monkeypatch):
+async def test_preflight_detects_legacy_roots_overlay(tmp_path, monkeypatch):
     overlay = tmp_path / "bad.yaml"
     overlay.write_text("skills:\n  roots:\n    - /tmp\n", encoding="utf-8")
-    rt = _mk_runtime(monkeypatch, preflight_mode="off", config_paths=[overlay])
-    issues = rt.preflight()
-    assert any(i.code == "SKILL_CONFIG_LEGACY_ROOTS_UNSUPPORTED" for i in issues)
+    rt = _mk_runtime(monkeypatch, preflight_mode="warn", config_paths=[overlay])
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-roots"))
+    assert out.node_report is not None
+    issues = out.node_report.meta.get("preflight_issues") or []
+    assert any(i.get("code") == "SKILL_CONFIG_LEGACY_ROOTS_UNSUPPORTED" for i in issues)
 
 
-def test_preflight_warn_mode_does_not_block_on_unknown_scan_option(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_preflight_warn_mode_does_not_block_on_unknown_scan_option(tmp_path, monkeypatch):
     overlay = tmp_path / "warn.yaml"
     overlay.write_text("skills:\n  scan:\n    ttlSecs: 10\n", encoding="utf-8")
     rt = _mk_runtime(monkeypatch, preflight_mode="warn", config_paths=[overlay])
-    issues = rt.preflight()
-    assert any(i.code == "SKILL_CONFIG_UNKNOWN_SCAN_OPTION" for i in issues)
-
-
-@pytest.mark.asyncio
-async def test_run_async_preflight_error_uses_run_id_when_provided(monkeypatch):
-    rt = _mk_runtime(monkeypatch, preflight_mode="error")
-    monkeypatch.setattr(
-        rt,
-        "preflight",
-        lambda: [FrameworkIssue(code="X", message="m", details={"path": "skills.scan.ttlSecs"})],
-    )
-    out = await rt.run_async("hi", run_id="RID")
-    assert out.node_report.run_id == "RID"
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-unknown-scan"))
+    assert out.node_report is not None
+    issues = out.node_report.meta.get("preflight_issues") or []
+    assert any(i.get("code") == "SKILL_CONFIG_UNKNOWN_SCAN_OPTION" for i in issues)

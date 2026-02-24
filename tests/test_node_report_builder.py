@@ -208,17 +208,43 @@ def test_report_raises_on_empty_events():
         NodeReportBuilder().build(events=[])
 
 
-def test_report_engine_version_uses_skills_runtime_sdk_dist_name_first(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_report_engine_version_prefers_agent_sdk_dunder_version(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    回归护栏：skills-runtime-sdk 的 distribution 名称是 `skills-runtime-sdk`。
+    回归护栏：证据链里 engine.version 应优先使用 agent_sdk.__version__。
+
+    原因：
+    - editable 安装或某些打包环境下 dist-info 版本可能漂移/滞后；
+    - agent_sdk.__version__ 与运行时代码更一致，取证更可靠。
+    """
+
+    import agent_sdk
+    import agently_skills_runtime.reporting.node_report as node_report_mod
+
+    def fake_version(_: str) -> str:
+        raise AssertionError("engine.version 不应依赖 importlib.metadata.version（优先使用 agent_sdk.__version__）")
+
+    monkeypatch.setattr(node_report_mod.importlib.metadata, "version", fake_version)
+
+    events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"})]
+    rep = NodeReportBuilder().build(events=events)
+
+    assert rep.engine.get("version") == agent_sdk.__version__
+
+
+def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    回归护栏：当无法读取 agent_sdk.__version__ 时，仍需按 dist 名称顺序回退。
 
     历史原因某些环境可能仍以 `skills-runtime-sdk-python` 作为 dist 名，
-    bridge 层应优先尝试前者并兼容回退。
+    bridge 层应优先尝试 `skills-runtime-sdk` 并兼容回退。
     """
 
     import agently_skills_runtime.reporting.node_report as node_report_mod
 
     calls: list[str] = []
+
+    def fake_get_agent_sdk_version() -> None:
+        return None
 
     def fake_version(dist_name: str) -> str:
         calls.append(dist_name)
@@ -228,10 +254,11 @@ def test_report_engine_version_uses_skills_runtime_sdk_dist_name_first(monkeypat
             return "0.3.0"
         raise Exception("not found")
 
+    monkeypatch.setattr(node_report_mod, "_get_agent_sdk_version", fake_get_agent_sdk_version)
     monkeypatch.setattr(node_report_mod.importlib.metadata, "version", fake_version)
 
     events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"})]
     rep = NodeReportBuilder().build(events=events)
 
     assert rep.engine.get("version") == "9.9.9"
-    assert "skills-runtime-sdk" in calls
+    assert calls and calls[0] == "skills-runtime-sdk"

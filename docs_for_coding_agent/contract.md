@@ -1,88 +1,62 @@
-# 编码任务契约：使用 agently-skills-runtime 的标准流程
+# 编码任务契约：使用 agently-skills-runtime 的标准流程（统一 Runtime）
 
-本文是编码智能体在本仓执行任务时的默认行为约束。
-目标：减少偏航、保证可复现、避免绕过运行时。
+本文是编码智能体在本仓执行任务时的默认行为约束，目标是：
 
-## 收到任务后的标准流程
+- 不偏航：所有改动服务于“生产级能力运行时基座”的主旨
+- 可回归：变更必须可测试、可复现
+- 可追溯：关键命令/结论写入 `docs/internal/worklog.md`
 
-1. 先读 `docs_for_coding_agent/cheatsheet.md`，建立 API 心智模型。
-2. 根据任务类型选择参考入口：
-   - 定义 Agent：`examples/11_agent_domain_starter/agents/`
-   - 编排 Workflow：`examples/02_workflow_sequential` 到 `examples/05_workflow_conditional`
-   - 真实接线：`examples/10_bridge_wiring/`
-   - 构建业务域：`docs_for_coding_agent/04-agent-domain-guide.md`
-3. 按最小改动实现。
-4. 补充或更新测试（至少离线回归）。
-5. 运行验证：`python -m pytest tests/ -v`。
+## 1) 最小闭环（你每次都应该走）
 
-## 能力声明检查清单
+1. 读输入文档（若本轮提供）：明确边界、验收与禁止项
+2. 写/更新 spec（至少 Goal/AC/Test Plan）
+3. 先补离线回归测试（RED）
+4. 实现最小改动（GREEN）
+5. 跑离线回归（至少 `python -m pytest tests/ -q`）
+6. 更新：`docs/internal/worklog.md`、`DOCS_INDEX.md`、（必要时）任务总结
 
-- [ ] `CapabilitySpec.id` 全局唯一。
-- [ ] `CapabilitySpec.kind` 与声明类型一致（skill/agent/workflow）。
-- [ ] `AgentSpec` 在 `LoopStep` 中使用时设置 `loop_compatible=True`。
-- [ ] `WorkflowSpec` 中每个 `CapabilityRef.id` 都已注册。
-- [ ] `InputMapping.source` 使用合法前缀。
-- [ ] `LoopStep.iterate_over` 指向列表来源。
-- [ ] 注册后执行 `runtime.validate()` 并断言结果为空。
+> 约束提示：所有“删除”必须先归档并保持可索引追溯；未经授权不得修改 `.gitignore`。
 
-## Workflow 编排检查清单
+## 2) Runtime 使用契约（单一入口）
 
-- [ ] 每个 Step ID 唯一。
-- [ ] 数据流可追踪（无悬空 `step.*` 引用）。
-- [ ] `LoopStep.max_iterations` 合理。
-- [ ] 嵌套深度不超过 `RuntimeConfig.max_depth`。
-- [ ] `output_mappings` 覆盖业务最终需要字段。
-- [ ] 错误路径可观测（失败时返回明确 error）。
+### 2.1 执行入口
 
-## 输入映射约束（必须精确）
+- 非流式：`await Runtime.run(capability_id, input=..., context=...)`
+- 流式：`async for x in Runtime.run_stream(...): ...`
 
-支持前缀：
-- `context.{key}`
-- `previous.{key}`
-- `step.{step_id}.{key}`
-- `step.{step_id}`
-- `literal.{value}`
-- `item` / `item.{key}`
+### 2.2 运行前必须校验
 
-注意：`resolve_mapping()` 找不到字段时返回 `None`，不会抛异常。
-因此拼写错误会表现为“静默空值”，必须通过测试覆盖发现。
+- `Runtime.register(...)` / `Runtime.register_many(...)`
+- `missing = Runtime.validate()`
+  - `missing` 非空：视为配置/注册问题，先补齐依赖再执行（不要“带病运行”）
 
-## 常见错误与修复
+## 3) 能力声明检查清单（Protocol）
 
-| 错误现象 | 可能原因 | 修复动作 |
+- [ ] `CapabilitySpec.id` 全局唯一
+- [ ] `CapabilitySpec.kind` 与声明一致（仅 `AGENT` / `WORKFLOW`）
+- [ ] `WorkflowSpec` 中每个 `CapabilityRef.id` 都已注册
+- [ ] `InputMapping.source` 使用合法前缀：`context.*` / `previous.*` / `step.*` / `item.*` / `literal.*`
+- [ ] 注册完成后执行 `Runtime.validate()` 并断言为空
+
+## 4) 编排（Workflow）检查清单
+
+- [ ] 每个 step 的 `id` 唯一
+- [ ] 数据流可追踪：避免悬空 `step.xxx` 引用
+- [ ] `LoopStep.iterate_over` 必须解析为 `list`（否则 LoopStep 失败）
+- [ ] 嵌套深度不超过 `RuntimeConfig.max_depth`（默认 10）
+
+## 5) 常见错误与最短排查路径
+
+| 现象 | 常见原因 | 最短修复 |
 |---|---|---|
-| `Capability not found: X` | X 未注册 | 检查 `register_all()` 是否包含 X |
-| `No adapter registered for kind` | 未注入对应 Adapter | 在 runtime 中 `set_adapter(kind, adapter)` |
-| `Recursion depth N exceeds max M` | 嵌套过深 | 降低嵌套层级或调大 `max_depth` |
-| `LoopStep ... expected list` | `iterate_over` 不是列表 | 校验上游输出字段名和类型 |
-| 输入字段是 `None` | `InputMapping.source` 写错 | 核对 source 前缀和 step_id |
-| 全局循环熔断 | 总循环次数超过上限 | 缩小输入规模或调低迭代路径 |
-| real 模式直接崩溃 | 缺 `.env` / 缺依赖门禁 | 加入提示并安全退出（exit 0） |
+| `Capability not found: X` | X 未注册 | 补注册 + `validate()` 断言为空 |
+| `... recursion depth ...` | 嵌套过深 | 减少嵌套或调小输入规模（必要时调大 `max_depth` 并补测试） |
+| 映射字段是 `None` | `InputMapping.source` 拼写错 | 打印解析结果 + 为该映射补回归测试 |
+| 想调用 TriggerFlow tool | 该路径已搁置归档 | 用 TriggerFlow 顶层编排多个 `Runtime.run()` |
 
-## 绝对禁止
+## 6) 绝对禁止
 
-- ❌ 在业务代码中绕过 Runtime 直接串联执行链。
-- ❌ 在 Workflow Adapter 之外手写递归调度。
-- ❌ 在 protocol 层引入上游 SDK 依赖。
-- ❌ 跳过 `validate()` 直接上线。
-- ❌ 无需求时改动 `src/agently_skills_runtime/` 核心实现。
-- ❌ 在代码或文档中写入真实密钥。
-- ❌ 用 `as any` / `@ts-ignore` / 静默吞错掩盖问题。
-
-## 推荐执行顺序（最小风险）
-
-1. 先写 `Spec`（Goal / AC / Test Plan）。
-2. 先跑或补离线测试（RED）。
-3. 实现最小改动（GREEN）。
-4. 执行全量回归并记录命令输出。
-5. 更新 `worklog`、`task summary`、`DOCS_INDEX.md`。
-
-## 验收出口
-
-满足以下条件才视为“任务完成”：
-- 目标能力可运行（至少 mock 模式）。
-- 离线回归通过。
-- 关键文档已登记并可追溯。
-- 未破坏现有 public API 行为。
-
-若以上任一项不满足，任务状态应保持为“未完成”。
+- ❌ 在 protocol 层引入上游依赖（破坏可审计边界）
+- ❌ 绕过 Runtime 手写递归调度/编排（会造成语义分叉）
+- ❌ 把业务域名词/规则写死进 runtime（本仓不定义业务）
+- ❌ 在代码或文档中提交真实密钥（使用 `.env.example` 描述配置项）

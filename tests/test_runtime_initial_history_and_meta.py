@@ -4,27 +4,11 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-import agently_skills_runtime.bridge as runtime_mod
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
-
-
-class _FakeRequester:
-    def generate_request_data(self):
-        return type(
-            "Req",
-            (),
-            {"data": {"messages": []}, "request_options": {}, "stream": True, "headers": {}, "client_options": {}, "request_url": "x"},
-        )()
-
-    async def request_model(self, request_data):
-        yield ("message", "[DONE]")
-
-
-def _patch_requester_factory(monkeypatch):
-    def fake_build(*, agently_agent):
-        return lambda: _FakeRequester()
-
-    monkeypatch.setattr(runtime_mod, "build_openai_compatible_requester_factory", fake_build)
+from agently_skills_runtime.config import RuntimeConfig
+from agently_skills_runtime.protocol.agent import AgentSpec
+from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec
+from agently_skills_runtime.protocol.context import ExecutionContext
+from agently_skills_runtime.runtime import Runtime
 
 
 class _FakeAgent:
@@ -43,44 +27,50 @@ class _FakeAgent:
 
 
 def _mk_runtime(monkeypatch):
-    _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
-        workspace_root=Path("."),
-        config_paths=[],
-        preflight_mode="off",
-    )
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: _FakeAgent(events=[]))
+    rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    return rt
 
 
 @pytest.mark.asyncio
 async def test_run_async_passes_initial_history_to_sdk_agent(monkeypatch):
-    rt = _mk_runtime(monkeypatch)
-
     fake_events = [
         AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
         AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id="r1", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
     ]
     fake_agent = _FakeAgent(events=fake_events)
-    monkeypatch.setattr(rt, "_get_or_create_agent", lambda: fake_agent)
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
+
+    rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
 
     hist = [{"role": "user", "content": "hello"}]
-    out = await rt.run_async("hi", initial_history=hist)
-    assert out.final_output == "ok"
+    ctx = ExecutionContext(run_id="r1", bag={"__host_meta__": {"initial_history": hist}})
+    out = await rt.run("A", context=ctx)
+    assert out.output == "ok"
     assert fake_agent.last_initial_history == hist
+    assert out.node_report is not None
     assert out.node_report.meta["initial_history_injected"] is True
 
 
 @pytest.mark.asyncio
 async def test_run_async_injects_session_and_turn_id_into_node_report_meta(monkeypatch):
-    rt = _mk_runtime(monkeypatch)
-
     fake_events = [
         AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
         AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id="r1", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
     ]
-    monkeypatch.setattr(rt, "_get_or_create_agent", lambda: _FakeAgent(events=fake_events))
+    fake_agent = _FakeAgent(events=fake_events)
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
 
-    out = await rt.run_async("hi", session_id="SID", turn_id="TID")
+    rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+
+    ctx = ExecutionContext(
+        run_id="r1",
+        bag={"__host_meta__": {"session_id": "SID", "host_turn_id": "TID"}},
+    )
+    out = await rt.run("A", context=ctx)
+    assert out.node_report is not None
     assert out.node_report.meta["session_id"] == "SID"
     assert out.node_report.meta["host_turn_id"] == "TID"
-

@@ -1,162 +1,293 @@
-"""Agent 适配器：AgentSpec → Bridge Runtime 执行。"""
+"""
+AgentAdapter：AgentSpec 的执行适配器（统一 mock/bridge/sdk_native）。
+
+说明：
+- 本仓不实现 skills 引擎；skills 的注入与执行由上游 `agent_sdk` 完成；
+- 本适配器负责把 AgentSpec + input 翻译成 SDK Agent 的 task 文本，并驱动事件流执行；
+- `Runtime.run_stream()` 的事件转发语义依赖本适配器的流式执行能力。
+"""
+
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
+
+from agent_sdk.core.contracts import AgentEvent
+from agent_sdk.core.errors import FrameworkIssue
 
 from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
+from ..reporting.node_report import NodeReportBuilder
 
 
 class AgentAdapter:
     """
-    Agent 适配器。
+    Agent 适配器（Runtime 内部组件）。
 
     参数：
-    - runner: 异步执行函数。签名：
-        async def runner(task: str, *, initial_history: Optional[List] = None) -> Any
-      通常传入 AgentlySkillsRuntime.run_async。
-      也可以传入任何兼容签名的 async callable（方便测试）。
+    - runtime：统一 Runtime 实例（提供 config 与 bridge 执行的内部工厂方法）
     """
 
-    def __init__(
-        self,
-        *,
-        runner: Optional[Callable[..., Awaitable[Any]]] = None,
-    ):
-        self._runner = runner
+    def __init__(self, *, runtime: Any) -> None:
+        self._runtime = runtime
 
-    async def execute(
+    async def execute_stream(
         self,
         *,
         spec: AgentSpec,
         input: Dict[str, Any],
         context: ExecutionContext,
-        runtime: Any,  # CapabilityRuntime（避免循环 import）
-    ) -> CapabilityResult:
+    ) -> AsyncIterator[Union[AgentEvent, CapabilityResult]]:
         """
-        执行 AgentSpec。
+        流式执行 AgentSpec：先 yield AgentEvent（若为真实执行），最后 yield CapabilityResult。
 
-        流程：
-        1. 构造 task 文本（prompt_template + input + output_schema）
-        2. 将 `system_prompt` 合入 task 文本（适配上游对 `initial_history` 的现实约束）
-        3. 委托 runner 执行
-        4. 包装返回值为 CapabilityResult
+        mock 模式：
+        - 不产出中间事件（只产出最终 CapabilityResult）
 
-        说明：
-        - 本仓库不再提供 Skill 原语与注入机制（方案 2）。
-        - skills 的发现/mention/sources/preflight/tools/approvals/WAL 由上游 `agent_sdk` 负责。
+        bridge/sdk_native 模式：
+        - 转发 SDK AgentEvent，并聚合 NodeReportV2 写入 CapabilityResult.node_report
         """
-        if self._runner is None:
+
+        mode = str(getattr(self._runtime.config, "mode", "mock"))
+        if mode == "mock":
+            yield await self._mock_execute(spec=spec, input=input, context=context)
+            return
+
+        async for item in self._bridge_execute_stream(spec=spec, input=input, context=context):
+            yield item
+
+    async def _mock_execute(self, *, spec: AgentSpec, input: Dict[str, Any], context: ExecutionContext) -> CapabilityResult:
+        """
+        mock 执行（离线回归）。
+
+        约束：
+        - handler 可返回 Any 或 CapabilityResult；
+        - handler 支持同步或 async；
+        - 异常将转为 FAILED（避免 silent success）。
+        """
+
+        handler = getattr(self._runtime.config, "mock_handler", None)
+        if handler is None:
             return CapabilityResult(
-                status=CapabilityStatus.FAILED,
-                error=(
-                    "AgentAdapter: no runner injected. "
-                    "Inject AgentlySkillsRuntime.run_async or a compatible async callable."
-                ),
+                status=CapabilityStatus.SUCCESS,
+                output={"mock": True, "id": spec.base.id, "input_keys": list(input.keys())},
             )
 
-        # 1) 构造 task 文本
-        task = self._build_task(spec=spec, input=input)
-
-        # 2) 委托 runner 执行
         try:
-            result = await self._runner(task, initial_history=None)
+            out = None
+            try:
+                out = handler(spec, input, context)
+            except TypeError:
+                out = handler(spec, input)
+
+            if hasattr(out, "__await__"):
+                out = await out
+
+            if isinstance(out, CapabilityResult):
+                return out
+            return CapabilityResult(status=CapabilityStatus.SUCCESS, output=out)
         except Exception as exc:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
-                error=f"Agent execution error: {exc}",
+            return CapabilityResult(status=CapabilityStatus.FAILED, error=f"mock_handler error: {exc}")
+
+    async def _bridge_execute_stream(
+        self, *, spec: AgentSpec, input: Dict[str, Any], context: ExecutionContext
+    ) -> AsyncIterator[Union[AgentEvent, CapabilityResult]]:
+        """
+        真实执行（bridge/sdk_native）：驱动 SDK Agent.run_stream_async 并聚合 NodeReport。
+        """
+
+        # preflight gate（生产默认 fail-closed）
+        issues: List[FrameworkIssue] = []
+        if getattr(self._runtime.config, "preflight_mode", "error") != "off":
+            issues = self._runtime._preflight()
+        if issues and getattr(self._runtime.config, "preflight_mode", "error") == "error":
+            report = self._runtime._build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="skill_config_error",
+                completion_reason="preflight_failed",
+                meta={
+                    "preflight_mode": "error",
+                    "skill_issue": {
+                        "code": "SKILL_PREFLIGHT_FAILED",
+                        "details": {"issues": [self._runtime._redact_issue(i) for i in issues]},
+                    },
+                },
             )
+            yield CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error="Skills preflight failed",
+                report=report,
+                node_report=report,
+                metadata={"skill_issues": [self._runtime._redact_issue(i) for i in issues]},
+            )
+            return
 
-        # 4) 包装返回值
-        return self._wrap_result(result)
+        task = self._build_task(spec=spec, input=input)
+        agent = self._runtime._create_sdk_agent()
 
-    def _build_task(
-        self,
-        *,
-        spec: AgentSpec,
-        input: Dict[str, Any],
-    ) -> str:
-        """从 AgentSpec + input 构造 task 文本。"""
+        events: List[AgentEvent] = []
+        host_meta = self._runtime._get_host_meta(context=context)
+        initial_history = host_meta.get("initial_history") if isinstance(host_meta.get("initial_history"), list) else None
+
+        try:
+            async for ev in agent.run_stream_async(task, run_id=context.run_id, initial_history=initial_history):
+                events.append(ev)
+                if getattr(self._runtime.config, "on_event", None) is not None:
+                    try:
+                        self._runtime._call_callback(
+                            self._runtime.config.on_event,
+                            ev,
+                            {"run_id": context.run_id, "capability_id": spec.base.id},
+                        )
+                    except Exception:
+                        pass
+                yield ev
+        except Exception as exc:
+            report = self._runtime._build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="engine_error",
+                completion_reason="engine_exception",
+                meta={"engine_exception": type(exc).__name__},
+            )
+            yield CapabilityResult(status=CapabilityStatus.FAILED, error=str(exc), report=report, node_report=report)
+            return
+
+        report = NodeReportBuilder().build(events=events)
+        if issues and getattr(self._runtime.config, "preflight_mode", "error") == "warn":
+            report.meta["preflight_mode"] = "warn"
+            report.meta["preflight_issues"] = [self._runtime._redact_issue(i) for i in issues]
+
+        if initial_history is not None:
+            report.meta["initial_history_injected"] = True
+        session_id = host_meta.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            report.meta["session_id"] = session_id
+        host_turn_id = host_meta.get("host_turn_id")
+        if isinstance(host_turn_id, str) and host_turn_id:
+            report.meta["host_turn_id"] = host_turn_id
+
+        final_output = ""
+        for ev in events:
+            if ev.type == "run_completed":
+                final_output = str(ev.payload.get("final_output") or "")
+            if ev.type in ("run_failed", "run_cancelled"):
+                final_output = str(ev.payload.get("message") or "")
+
+        self._runtime._apply_output_validation(
+            final_output=final_output,
+            report=report,
+            context={"run_id": context.run_id, "capability_id": spec.base.id, "bag": dict(context.bag)},
+        )
+
+        status = self._runtime._map_node_status(report)
+        yield CapabilityResult(
+            status=status,
+            output=final_output,
+            error=report.reason if status == CapabilityStatus.FAILED else None,
+            report=report,
+            node_report=report,
+            artifacts=list(report.artifacts),
+        )
+
+    def _build_task(self, *, spec: AgentSpec, input: Dict[str, Any]) -> str:
+        """
+        将 AgentSpec + input 转换为 SDK Agent 的 task 文本（结构化拼接）。
+
+        约束：
+        - 不做 prompt engineering；
+        - 仅做结构化拼接，保证可回归与可诊断。
+        """
+
         parts: List[str] = []
 
-        # system_prompt：Agent 级提示词片段（不走 initial_history，避免上游忽略 role=system）
         if spec.system_prompt and str(spec.system_prompt).strip():
-            parts.append("系统指令（仅对本 Agent 生效）：")
-            parts.append(str(spec.system_prompt).strip())
-            parts.append("")  # 保持与后续正文分隔
+            parts.append(f"## 系统指令\n{str(spec.system_prompt).strip()}")
 
-        # prompt_template 优先
-        if spec.prompt_template:
-            try:
-                task_text = spec.prompt_template.format(**input)
-                parts.append(task_text)
-            except KeyError:
-                parts.append(spec.prompt_template)
-                parts.append(
-                    f"\n输入参数:\n{json.dumps(input, ensure_ascii=False, indent=2)}"
-                )
-        else:
-            if "task" in input:
-                parts.append(str(input["task"]))
-            else:
-                parts.append(json.dumps(input, ensure_ascii=False, indent=2))
+        if spec.base.description:
+            parts.append(f"## 任务\n{spec.base.description}")
 
-        # 输出 schema 提示
+        if input:
+            lines: List[str] = []
+            for k, v in input.items():
+                if isinstance(v, str):
+                    lines.append(f"- {k}: {v}")
+                else:
+                    lines.append(f"- {k}: {json.dumps(v, ensure_ascii=False)}")
+            parts.append("## 输入\n" + "\n".join(lines))
+
         if spec.output_schema and spec.output_schema.fields:
-            parts.append("\n\n请按以下格式输出 JSON：")
-            schema_desc = json.dumps(
-                {k: f"({v})" for k, v in spec.output_schema.fields.items()},
-                ensure_ascii=False,
-                indent=2,
-            )
-            parts.append(schema_desc)
+            schema_lines = [f"- {name}: {typ}" for name, typ in spec.output_schema.fields.items()]
+            parts.append("## 输出要求\n请严格按以下字段输出 JSON：\n" + "\n".join(schema_lines))
 
-        return "\n".join(parts)
+        # skills mention（可选）
+        mentions = self._build_skill_mentions(spec=spec)
+        if mentions:
+            parts.append("## 使用以下 Skills\n" + "\n".join(mentions))
 
-    def _wrap_result(self, result: Any) -> CapabilityResult:
-        """把桥接层返回值包装为 CapabilityResult。"""
-        # 兼容 NodeResultV2（bridge.py 的返回值）
-        if hasattr(result, "node_report"):
-            nr = result.node_report
-            output = getattr(result, "final_output", None)
-            if output is None and hasattr(nr, "meta"):
-                output = nr.meta.get("final_output")
-            node_status = getattr(nr, "status", None)
-            node_reason = getattr(nr, "reason", None)
+        if spec.prompt_template:
+            parts.append(str(spec.prompt_template))
 
-            # NodeReport 是控制面强结构：success/failed/incomplete/needs_approval。
-            # CapabilityStatus 是运行时统一状态：pending/running/success/failed/cancelled。
-            #
-            # 约束：
-            # - 不能把 needs_approval/incomplete 折叠成 FAILED（否则编排层会误判并丢失语义）；
-            # - FAILED 仅用于“明确失败”；其它非 success 的状态通过 report 暴露更细粒度语义。
-            if node_status == "success":
-                status = CapabilityStatus.SUCCESS
-            elif node_status == "failed":
-                status = CapabilityStatus.FAILED
-            elif node_status == "needs_approval":
-                status = CapabilityStatus.PENDING
-            elif node_status == "incomplete":
-                # incomplete 可能来自 cancel/budget/no-progress 等。
-                status = CapabilityStatus.CANCELLED if node_reason == "cancelled" else CapabilityStatus.PENDING
+        return "\n\n".join(parts)
+
+    def _build_skill_mentions(self, *, spec: AgentSpec) -> List[str]:
+        """
+        将 spec.skills 转为 SDK 识别的 mention 文本。
+
+        优先级：
+        1) skills_mention_map 显式映射（最稳定）
+        2) 从 Runtime bridge 初始化的 skills_config 推断默认 space（尽力而为）
+        """
+
+        skills = list(getattr(spec, "skills", []) or [])
+        if not skills:
+            return []
+
+        mention_map: Dict[str, str] = dict(getattr(spec, "skills_mention_map", {}) or {})
+
+        inferred_prefix: Optional[str] = None
+        skills_cfg = getattr(getattr(self._runtime, "_sdk_state", None), "skills_config", None)
+        inferred_prefix = self._infer_space_prefix(skills_cfg)
+
+        out: List[str] = []
+        for name in skills:
+            if name in mention_map and str(mention_map[name]).strip():
+                out.append(str(mention_map[name]).strip())
+                continue
+            if inferred_prefix:
+                out.append(f"${inferred_prefix}.{name}")
+        return out
+
+    def _infer_space_prefix(self, skills_cfg: Any) -> Optional[str]:
+        """
+        从 skills_config 推断 `$[account:domain]` 前缀。
+
+        说明：
+        - 该逻辑是 best-effort：skills_config 的具体形态由上游决定（dict / pydantic model / dataclass）。
+        - 无法推断时返回 None（调用方将不输出 mention）。
+        """
+
+        spaces = None
+        if isinstance(skills_cfg, dict):
+            spaces = skills_cfg.get("spaces")
+        else:
+            spaces = getattr(skills_cfg, "spaces", None)
+
+        if not isinstance(spaces, list):
+            return None
+
+        def _get(obj: Any, key: str) -> Optional[str]:
+            if isinstance(obj, dict):
+                v = obj.get(key)
             else:
-                # 未知状态：保守降级为 FAILED，避免 silent success。
-                status = CapabilityStatus.FAILED
+                v = getattr(obj, key, None)
+            return str(v).strip() if isinstance(v, str) and str(v).strip() else None
 
-            error = node_reason if status == CapabilityStatus.FAILED else None
-            return CapabilityResult(
-                status=status,
-                output=output,
-                error=error,
-                report=nr,
-            )
-
-        # 兼容普通返回值
-        if isinstance(result, str):
-            return CapabilityResult(status=CapabilityStatus.SUCCESS, output=result)
-        if isinstance(result, dict):
-            return CapabilityResult(status=CapabilityStatus.SUCCESS, output=result)
-
-        return CapabilityResult(status=CapabilityStatus.SUCCESS, output=result)
+        for sp in spaces:
+            account = _get(sp, "account")
+            domain = _get(sp, "domain")
+            if account and domain:
+                return f"[{account}:{domain}]"
+        return None

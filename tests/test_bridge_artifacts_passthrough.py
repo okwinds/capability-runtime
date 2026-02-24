@@ -7,7 +7,11 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from agently_skills_runtime.config import RuntimeConfig
+from agently_skills_runtime.protocol.agent import AgentSpec
+from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec, CapabilityStatus
+from agently_skills_runtime.protocol.context import ExecutionContext
+from agently_skills_runtime.runtime import Runtime
 
 
 class _FakeAgent:
@@ -29,24 +33,15 @@ class _FakeAgent:
 @pytest.mark.asyncio
 async def test_run_async_passes_report_artifacts_to_node_result(monkeypatch, tmp_path: Path) -> None:
     """
-    回归护栏：NodeResult.artifacts 必须透传 NodeReport.artifacts（证据链对齐）。
+    回归护栏：CapabilityResult.artifacts 必须透传 NodeReport.artifacts（证据链对齐）。
     """
 
-    cfg = AgentlySkillsRuntimeConfig(
-        workspace_root=tmp_path,
-        config_paths=[],
-        backend_mode="sdk_openai_chat_completions",
-        preflight_mode="off",
-        upstream_verification_mode="off",
-    )
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=tmp_path, preflight_mode="off"))
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
 
-    import agently_skills_runtime.bridge as rt_mod
-
-    monkeypatch.setattr(rt_mod, "Agent", _FakeAgent)
-
-    rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg)
-    out = await rt.run_async("hello", run_id="r1")
-
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.node_report is not None
     assert out.node_report.artifacts == ["handoff-1.md"]
     assert out.artifacts == ["handoff-1.md"]
-

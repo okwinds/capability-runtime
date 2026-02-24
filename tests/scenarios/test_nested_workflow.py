@@ -1,9 +1,10 @@
 """场景测试：Workflow 嵌套 Workflow。"""
 from __future__ import annotations
 
+from typing import Any, Dict
+
 import pytest
 
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
 from agently_skills_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
@@ -13,15 +14,17 @@ from agently_skills_runtime.protocol.capability import (
 )
 from agently_skills_runtime.protocol.agent import AgentSpec
 from agently_skills_runtime.protocol.workflow import Step, WorkflowSpec
-from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
+from agently_skills_runtime.runtime import Runtime
+from agently_skills_runtime.config import RuntimeConfig
 
 
-class SimpleAdapter:
-    async def execute(self, *, spec, input, context, runtime):
-        return CapabilityResult(
-            status=CapabilityStatus.SUCCESS,
-            output={"from": spec.base.id, "depth": context.depth},
-        )
+def _handler(spec: AgentSpec, _input: Dict[str, Any], context) -> CapabilityResult:
+    """场景 mock handler：输出包含能力 ID 与深度信息，便于断言递归语义。"""
+
+    return CapabilityResult(
+        status=CapabilityStatus.SUCCESS,
+        output={"from": spec.base.id, "depth": context.depth},
+    )
 
 
 @pytest.mark.asyncio
@@ -39,9 +42,7 @@ async def test_workflow_calls_workflow():
         base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
     )
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    rt.set_adapter(CapabilityKind.AGENT, SimpleAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
+    rt = Runtime(RuntimeConfig(mode="mock", max_depth=10, mock_handler=_handler))
     rt.register_many([agent, inner, outer])
 
     result = await rt.run("WF-outer")
@@ -67,9 +68,7 @@ async def test_deep_nesting_hits_limit():
         )
     )
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=3))
-    rt.set_adapter(CapabilityKind.AGENT, SimpleAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
+    rt = Runtime(RuntimeConfig(mode="mock", max_depth=3, mock_handler=_handler))
     rt.register_many(specs)
 
     result = await rt.run("WF-0")

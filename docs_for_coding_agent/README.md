@@ -5,27 +5,25 @@
 - 最短路径（怎么跑通 / 怎么扩展）
 - 质量门禁（怎么写测试、怎么证明“完整完成”）
 
-> 约定：本文档包以 `archive/instructcontext/5-true-CODEX_CONTEXT_BRIEF.md` 为“全局上下文真相源”。  
-> 代码层面的“地面真相”以 `src/` 与 `tests/` 为准。
+> 约定：本文档包以 `src/` 与 `tests/` 为“地面真相源”；关键边界与验收以 `docs/context/refactoring-spec.md` 为准。
 
 ## 推荐阅读顺序
 
-1. `cheatsheet.md` — 10 分钟建立核心心智模型（本批次交付）
-2. `00-mental-model.md` — 深入理解面向能力范式（BATCH 2 交付）
-3. `01-capability-inventory.md` — 全 API 清单（BATCH 2 交付）
-4. `02-patterns.md` — 6 种典型组合模式详解（BATCH 3 交付）
-5. `03-bridge-wiring.md` — 接线真实 LLM（BATCH 3 交付）
-6. `04-agent-domain-guide.md` — 从 0 构建 Agent Domain（BATCH 4 交付）
-7. `contract.md` — 编码任务契约（BATCH 4 交付）
+1. `cheatsheet.md` — 最短闭环（统一 Runtime）
+2. `00-mental-model.md` — 心智模型：Protocol → Runtime → Report
+3. `contract.md` — 编码任务契约（Spec-Driven + TDD）
+
+补充说明：
+- 本目录只维护“最短闭环”三份文档，避免为建设期引入多套叙事与学习面。
+- 扩展文档（API 清单 / 组合模式 / 接线指南 / Agent Domain 指南）已归档到 `archive/` 中（追溯入口见 `archive/README.md`）。
 
 ## 配套示例
 
 `examples/` 目录包含可运行的渐进式示例：
-- 00：快速体验（离线）
-- 01-05：基础能力（声明 / 顺序 / 循环 / 并行 / 条件）
-- 06-08：进阶组合（06/07 已迁移为指引；08 为嵌套 Workflow）
-- 09-10：完整场景 + 真实 LLM 接线
-- 11：Agent Domain 脚手架
+- 01：最短闭环（mock + bridge）
+- 02：Workflow（顺序 + 循环 + 条件）
+- 03-04：端到端（真实 LLM + 证据链；TriggerFlow 顶层编排）
+- 其余目录为对照材料（不作为主线学习入口）
 
 入口：
 - `examples/README.md`

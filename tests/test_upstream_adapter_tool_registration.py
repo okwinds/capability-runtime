@@ -1,37 +1,74 @@
-"""回归：上游扩展点（Agent.register_tool）优先，旧版回退到 _extra_tools。"""
+"""回归：自定义工具注入（RuntimeConfig.custom_tools）走上游公开扩展点。"""
 from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agently_skills_runtime.adapters.upstream import register_agent_tool
+from agent_sdk.core.contracts import AgentEvent
+from agent_sdk.tools.protocol import ToolSpec
+
+from agently_skills_runtime.config import CustomTool, RuntimeConfig
+from agently_skills_runtime.protocol.agent import AgentSpec
+from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec, CapabilityStatus
+from agently_skills_runtime.protocol.context import ExecutionContext
+from agently_skills_runtime.runtime import Runtime
 
 
-def test_register_agent_tool_prefers_public_api_when_available() -> None:
-    called = {"args": None}
+class _FakeAgent:
+    last_instance = None
 
-    class A:
-        def register_tool(self, spec, handler, override: bool = False) -> None:
-            called["args"] = (spec, handler, override)
+    def __init__(self, **kwargs: Any) -> None:
+        _FakeAgent.last_instance = self
+        self.kwargs = kwargs
+        self.registered: list[tuple[str, bool]] = []
 
-    agent = A()
-    register_agent_tool(agent=agent, spec="S", handler="H", override=True)
-    assert called["args"] == ("S", "H", True)
+    def register_tool(self, spec, handler, *, override: bool = False) -> None:
+        _ = handler
+        self.registered.append((str(getattr(spec, "name", "")), bool(override)))
+
+    async def run_stream_async(
+        self,
+        task: str,
+        *,
+        run_id: Optional[str] = None,
+        initial_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> AsyncIterator[AgentEvent]:
+        _ = task
+        _ = initial_history
+        yield AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id=run_id or "r1", payload={})
+        yield AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id=run_id or "r1", payload={"final_output": "ok", "events_path": "wal.jsonl"})
 
 
-def test_register_agent_tool_falls_back_to_extra_tools_list() -> None:
-    class A:
-        def __init__(self) -> None:
-            self._extra_tools = []
+@pytest.mark.asyncio
+async def test_custom_tools_override_flag_is_propagated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
 
-    agent = A()
-    register_agent_tool(agent=agent, spec="S", handler="H", override=False)
-    assert agent._extra_tools == [("S", "H")]
+    spec = ToolSpec(
+        name="t",
+        description="d",
+        parameters={"type": "object", "properties": {}, "required": []},
+        requires_approval=False,
+    )
 
+    def handler(call, ctx):
+        _ = call
+        _ = ctx
+        return {"ok": True}
 
-def test_register_agent_tool_raises_when_no_extension_point() -> None:
-    class A:
-        pass
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="off",
+            custom_tools=[CustomTool(spec=spec, handler=handler, override=True)],
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.SUCCESS
 
-    with pytest.raises(AttributeError, match="register_tool"):
-        register_agent_tool(agent=A(), spec="S", handler="H", override=False)
-
+    agent = _FakeAgent.last_instance
+    assert agent is not None
+    assert ("t", True) in agent.registered

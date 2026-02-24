@@ -12,8 +12,11 @@ from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.tools.protocol import ToolCall
 from agent_sdk.tools.registry import ToolExecutionContext, ToolRegistry
 
-import agently_skills_runtime.bridge as runtime_mod
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from agently_skills_runtime.config import RuntimeConfig
+from agently_skills_runtime.protocol.agent import AgentSpec
+from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec
+from agently_skills_runtime.protocol.context import ExecutionContext
+from agently_skills_runtime.runtime import Runtime
 from agently_skills_runtime.reporting.node_report import NodeReportBuilder
 
 
@@ -37,35 +40,6 @@ from agently_skills_web_backend.rag import (  # noqa: E402
 )
 
 
-class _FakeRequester:
-    """最小 Fake requester：只返回 `[DONE]`，用于离线 `run_async`。"""
-
-    def generate_request_data(self):
-        """返回与 Agently requester 兼容的最小 request_data。"""
-
-        return type(
-            "Req",
-            (),
-            {"data": {"messages": []}, "request_options": {}, "stream": True, "headers": {}, "client_options": {}, "request_url": "x"},
-        )()
-
-    async def request_model(self, request_data):
-        """输出最小流式消息。"""
-
-        _ = request_data
-        yield ("message", "[DONE]")
-
-
-def _patch_requester_factory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把 bridge requester 工厂替换成离线 fake，避免触网。"""
-
-    def fake_build(*, agently_agent: Any):
-        _ = agently_agent
-        return lambda: _FakeRequester()
-
-    monkeypatch.setattr(runtime_mod, "build_openai_compatible_requester_factory", fake_build)
-
-
 class _FakeAgent:
     """离线 fake SDK Agent：回放固定事件，并记录 `initial_history`。"""
 
@@ -85,16 +59,13 @@ class _FakeAgent:
             yield ev
 
 
-def _mk_runtime(monkeypatch: pytest.MonkeyPatch) -> AgentlySkillsRuntime:
-    """构造用于离线场景回归的 runtime。"""
+def _mk_runtime(monkeypatch: pytest.MonkeyPatch) -> Runtime:
+    """构造用于离线场景回归的 Runtime（sdk_native）。"""
 
-    _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
-        workspace_root=Path("."),
-        config_paths=[],
-        preflight_mode="off",
-    )
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: _FakeAgent(events=[]))
+    rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    return rt
 
 
 def _collecting_ctx(*, events: List[AgentEvent]) -> ToolExecutionContext:
@@ -129,7 +100,7 @@ async def test_pre_run_injection_meta_uses_minimal_disclosure(monkeypatch: pytes
         AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id="r1", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
     ]
     fake_agent = _FakeAgent(events=fake_events)
-    monkeypatch.setattr(rt, "_get_or_create_agent", lambda: fake_agent)
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
 
     provider = InMemoryRagProvider.from_documents(
         [
@@ -141,7 +112,9 @@ async def test_pre_run_injection_meta_uses_minimal_disclosure(monkeypatch: pytes
     injected_messages = build_rag_injected_messages(query="审批 流程 证据链", rag_result=rag_result)
     rag_meta = build_rag_meta(mode="pre_run", query="审批 流程 证据链", top_k=2, rag_result=rag_result)
 
-    out = await rt.run_async("请总结审批流策略", initial_history=injected_messages)
+    ctx = ExecutionContext(run_id="r1", bag={"__host_meta__": {"initial_history": injected_messages}})
+    out = await rt.run("A", input={"task": "请总结审批流策略"}, context=ctx)
+    assert out.node_report is not None
     out.node_report.meta["rag"] = rag_meta
 
     assert fake_agent.last_initial_history == injected_messages

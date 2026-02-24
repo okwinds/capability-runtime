@@ -20,6 +20,7 @@ class ExecutionContext:
     - parent_context: 父上下文（用于追溯调用链）
     - depth: 当前嵌套深度（从 0 开始）
     - max_depth: 最大嵌套深度
+    - guards: per-run 执行守卫（如全局 loop 熔断计数器）
     - bag: 全局数据袋（浅拷贝传递）
     - step_outputs: 当前层级的步骤输出缓存（step_id → output）
     - call_chain: 调用链记录（能力 ID 列表）
@@ -29,6 +30,7 @@ class ExecutionContext:
     parent_context: Optional[ExecutionContext] = None
     depth: int = 0
     max_depth: int = 10
+    guards: Any = None
     bag: Dict[str, Any] = field(default_factory=dict)
     step_outputs: Dict[str, Any] = field(default_factory=dict)
     # step_id -> {status, output, error, report}（面向编排的执行证据；不落盘）
@@ -57,6 +59,7 @@ class ExecutionContext:
             parent_context=self,
             depth=new_depth,
             max_depth=self.max_depth,
+            guards=self.guards,
             bag=dict(self.bag),
             step_outputs={},
             step_results={},

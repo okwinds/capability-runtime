@@ -8,35 +8,32 @@
 pip install -e ".[dev]"
 ```
 
-立即可运行（已存在）：
+立即可运行（推荐，从统一 Runtime 开始）：
 
 ```bash
-python examples/00_quickstart_capability_runtime/run.py
+python examples/01_quickstart/run_mock.py
 ```
 
-基础示例（BATCH1 已补齐 `run.py`，可直接运行）：
+Workflow 示例（离线可跑）：
 
 ```bash
-python examples/01_declare_and_run/run.py
+python examples/02_workflow/run.py
 ```
 
 ## 示例索引
 
 | # | 目录 | 演示内容 | 需要 LLM |
 |---|------|---------|---------|
-| 00 | 00_quickstart_capability_runtime | 30 秒离线体验 CapabilityRuntime（已可运行） | ❌ |
-| 01 | 01_declare_and_run | 最小 AgentSpec 声明 + mock 执行 | ❌ |
-| 02 | 02_workflow_sequential | 3 个 Agent 顺序执行 + InputMapping | ❌ |
-| 03 | 03_workflow_loop | LoopStep：对列表中每个元素调用 Agent | ❌ |
-| 04 | 04_workflow_parallel | ParallelStep：多个 Agent 并行执行 | ❌ |
-| 05 | 05_workflow_conditional | ConditionalStep：条件分支 | ❌ |
-| 08 | 08_nested_workflow | Workflow 嵌套 Workflow（BATCH 2） | ❌ |
-| 09 | 09_full_scenario_mock | 完整场景模拟（BATCH 3） | ❌ |
-| 10 | 10_bridge_wiring | 真实 LLM 接线（BATCH 3） | ✅ |
-| 11 | 11_agent_domain_starter | Agent Domain 脚手架（BATCH 4；不含 SkillSpec） | ✅ |
-| 12 | 12_host_lifecycle_toolkit_mvr | Host 生命周期工具箱（MVR）：TurnDelta/HistoryAssembler/system 注入摘要/approvals profiles/resume helper | ❌ |
+| 01 | 01_quickstart | 最短闭环：mock + bridge（统一 Runtime） | 部分 ✅ |
+| 02 | 02_workflow | 顺序 + 循环 + 条件分支（统一 Runtime） | ❌ |
+| 03 | 03_bridge_e2e | 真实 LLM：tool_call + 自动审批 + NodeReport 证据链 | ✅ |
+| 04 | 04_triggerflow_orchestration | TriggerFlow 顶层编排多个 Runtime.run()（推荐路径） | ✅ |
 
-> 注（方案2）：`06_skill_injection` / `07_skill_dispatch` 已不再提供可运行实现，仅保留迁移说明与指引。
+## 对照示例（已归档，非主线）
+
+对照材料已统一归档，不建议作为新项目起点。追溯入口见：
+
+- `archive/README.md`
 
 ## 参考应用（非示例）
 

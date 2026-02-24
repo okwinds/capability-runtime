@@ -1,9 +1,11 @@
-"""agently-skills-runtime: 桥接胶水层 + 能力组织层。"""
+"""agently-skills-runtime：统一 Runtime 入口（能力协议 + 执行 + 报告）。"""
 from __future__ import annotations
 
-# === 桥接层导出（保持向后兼容）===
-from .bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
-from .config import BridgeConfigModel
+# === 统一入口 ===
+from .config import RuntimeConfig
+from .runtime import Runtime
+
+# === 报告类型 ===
 from .types import NodeReportV2, NodeResultV2
 
 # === Protocol 导出 ===
@@ -15,7 +17,7 @@ from .protocol.capability import (
     CapabilitySpec,
     CapabilityStatus,
 )
-from .protocol.context import ExecutionContext, RecursionLimitError
+from .protocol.context import ExecutionContext
 from .protocol.workflow import (
     ConditionalStep,
     InputMapping,
@@ -23,29 +25,18 @@ from .protocol.workflow import (
     ParallelStep,
     Step,
     WorkflowSpec,
-    WorkflowStep,
 )
-
-# === Runtime 导出 ===
-from .runtime.engine import AdapterProtocol, CapabilityRuntime, RuntimeConfig
-from .runtime.guards import ExecutionGuards, LoopBreakerError
-from .runtime.loop import LoopController
-from .runtime.registry import CapabilityRegistry
-
-# === Adapter 导出 ===
-from .adapters.agent_adapter import AgentAdapter
-from .adapters.workflow_adapter import WorkflowAdapter
 
 # === 错误导出 ===
 from .errors import AdapterNotFoundError, AgentlySkillsRuntimeError, CapabilityNotFoundError
 
 __all__ = [
-    # Bridge
-    "AgentlySkillsRuntime",
-    "AgentlySkillsRuntimeConfig",
+    # Runtime
+    "Runtime",
+    "RuntimeConfig",
+    # Reports
     "NodeReportV2",
     "NodeResultV2",
-    "BridgeConfigModel",
     # Protocol
     "CapabilityKind",
     "CapabilityRef",
@@ -60,20 +51,7 @@ __all__ = [
     "ParallelStep",
     "ConditionalStep",
     "InputMapping",
-    "WorkflowStep",
     "ExecutionContext",
-    "RecursionLimitError",
-    # Runtime
-    "CapabilityRuntime",
-    "RuntimeConfig",
-    "AdapterProtocol",
-    "CapabilityRegistry",
-    "ExecutionGuards",
-    "LoopBreakerError",
-    "LoopController",
-    # Adapters
-    "AgentAdapter",
-    "WorkflowAdapter",
     # Errors
     "AgentlySkillsRuntimeError",
     "AdapterNotFoundError",

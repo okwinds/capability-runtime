@@ -1,65 +1,29 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.tools.protocol import ToolSpec
 
-import agently_skills_runtime.bridge as bridge_mod
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
-
-
-class _FakeRequester:
-    def generate_request_data(self):
-        return type(
-            "Req",
-            (),
-            {
-                "data": {"messages": []},
-                "request_options": {},
-                "stream": True,
-                "headers": {},
-                "client_options": {},
-                "request_url": "x",
-            },
-        )()
-
-    async def request_model(self, request_data):
-        yield ("message", "[DONE]")
-
-
-def _patch_requester_factory(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_build(*, agently_agent):
-        _ = agently_agent
-        return lambda: _FakeRequester()
-
-    monkeypatch.setattr(bridge_mod, "build_openai_compatible_requester_factory", fake_build)
-
-
 class _FakeAgent:
     last_instance = None
 
     def __init__(
         self,
-        *,
-        workspace_root,
-        config_paths,
-        env_vars,
-        backend,
-        human_io,
-        approval_provider,
-        cancel_checker,
+        **kwargs: Any,
     ):
         _FakeAgent.last_instance = self
+        self.kwargs = kwargs
         self.registered: list[tuple[str, bool]] = []
 
     def register_tool(self, spec, handler, *, override: bool = False) -> None:
         _ = handler
         self.registered.append((str(getattr(spec, "name", "")), bool(override)))
 
-    async def run_stream_async(self, task, *, run_id=None, initial_history=None):
+    async def run_stream_async(self, task, *, run_id=None, initial_history=None) -> AsyncIterator[AgentEvent]:
         _ = task
         _ = run_id
         _ = initial_history
@@ -73,19 +37,12 @@ class _FakeAgent:
 
 
 @pytest.mark.asyncio
-async def test_register_tool_is_lazy_and_injected_on_first_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_requester_factory(monkeypatch)
-    monkeypatch.setattr(bridge_mod, "Agent", _FakeAgent)
+async def test_custom_tools_are_injected_into_sdk_agent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    回归护栏：RuntimeConfig.custom_tools 必须在每次创建 SDK Agent 时注入（公共扩展点）。
+    """
 
-    cfg = AgentlySkillsRuntimeConfig(
-        workspace_root=Path("."),
-        config_paths=[],
-        preflight_mode="off",
-        upstream_verification_mode="off",
-    )
-    rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg)
-
-    assert rt._agent is None
+    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
 
     spec = ToolSpec(
         name="run_workflow",
@@ -99,13 +56,25 @@ async def test_register_tool_is_lazy_and_injected_on_first_run(monkeypatch: pyte
         _ = ctx
         raise RuntimeError("should not be executed in this test")
 
-    rt.register_tool(spec=spec, handler=handler, override=False)
-    assert rt._agent is None  # 仍应保持懒加载
+    from agently_skills_runtime.config import CustomTool, RuntimeConfig
+    from agently_skills_runtime.protocol.agent import AgentSpec
+    from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec
+    from agently_skills_runtime.protocol.context import ExecutionContext
+    from agently_skills_runtime.runtime import Runtime
 
-    out = await rt.run_async("hi")
-    assert out.final_output == "ok"
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="off",
+            custom_tools=[CustomTool(spec=spec, handler=handler, override=False)],
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.output == "ok"
 
     agent = _FakeAgent.last_instance
     assert agent is not None
     assert ("run_workflow", False) in agent.registered
-

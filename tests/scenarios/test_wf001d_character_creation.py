@@ -1,9 +1,10 @@
 """场景测试：模拟 WF-001D 人物塑造子流程。"""
 from __future__ import annotations
 
+from typing import Any, Dict
+
 import pytest
 
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
 from agently_skills_runtime.protocol.agent import AgentSpec
 from agently_skills_runtime.protocol.capability import (
     CapabilityKind,
@@ -18,62 +19,62 @@ from agently_skills_runtime.protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
+from agently_skills_runtime.runtime import Runtime
+from agently_skills_runtime.config import RuntimeConfig
 
 
-class MockAgentAdapter:
-    """按 Agent ID 返回不同结果的 mock。"""
+def _handler(spec: AgentSpec, input_dict: Dict[str, Any]) -> CapabilityResult:
+    """按 Agent ID 返回不同结果的 mock（用于场景回归）。"""
 
-    async def execute(self, *, spec, input, context, runtime):
-        agent_id = spec.base.id
+    agent_id = spec.base.id
 
-        if agent_id == "MA-013A":
-            return CapabilityResult(
-                status=CapabilityStatus.SUCCESS,
-                output={
-                    "角色列表": [
-                        {"定位": "女主-天真少女", "重要性": "核心"},
-                        {"定位": "男主-冷面总裁", "重要性": "核心"},
-                        {"定位": "反派-心机女", "重要性": "重要"},
-                    ],
-                },
-            )
-
-        if agent_id == "MA-013":
-            role = input.get("角色定位", "未知")
-            return CapabilityResult(
-                status=CapabilityStatus.SUCCESS,
-                output={
-                    "角色小传": f"{role}的完整人物设定...",
-                    "外貌": "...",
-                    "性格": "...",
-                },
-            )
-
-        if agent_id == "MA-014":
-            chars = input.get("角色小传列表", [])
-            return CapabilityResult(
-                status=CapabilityStatus.SUCCESS,
-                output={
-                    "关系图谱": f"共{len(chars)}个角色的关系...",
-                    "核心冲突": "三角关系",
-                },
-            )
-
-        if agent_id == "MA-015":
-            char = input.get("角色小传", {})
-            return CapabilityResult(
-                status=CapabilityStatus.SUCCESS,
-                output={
-                    "视觉关键词": ["长发", "白裙", "月光下"],
-                    "风格": "日系",
-                },
-            )
-
+    if agent_id == "MA-013A":
         return CapabilityResult(
-            status=CapabilityStatus.FAILED,
-            error=f"Unknown agent: {agent_id}",
+            status=CapabilityStatus.SUCCESS,
+            output={
+                "角色列表": [
+                    {"定位": "女主-天真少女", "重要性": "核心"},
+                    {"定位": "男主-冷面总裁", "重要性": "核心"},
+                    {"定位": "反派-心机女", "重要性": "重要"},
+                ],
+            },
         )
+
+    if agent_id == "MA-013":
+        role = input_dict.get("角色定位", "未知")
+        return CapabilityResult(
+            status=CapabilityStatus.SUCCESS,
+            output={
+                "角色小传": f"{role}的完整人物设定...",
+                "外貌": "...",
+                "性格": "...",
+            },
+        )
+
+    if agent_id == "MA-014":
+        chars = input_dict.get("角色小传列表", [])
+        return CapabilityResult(
+            status=CapabilityStatus.SUCCESS,
+            output={
+                "关系图谱": f"共{len(chars)}个角色的关系...",
+                "核心冲突": "三角关系",
+            },
+        )
+
+    if agent_id == "MA-015":
+        _ = input_dict.get("角色小传", {})
+        return CapabilityResult(
+            status=CapabilityStatus.SUCCESS,
+            output={
+                "视觉关键词": ["长发", "白裙", "月光下"],
+                "风格": "日系",
+            },
+        )
+
+    return CapabilityResult(
+        status=CapabilityStatus.FAILED,
+        error=f"Unknown agent: {agent_id}",
+    )
 
 
 @pytest.mark.asyncio
@@ -145,9 +146,7 @@ async def test_wf001d_full_flow():
         ],
     )
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    rt.set_adapter(CapabilityKind.AGENT, MockAgentAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
+    rt = Runtime(RuntimeConfig(mode="mock", max_depth=10, mock_handler=_handler))
     for a in agents:
         rt.register(a)
     rt.register(wf)
@@ -157,7 +156,7 @@ async def test_wf001d_full_flow():
 
     result = await rt.run(
         "WF-001D",
-        context_bag={"故事梗概": "霸道总裁爱上灰姑娘的故事"},
+        input={"故事梗概": "霸道总裁爱上灰姑娘的故事"},
     )
 
     assert result.status == CapabilityStatus.SUCCESS
@@ -172,4 +171,3 @@ async def test_wf001d_full_flow():
 
     assert "视觉关键词列表" in output
     assert len(output["视觉关键词列表"]) == 3
-

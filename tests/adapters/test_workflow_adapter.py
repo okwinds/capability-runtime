@@ -1,10 +1,11 @@
 """WorkflowAdapter 单元测试。"""
 from __future__ import annotations
 
-import pytest
 import asyncio
+from typing import Any, Dict
 
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
+import pytest
+
 from agently_skills_runtime.protocol.agent import AgentSpec
 from agently_skills_runtime.protocol.capability import (
     CapabilityKind,
@@ -21,18 +22,9 @@ from agently_skills_runtime.protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
 from agently_skills_runtime.types import NodeReportV2
-
-
-class EchoAdapter:
-    """Mock adapter：输出 = 输入 + spec_id。"""
-
-    async def execute(self, *, spec, input, context, runtime):
-        return CapabilityResult(
-            status=CapabilityStatus.SUCCESS,
-            output={**input, "__agent__": spec.base.id},
-        )
+from agently_skills_runtime.runtime import Runtime
+from agently_skills_runtime.config import RuntimeConfig
 
 
 def _make_agent(id: str) -> AgentSpec:
@@ -41,13 +33,19 @@ def _make_agent(id: str) -> AgentSpec:
     )
 
 
-def _build_runtime(agents, adapter=None):
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    a = adapter or EchoAdapter()
-    rt.set_adapter(CapabilityKind.AGENT, a)
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    for agent in agents:
-        rt.register(agent)
+def _build_runtime(*, agents: list[AgentSpec], handler) -> Runtime:
+    """
+    构造 mock Runtime，并注册 AgentSpec 列表。
+
+    说明：
+    - WorkflowAdapter 由 Runtime 内部负责调用（不需要在测试中显式注入）。
+    - handler 可返回：
+      - Any（将被包装为 CapabilityResult.SUCCESS.output）
+      - CapabilityResult（将被 Runtime 直接透传）
+    """
+
+    rt = Runtime(RuntimeConfig(mode="mock", max_depth=10, mock_handler=handler))
+    rt.register_many(list(agents))
     return rt
 
 
@@ -66,7 +64,10 @@ async def test_sequential_steps():
             ),
         ],
     )
-    rt = _build_runtime([_make_agent("A"), _make_agent("B")])
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        return {**input_dict, "__agent__": spec.base.id}
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-1", input={"data": "hello"})
@@ -93,29 +94,71 @@ async def test_loop_step():
         ],
     )
 
-    class PlannerAdapter:
-        async def execute(self, *, spec, input, context, runtime):
-            if spec.base.id == "PLANNER":
-                return CapabilityResult(
-                    status=CapabilityStatus.SUCCESS,
-                    output={"items": [{"name": "A"}, {"name": "B"}, {"name": "C"}]},
-                )
-            return CapabilityResult(
-                status=CapabilityStatus.SUCCESS,
-                output={"processed": input.get("name", "?")},
-            )
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        if spec.base.id == "PLANNER":
+            return {"items": [{"name": "A"}, {"name": "B"}, {"name": "C"}]}
+        return {"processed": input_dict.get("name", "?")}
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    rt.set_adapter(CapabilityKind.AGENT, PlannerAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    rt.register(_make_agent("PLANNER"))
-    rt.register(_make_agent("WORKER"))
+    rt = _build_runtime(agents=[_make_agent("PLANNER"), _make_agent("WORKER")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-L")
     assert result.status == CapabilityStatus.SUCCESS
     loop_output = result.output["loop"]
     assert len(loop_output) == 3
+
+
+@pytest.mark.asyncio
+async def test_loop_step_collect_as_injects_results_into_context_bag() -> None:
+    """
+    回归护栏：LoopStep.collect_as 不能是 no-op。
+
+    期望：
+    - loop 的结果仍写入 `step_outputs[loop_step_id]`（对外输出保持一致）；
+    - 同时把同一结果写入 `context.bag[collect_as]`，允许后续步骤用 `context.<collect_as>` 引用。
+    """
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-L-CA", kind=CapabilityKind.WORKFLOW, name="loop-collect-as"),
+        steps=[
+            Step(id="plan", capability=CapabilityRef(id="PLANNER")),
+            LoopStep(
+                id="loop",
+                capability=CapabilityRef(id="WORKER"),
+                iterate_over="step.plan.items",
+                item_input_mappings=[InputMapping(source="item.name", target_field="name")],
+                collect_as="results",
+            ),
+            Step(
+                id="summarize",
+                capability=CapabilityRef(id="SUMMARIZER"),
+                input_mappings=[InputMapping(source="context.results", target_field="results")],
+            ),
+        ],
+        output_mappings=[InputMapping(source="step.summarize.summary", target_field="summary")],
+    )
+
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        if spec.base.id == "PLANNER":
+            return {"items": [{"name": "A"}, {"name": "B"}]}
+        if spec.base.id == "WORKER":
+            return {"processed": input_dict.get("name")}
+        if spec.base.id == "SUMMARIZER":
+            results = input_dict.get("results")
+            if results is None:
+                return CapabilityResult(status=CapabilityStatus.FAILED, error="missing results")
+            return {"summary": f"n={len(results)}"}
+        return {"ok": True}
+
+    rt = _build_runtime(
+        agents=[_make_agent("PLANNER"), _make_agent("WORKER"), _make_agent("SUMMARIZER")],
+        handler=handler,
+    )
+    rt.register(wf)
+
+    result = await rt.run("WF-L-CA")
+    assert result.status == CapabilityStatus.SUCCESS
+    assert result.output == {"summary": "n=2"}
 
 
 @pytest.mark.asyncio
@@ -134,7 +177,10 @@ async def test_parallel_step():
         ],
     )
 
-    rt = _build_runtime([_make_agent("A"), _make_agent("B")])
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        return {**input_dict, "__agent__": spec.base.id}
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-P", input={"data": "test"})
@@ -152,18 +198,24 @@ async def test_parallel_step_context_bag_is_isolated_between_branches():
     否则一个分支对 bag 的写入会泄露到另一个分支并导致非确定性行为。
     """
 
-    class BagMutatingAdapter:
-        async def execute(self, *, spec, input, context, runtime):
-            if spec.base.id == "A":
-                context.bag["leak"] = "A"
-                return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True})
-            if spec.base.id == "B":
-                # 让 A 先写入（若共享 context，B 将看到 leak）
-                await asyncio.sleep(0)
-                if "leak" in context.bag:
-                    return CapabilityResult(status=CapabilityStatus.FAILED, error="context leak detected")
-                return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True})
-            return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True})
+    async def handler(spec: AgentSpec, _input: Dict[str, Any], context):
+        """
+        用 parent_context.bag 做“可见层级”的写入，增强用例强度：
+        - 若并行分支错误共享同一个 branch_context，B 将观察到 A 的写入；
+        - 若隔离正确，B 不应看到 leak。
+        """
+
+        if spec.base.id == "A":
+            assert context.parent_context is not None
+            context.parent_context.bag["leak"] = "A"
+            return {"ok": True}
+        if spec.base.id == "B":
+            await asyncio.sleep(0)
+            assert context.parent_context is not None
+            if "leak" in context.parent_context.bag:
+                return CapabilityResult(status=CapabilityStatus.FAILED, error="context leak detected")
+            return {"ok": True}
+        return {"ok": True}
 
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-P-ISO", kind=CapabilityKind.WORKFLOW, name="parallel-iso"),
@@ -179,11 +231,7 @@ async def test_parallel_step_context_bag_is_isolated_between_branches():
         ],
     )
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    rt.set_adapter(CapabilityKind.AGENT, BagMutatingAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    rt.register(_make_agent("A"))
-    rt.register(_make_agent("B"))
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-P-ISO")
@@ -207,23 +255,15 @@ async def test_conditional_step():
         ],
     )
 
-    class ClassifyAdapter:
-        async def execute(self, *, spec, input, context, runtime):
-            if spec.base.id == "CLASSIFIER":
-                return CapabilityResult(
-                    status=CapabilityStatus.SUCCESS,
-                    output={"category": "romance"},
-                )
-            return CapabilityResult(
-                status=CapabilityStatus.SUCCESS,
-                output={"genre": spec.base.id},
-            )
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "CLASSIFIER":
+            return {"category": "romance"}
+        return {"genre": spec.base.id}
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    rt.set_adapter(CapabilityKind.AGENT, ClassifyAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    for id in ["CLASSIFIER", "ROMANCE", "ACTION"]:
-        rt.register(_make_agent(id))
+    rt = _build_runtime(
+        agents=[_make_agent("CLASSIFIER"), _make_agent("ROMANCE"), _make_agent("ACTION")],
+        handler=handler,
+    )
     rt.register(wf)
 
     result = await rt.run("WF-C")
@@ -238,34 +278,27 @@ async def test_conditional_step_can_route_by_step_report_status():
     而不是解析自由文本输出。
     """
 
-    class ReportClassifierAdapter:
-        async def execute(self, *, spec, input, context, runtime):
-            _ = input
-            _ = context
-            _ = runtime
-            if spec.base.id == "CLASSIFIER":
-                report = NodeReportV2(
-                    status="needs_approval",
-                    reason="approval_pending",
-                    completion_reason="run_cancelled",
-                    engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                    bridge={"name": "agently-skills-runtime"},
-                    run_id="r1",
-                    events_path="wal.jsonl",
-                    activated_skills=[],
-                    tool_calls=[],
-                    artifacts=[],
-                    meta={},
-                )
-                return CapabilityResult(
-                    status=CapabilityStatus.SUCCESS,
-                    output={"category": "romance"},
-                    report=report,
-                )
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "CLASSIFIER":
+            report = NodeReportV2(
+                status="needs_approval",
+                reason="approval_pending",
+                completion_reason="run_cancelled",
+                engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
+                bridge={"name": "agently-skills-runtime"},
+                run_id="r1",
+                events_path="wal.jsonl",
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={},
+            )
             return CapabilityResult(
                 status=CapabilityStatus.SUCCESS,
-                output={"genre": spec.base.id},
+                output={"category": "romance"},
+                report=report,
             )
+        return {"genre": spec.base.id}
 
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-C-REPORT", kind=CapabilityKind.WORKFLOW, name="cond-report"),
@@ -285,11 +318,10 @@ async def test_conditional_step_can_route_by_step_report_status():
         ],
     )
 
-    rt = CapabilityRuntime(config=RuntimeConfig(max_depth=10))
-    rt.set_adapter(CapabilityKind.AGENT, ReportClassifierAdapter())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    for id in ["CLASSIFIER", "ROMANCE", "ACTION"]:
-        rt.register(_make_agent(id))
+    rt = _build_runtime(
+        agents=[_make_agent("CLASSIFIER"), _make_agent("ROMANCE"), _make_agent("ACTION")],
+        handler=handler,
+    )
     rt.register(wf)
 
     result = await rt.run("WF-C-REPORT")
@@ -309,7 +341,10 @@ async def test_output_mappings():
         ],
     )
 
-    rt = _build_runtime([_make_agent("A")])
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        return {**input_dict, "__agent__": spec.base.id}
+
+    rt = _build_runtime(agents=[_make_agent("A")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-O", input={"x": 1})
@@ -318,11 +353,10 @@ async def test_output_mappings():
 
 @pytest.mark.asyncio
 async def test_step_failure_aborts_workflow():
-    class FailOnB:
-        async def execute(self, *, spec, input, context, runtime):
-            if spec.base.id == "B":
-                return CapabilityResult(status=CapabilityStatus.FAILED, error="B failed")
-            return CapabilityResult(status=CapabilityStatus.SUCCESS, output="ok")
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "B":
+            return CapabilityResult(status=CapabilityStatus.FAILED, error="B failed")
+        return "ok"
 
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-F", kind=CapabilityKind.WORKFLOW, name="fail"),
@@ -333,11 +367,7 @@ async def test_step_failure_aborts_workflow():
         ],
     )
 
-    rt = CapabilityRuntime()
-    rt.set_adapter(CapabilityKind.AGENT, FailOnB())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    for id in ["A", "B", "C"]:
-        rt.register(_make_agent(id))
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B"), _make_agent("C")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-F")
@@ -354,31 +384,30 @@ async def test_step_pending_aborts_workflow() -> None:
 
     called = {"C": 0}
 
-    class PendingOnB:
-        async def execute(self, *, spec, input, context, runtime):
-            if spec.base.id == "B":
-                return CapabilityResult(
-                    status=CapabilityStatus.PENDING,
-                    output=None,
-                    error=None,
-                    report=NodeReportV2(
-                        status="needs_approval",
-                        reason="approval_pending",
-                        completion_reason="run_cancelled",
-                        engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                        bridge={"name": "agently-skills-runtime"},
-                        run_id="r1",
-                        events_path="wal.jsonl",
-                        activated_skills=[],
-                        tool_calls=[],
-                        artifacts=[],
-                        meta={},
-                    ),
-                )
-            if spec.base.id == "C":
-                called["C"] += 1
-                return CapabilityResult(status=CapabilityStatus.SUCCESS, output="ok")
-            return CapabilityResult(status=CapabilityStatus.SUCCESS, output="ok")
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "B":
+            return CapabilityResult(
+                status=CapabilityStatus.PENDING,
+                output=None,
+                error=None,
+                report=NodeReportV2(
+                    status="needs_approval",
+                    reason="approval_pending",
+                    completion_reason="run_cancelled",
+                    engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
+                    bridge={"name": "agently-skills-runtime"},
+                    run_id="r1",
+                    events_path="wal.jsonl",
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                ),
+            )
+        if spec.base.id == "C":
+            called["C"] += 1
+            return "ok"
+        return "ok"
 
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-PEND", kind=CapabilityKind.WORKFLOW, name="pend"),
@@ -389,11 +418,7 @@ async def test_step_pending_aborts_workflow() -> None:
         ],
     )
 
-    rt = CapabilityRuntime()
-    rt.set_adapter(CapabilityKind.AGENT, PendingOnB())
-    rt.set_adapter(CapabilityKind.WORKFLOW, WorkflowAdapter())
-    for id in ["A", "B", "C"]:
-        rt.register(_make_agent(id))
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B"), _make_agent("C")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-PEND")
@@ -414,7 +439,10 @@ async def test_iterate_over_not_list():
             ),
         ],
     )
-    rt = _build_runtime([_make_agent("A")])
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        return {**input_dict, "__agent__": spec.base.id}
+
+    rt = _build_runtime(agents=[_make_agent("A")], handler=handler)
     rt.register(wf)
 
     result = await rt.run("WF-X", input={"items": "not-a-list"})

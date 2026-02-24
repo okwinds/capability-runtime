@@ -16,6 +16,20 @@ from agent_sdk.core.contracts import AgentEvent
 from ..types import NodeReportV2, NodeToolCallReport
 
 
+def _get_agent_sdk_version() -> Optional[str]:
+    """读取 agent_sdk.__version__（若可用）。"""
+
+    try:
+        import agent_sdk  # type: ignore
+
+        v = getattr(agent_sdk, "__version__", None)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    except Exception:
+        return None
+    return None
+
+
 def _get_dist_version(dist_name: str) -> Optional[str]:
     """读取已安装 distribution 的版本号；不存在则返回 None。"""
 
@@ -244,6 +258,7 @@ class NodeReportBuilder:
                     "not_found",
                     "config_error",
                     "skill_config_error",
+                    "missing_env_var",
                     "SKILL_PREFLIGHT_FAILED",
                 ):
                     reason = "skill_config_error"
@@ -278,7 +293,8 @@ class NodeReportBuilder:
             engine={
                 "name": "skills-runtime-sdk-python",
                 "module": "agent_sdk",
-                "version": _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
+                "version": _get_agent_sdk_version()
+                or _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
             },
             bridge={"name": "agently-skills-runtime", "version": _get_first_dist_version(["agently-skills-runtime"])},
             run_id=run_id,

@@ -74,7 +74,7 @@ class ParallelStep:
     """
 
     id: str
-    branches: List[Union[Step, LoopStep]] = field(default_factory=list)
+    branches: List["WorkflowStep"] = field(default_factory=list)
     join_strategy: str = "all_success"
 
 
@@ -92,8 +92,8 @@ class ConditionalStep:
 
     id: str
     condition_source: str
-    branches: Dict[str, Union[Step, LoopStep]] = field(default_factory=dict)
-    default: Optional[Union[Step, LoopStep]] = None
+    branches: Dict[str, "WorkflowStep"] = field(default_factory=dict)
+    default: Optional["WorkflowStep"] = None
 
 
 WorkflowStep = Union[Step, LoopStep, ParallelStep, ConditionalStep]

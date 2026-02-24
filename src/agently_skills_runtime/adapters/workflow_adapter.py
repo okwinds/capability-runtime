@@ -102,7 +102,7 @@ class WorkflowAdapter:
         step_input = self._resolve_input_mappings(step.input_mappings, context)
 
         target_spec = runtime.registry.get_or_raise(step.capability.id)
-        result = await runtime._execute(target_spec, input=step_input, context=context)
+        result = await runtime._execute(spec=target_spec, input=step_input, context=context)
 
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
@@ -142,9 +142,15 @@ class WorkflowAdapter:
             step_input = self._resolve_input_mappings(step.item_input_mappings, item_context)
             if not step_input:
                 step_input = item if isinstance(item, dict) else {"item": item}
-            return await runtime._execute(target_spec, input=step_input, context=item_context)
+            return await runtime._execute(spec=target_spec, input=step_input, context=item_context)
 
-        result = await runtime.loop_controller.run_loop(
+        if context.guards is None:
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"LoopStep '{step.id}': missing ExecutionGuards in ExecutionContext",
+            )
+
+        result = await context.guards.run_loop(
             items=items,
             max_iterations=step.max_iterations,
             execute_fn=execute_item,
@@ -152,6 +158,9 @@ class WorkflowAdapter:
         )
 
         context.step_outputs[step.id] = result.output
+        # LoopStep.collect_as：非破坏性补齐（保持 step_outputs 语义不变，同时提供 bag 别名）。
+        if result.status == CapabilityStatus.SUCCESS and step.collect_as:
+            context.bag[step.collect_as] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
         return result
 

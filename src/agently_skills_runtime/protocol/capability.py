@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from ..types import NodeReportV2
+
 
 class CapabilityKind(str, Enum):
     """能力种类。"""
@@ -77,7 +79,8 @@ class CapabilityResult:
     - status: 执行状态
     - output: 执行输出（类型由具体能力决定，通常是 dict 或 str）
     - error: 错误信息（仅 FAILED 时非 None）
-    - report: 执行报告（可选，通常是 NodeReport 或嵌套的子报告列表）
+    - report: 执行报告（可选；历史字段，建议优先使用 node_report）
+    - node_report: 控制面强结构报告（桥接模式下产出；Workflow/Host 编排优先读取）
     - artifacts: 产出的文件路径列表
     - duration_ms: 执行耗时（毫秒，可选）
     - metadata: 扩展信息
@@ -87,6 +90,7 @@ class CapabilityResult:
     output: Any = None
     error: Optional[str] = None
     report: Optional[Any] = None
+    node_report: Optional[NodeReportV2] = None
     artifacts: List[str] = field(default_factory=list)
     duration_ms: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
