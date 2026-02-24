@@ -77,6 +77,23 @@ class NodeReportBuilder:
         activated_skills: List[str] = []
         seen_skills: set[str] = set()
 
+        artifacts: List[str] = []
+        seen_artifacts: set[str] = set()
+
+        def _add_artifact(path: str) -> None:
+            """
+            记录 artifact 路径（去重但保持首次出现顺序）。
+
+            参数：
+            - path：artifact 路径字符串（必须为非空）
+            """
+
+            p = str(path or "").strip()
+            if not p or p in seen_artifacts:
+                return
+            artifacts.append(p)
+            seen_artifacts.add(p)
+
         # call_id -> aggregated fields
         tool_calls: Dict[str, Dict[str, Any]] = {}
         approval_pending: set[str] = set()
@@ -111,6 +128,10 @@ class NodeReportBuilder:
             return tool_calls[call_id]
 
         for ev in events:
+            artifact_path = ev.payload.get("artifact_path")
+            if isinstance(artifact_path, str) and artifact_path.strip():
+                _add_artifact(artifact_path)
+
             if ev.type == "skill_injected":
                 skill_name = str(ev.payload.get("skill_name") or "").strip()
                 if skill_name and skill_name not in seen_skills:
@@ -184,6 +205,14 @@ class NodeReportBuilder:
                 events_path_raw = ev.payload.get("events_path")
                 if isinstance(events_path_raw, str) and events_path_raw.strip():
                     events_path = events_path_raw.strip()
+
+                # artifacts（run 级别产物列表）
+                artifacts_raw = ev.payload.get("artifacts")
+                if isinstance(artifacts_raw, list):
+                    for item in artifacts_raw:
+                        if isinstance(item, str) and item.strip():
+                            _add_artifact(item)
+
                 completion_reason = ev.type
                 if ev.type == "run_completed":
                     completion_status = "success"
@@ -191,7 +220,7 @@ class NodeReportBuilder:
                     final_error_kind = ev.payload.get("error_kind") if isinstance(ev.payload.get("error_kind"), str) else None
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
                     # 对齐契约：预算耗尽属于“未完成”而非“失败”（Host 可能需要走补偿/降级）。
-                    if final_error_kind == "budget_exceeded":
+                    if final_error_kind in ("budget_exceeded", "terminated"):
                         completion_status = "incomplete"
                     else:
                         completion_status = "failed"
@@ -233,6 +262,8 @@ class NodeReportBuilder:
         elif status == "incomplete":
             if final_error_kind == "budget_exceeded":
                 reason = "budget_exceeded"
+            elif final_error_kind == "terminated":
+                reason = "cancelled"
             else:
                 reason = "cancelled" if completion_reason == "run_cancelled" else "unknown"
 
@@ -255,7 +286,7 @@ class NodeReportBuilder:
             events_path=events_path,
             activated_skills=activated_skills,
             tool_calls=tool_reports,
-            artifacts=[],
+            artifacts=artifacts,
             meta={
                 "missing_events_path": events_path is None,
                 "final_message": final_message,

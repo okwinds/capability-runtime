@@ -753,7 +753,7 @@ class AgentlySkillsRuntime:
             final_output=final_output,
             node_report=report,
             events_path=report.events_path,
-            artifacts=[],
+            artifacts=list(report.artifacts),
         )
 
         for h in self._hooks:

@@ -39,6 +39,36 @@ def test_report_collects_activated_skills_unique_and_ordered():
     assert rep.activated_skills == ["a", "b"]
 
 
+def test_report_collects_artifacts_from_run_completed_payload():
+    events = [
+        _ev("run_started"),
+        _ev(
+            "run_completed",
+            payload={
+                "final_output": "ok",
+                "events_path": "wal.jsonl",
+                "artifacts": ["a.txt", "", "b.txt", 123, None],
+            },
+        ),
+    ]
+    rep = NodeReportBuilder().build(events=events)
+    assert rep.artifacts == ["a.txt", "b.txt"]
+
+
+def test_report_collects_artifacts_from_artifact_path_events_and_dedupes():
+    events = [
+        _ev("run_started"),
+        _ev("context_compacted", payload={"artifact_path": "handoff-1.md"}),
+        _ev("compaction_finished", payload={"artifact_path": "handoff-1.md"}),
+        _ev(
+            "run_completed",
+            payload={"final_output": "ok", "events_path": "wal.jsonl", "artifacts": ["handoff-1.md", "handoff-2.md"]},
+        ),
+    ]
+    rep = NodeReportBuilder().build(events=events)
+    assert rep.artifacts == ["handoff-1.md", "handoff-2.md"]
+
+
 def test_report_aggregates_tool_call_requested_and_finished():
     events = [
         _ev("run_started"),
@@ -144,6 +174,16 @@ def test_report_budget_exceeded_maps_to_incomplete_and_budget_exceeded_reason():
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "incomplete"
     assert rep.reason == "budget_exceeded"
+
+
+def test_report_terminated_maps_to_incomplete_and_cancelled_reason():
+    events = [
+        _ev("run_started"),
+        _ev("run_failed", payload={"error_kind": "terminated", "message": "terminated", "events_path": "wal.jsonl"}),
+    ]
+    rep = NodeReportBuilder().build(events=events)
+    assert rep.status == "incomplete"
+    assert rep.reason == "cancelled"
 
 
 def test_report_missing_events_path_sets_meta_flag():
