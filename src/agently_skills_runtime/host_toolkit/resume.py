@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,18 +19,25 @@ from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.state.replay import ResumeReplayState, rebuild_resume_replay_state
 
 
-def load_agent_events_from_jsonl(*, events_path: Path) -> List[AgentEvent]:
+def load_agent_events_from_jsonl(*, events_path: Union[Path, str]) -> List[AgentEvent]:
     """
     从 events.jsonl 加载 AgentEvent 列表（用于回放/诊断）。
 
     参数：
-    - events_path：WAL 路径
+    - events_path：WAL 路径或 locator（本仓对外字段名为 `events_path`；上游 `skills-runtime-sdk>=1.0` 可能为 `wal_locator`）
 
     返回：
     - AgentEvent 列表（按文件顺序）
     """
 
-    raw = Path(events_path).read_text(encoding="utf-8")
+    loc = str(events_path)
+    # best-effort：允许 wal_locator 追加 `#run_id=...` 等片段；文件读取仅使用其路径部分。
+    if "#" in loc:
+        loc = loc.split("#", 1)[0]
+    if loc.startswith("wal://"):
+        raise ValueError(f"wal locator is not a filesystem path: {loc}")
+
+    raw = Path(loc).read_text(encoding="utf-8")
     events: List[AgentEvent] = []
     for line in raw.splitlines():
         s = line.strip()
@@ -81,4 +88,3 @@ def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeRepl
         },
     )
     return st, summary
-

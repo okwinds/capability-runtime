@@ -6,19 +6,19 @@ from agently_skills_runtime.reporting.node_report import NodeReportBuilder
 
 
 def _ev(t, *, run_id="r1", turn_id="t1", payload=None):
-    return AgentEvent(type=t, ts="2026-02-10T00:00:00Z", run_id=run_id, turn_id=turn_id, payload=payload or {})
+    return AgentEvent(type=t, timestamp="2026-02-10T00:00:00Z", run_id=run_id, turn_id=turn_id, payload=payload or {})
 
 
 def _ev_step(t, *, run_id="r1", turn_id="t1", step_id="s1", payload=None):
     return AgentEvent(
-        type=t, ts="2026-02-10T00:00:00Z", run_id=run_id, turn_id=turn_id, step_id=step_id, payload=payload or {}
+        type=t, timestamp="2026-02-10T00:00:00Z", run_id=run_id, turn_id=turn_id, step_id=step_id, payload=payload or {}
     )
 
 
 def test_report_success_from_run_completed():
     events = [
         _ev("run_started", payload={}),
-        _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "success"
@@ -33,7 +33,7 @@ def test_report_collects_activated_skills_unique_and_ordered():
         _ev("skill_injected", payload={"skill_name": "a"}),
         _ev("skill_injected", payload={"skill_name": "b"}),
         _ev("skill_injected", payload={"skill_name": "a"}),
-        _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.activated_skills == ["a", "b"]
@@ -46,7 +46,7 @@ def test_report_collects_artifacts_from_run_completed_payload():
             "run_completed",
             payload={
                 "final_output": "ok",
-                "events_path": "wal.jsonl",
+                "wal_locator": "wal.jsonl",
                 "artifacts": ["a.txt", "", "b.txt", 123, None],
             },
         ),
@@ -62,7 +62,7 @@ def test_report_collects_artifacts_from_artifact_path_events_and_dedupes():
         _ev("compaction_finished", payload={"artifact_path": "handoff-1.md"}),
         _ev(
             "run_completed",
-            payload={"final_output": "ok", "events_path": "wal.jsonl", "artifacts": ["handoff-1.md", "handoff-2.md"]},
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl", "artifacts": ["handoff-1.md", "handoff-2.md"]},
         ),
     ]
     rep = NodeReportBuilder().build(events=events)
@@ -77,7 +77,7 @@ def test_report_aggregates_tool_call_requested_and_finished():
             "tool_call_finished",
             payload={"call_id": "c1", "tool": "shell_exec", "result": {"ok": True, "data": {"x": 1}}},
         ),
-        _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert len(rep.tool_calls) == 1
@@ -89,9 +89,9 @@ def test_report_aggregates_tool_call_requested_and_finished():
 def test_report_marks_requires_approval_when_approval_requested():
     events = [
         _ev("run_started"),
-        _ev("tool_call_requested", payload={"call_id": "c1", "name": "shell_exec", "arguments": {}}),
-        _ev("approval_requested", payload={"call_id": "c1", "tool": "shell_exec", "approval_key": "k1"}),
-        _ev("run_cancelled", payload={"message": "waiting", "events_path": "wal.jsonl"}),
+        _ev_step("tool_call_requested", step_id="s1", payload={"call_id": "c1", "name": "shell_exec", "arguments": {}}),
+        _ev_step("approval_requested", step_id="s1", payload={"tool": "shell_exec", "approval_key": "k1"}),
+        _ev("run_cancelled", payload={"message": "waiting", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "needs_approval"
@@ -104,9 +104,10 @@ def test_report_marks_requires_approval_when_approval_requested():
 def test_report_records_approval_decision_and_clears_pending():
     events = [
         _ev("run_started"),
-        _ev("approval_requested", payload={"call_id": "c1", "tool": "shell_exec", "approval_key": "k1"}),
-        _ev("approval_decided", payload={"call_id": "c1", "tool": "shell_exec", "decision": "approved", "reason": "ok"}),
-        _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        _ev_step("tool_call_requested", step_id="s1", payload={"call_id": "c1", "name": "shell_exec", "arguments": {}}),
+        _ev_step("approval_requested", step_id="s1", payload={"tool": "shell_exec", "approval_key": "k1"}),
+        _ev_step("approval_decided", step_id="s1", payload={"decision": "approved", "reason": "ok"}),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "success"
@@ -123,8 +124,8 @@ def test_report_correlates_approval_events_without_call_id_via_step_id():
         _ev_step("run_started", payload={}),
         _ev_step("tool_call_requested", payload={"call_id": "c1", "name": "shell_exec", "arguments": {}}),
         _ev_step("approval_requested", payload={"tool": "shell_exec", "approval_key": "k1"}),
-        _ev_step("approval_decided", payload={"tool": "shell_exec", "decision": "approved", "reason": "ok"}),
-        _ev_step("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        _ev_step("approval_decided", payload={"decision": "approved", "reason": "ok"}),
+        _ev_step("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "success"
@@ -152,7 +153,7 @@ def test_report_correlates_approval_events_without_call_id_via_step_id():
 def test_report_reason_mapping_for_run_failed(error_kind, expected_reason):
     events = [
         _ev("run_started"),
-        _ev("run_failed", payload={"error_kind": error_kind, "message": "x", "events_path": "wal.jsonl"}),
+        _ev("run_failed", payload={"error_kind": error_kind, "message": "x", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "failed"
@@ -160,7 +161,7 @@ def test_report_reason_mapping_for_run_failed(error_kind, expected_reason):
 
 
 def test_report_cancelled_maps_to_incomplete_and_cancelled_reason():
-    events = [_ev("run_started"), _ev("run_cancelled", payload={"message": "stop", "events_path": "wal.jsonl"})]
+    events = [_ev("run_started"), _ev("run_cancelled", payload={"message": "stop", "wal_locator": "wal.jsonl"})]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "incomplete"
     assert rep.reason == "cancelled"
@@ -169,7 +170,7 @@ def test_report_cancelled_maps_to_incomplete_and_cancelled_reason():
 def test_report_budget_exceeded_maps_to_incomplete_and_budget_exceeded_reason():
     events = [
         _ev("run_started"),
-        _ev("run_failed", payload={"error_kind": "budget_exceeded", "message": "budget exceeded", "events_path": "wal.jsonl"}),
+        _ev("run_failed", payload={"error_kind": "budget_exceeded", "message": "budget exceeded", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "incomplete"
@@ -179,7 +180,7 @@ def test_report_budget_exceeded_maps_to_incomplete_and_budget_exceeded_reason():
 def test_report_terminated_maps_to_incomplete_and_cancelled_reason():
     events = [
         _ev("run_started"),
-        _ev("run_failed", payload={"error_kind": "terminated", "message": "terminated", "events_path": "wal.jsonl"}),
+        _ev("run_failed", payload={"error_kind": "terminated", "message": "terminated", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "incomplete"
@@ -197,7 +198,7 @@ def test_report_turn_id_is_last_non_null_turn_id():
     events = [
         _ev("run_started", turn_id="t1"),
         _ev("tool_call_requested", turn_id="t2", payload={"call_id": "c1", "name": "shell_exec", "arguments": {}}),
-        _ev("run_completed", turn_id="t3", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        _ev("run_completed", turn_id="t3", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
     assert rep.turn_id == "t3"
@@ -225,7 +226,7 @@ def test_report_engine_version_prefers_agent_sdk_dunder_version(monkeypatch: pyt
 
     monkeypatch.setattr(node_report_mod.importlib.metadata, "version", fake_version)
 
-    events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"})]
+    events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"})]
     rep = NodeReportBuilder().build(events=events)
 
     assert rep.engine.get("version") == agent_sdk.__version__
@@ -257,7 +258,7 @@ def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest
     monkeypatch.setattr(node_report_mod, "_get_agent_sdk_version", fake_get_agent_sdk_version)
     monkeypatch.setattr(node_report_mod.importlib.metadata, "version", fake_version)
 
-    events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "events_path": "wal.jsonl"})]
+    events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"})]
     rep = NodeReportBuilder().build(events=events)
 
     assert rep.engine.get("version") == "9.9.9"

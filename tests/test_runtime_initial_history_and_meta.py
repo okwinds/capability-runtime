@@ -36,8 +36,13 @@ def _mk_runtime(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_async_passes_initial_history_to_sdk_agent(monkeypatch):
     fake_events = [
-        AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
-        AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id="r1", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id="r1", payload={}),
+        AgentEvent(
+            type="run_completed",
+            timestamp="2026-02-10T00:00:01Z",
+            run_id="r1",
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl"},
+        ),
     ]
     fake_agent = _FakeAgent(events=fake_events)
     monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
@@ -57,8 +62,13 @@ async def test_run_async_passes_initial_history_to_sdk_agent(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_async_injects_session_and_turn_id_into_node_report_meta(monkeypatch):
     fake_events = [
-        AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
-        AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id="r1", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id="r1", payload={}),
+        AgentEvent(
+            type="run_completed",
+            timestamp="2026-02-10T00:00:01Z",
+            run_id="r1",
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl"},
+        ),
     ]
     fake_agent = _FakeAgent(events=fake_events)
     monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)

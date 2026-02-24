@@ -21,12 +21,12 @@ class _FakeAgent:
     async def run_stream_async(
         self, task: str, *, run_id: Optional[str] = None, initial_history: Optional[List[Dict[str, Any]]] = None
     ) -> AsyncIterator[AgentEvent]:
-        yield AgentEvent(type="run_started", ts="2026-02-24T00:00:00Z", run_id=run_id or "r1", payload={})
+        yield AgentEvent(type="run_started", timestamp="2026-02-24T00:00:00Z", run_id=run_id or "r1", payload={})
         yield AgentEvent(
             type="run_completed",
-            ts="2026-02-24T00:00:01Z",
+            timestamp="2026-02-24T00:00:01Z",
             run_id=run_id or "r1",
-            payload={"final_output": "ok", "events_path": "wal.jsonl", "artifacts": ["handoff-1.md"]},
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl", "artifacts": ["handoff-1.md"]},
         )
 
 

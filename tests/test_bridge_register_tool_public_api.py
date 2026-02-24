@@ -27,12 +27,12 @@ class _FakeAgent:
         _ = task
         _ = run_id
         _ = initial_history
-        yield AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={})
+        yield AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id="r1", payload={})
         yield AgentEvent(
             type="run_completed",
-            ts="2026-02-10T00:00:01Z",
+            timestamp="2026-02-10T00:00:01Z",
             run_id="r1",
-            payload={"final_output": "ok", "events_path": "wal.jsonl"},
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl"},
         )
 
 

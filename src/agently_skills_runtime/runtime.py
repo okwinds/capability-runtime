@@ -41,6 +41,7 @@ class _SdkInitState:
     workspace_root: Path
     config_paths: List[Path]
     skills_config: Any
+    skills_config_overlay_issues: List[FrameworkIssue]
     backend: Any
     shared_skills_manager: SkillsManager
 
@@ -462,15 +463,19 @@ class Runtime:
         from agent_sdk.config.loader import load_config_dicts
 
         overlays: List[Dict[str, Any]] = [load_default_config_dict()]
+        overlay_issues: List[FrameworkIssue] = []
         for p in config_paths:
             try:
-                overlays.append(_load_yaml_dict(p))
+                raw = _load_yaml_dict(p)
+                sanitized, issues = _sanitize_sdk_overlay_dict_for_loader(raw)
+                overlays.append(sanitized)
+                overlay_issues.extend(issues)
             except Exception:
                 overlays.append({})
         cfg = load_config_dicts(overlays)
 
         if self._config.skills_config is not None:
-            skills_cfg = self._config.skills_config
+            skills_cfg = _normalize_skills_config_for_agent_sdk(self._config.skills_config)
         else:
             skills_cfg = cfg.skills
 
@@ -509,6 +514,7 @@ class Runtime:
             workspace_root=workspace_root,
             config_paths=config_paths,
             skills_config=skills_cfg,
+            skills_config_overlay_issues=list(overlay_issues),
             backend=backend,
             shared_skills_manager=shared_skills_manager,
         )
@@ -524,8 +530,13 @@ class Runtime:
         if self._sdk_state is None:
             return []
         try:
-            mgr = SkillsManager(workspace_root=self._sdk_state.workspace_root, skills_config=self._sdk_state.skills_config)
-            return mgr.preflight()
+            mgr = SkillsManager(
+                workspace_root=self._sdk_state.workspace_root,
+                skills_config=_normalize_skills_config_for_agent_sdk(self._sdk_state.skills_config),
+            )
+            upstream_issues = mgr.preflight()
+            overlay_issues = list(getattr(self._sdk_state, "skills_config_overlay_issues", []) or [])
+            return overlay_issues + list(upstream_issues or [])
         except Exception as exc:
             # preflight 异常不得 fail-open：否则 `preflight_mode="error"` 的 gate 会被静默绕过。
             return [
@@ -591,6 +602,125 @@ def _load_yaml_dict(path: Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError("YAML root must be a mapping")
     return obj
+
+
+def _normalize_skills_config_for_agent_sdk(skills_config: Any) -> Any:
+    """
+    将 RuntimeConfig.skills_config 归一为上游 `AgentSdkSkillsConfig` 可接受的形态（dict 或 model）。
+
+    背景：
+    - `skills-runtime-sdk>=1.0` 对 skills 配置 schema 采用 `extra=forbid`，未知字段会直接导致校验异常；
+    - 本仓历史上允许在 `skills_config` dict 里包含一些旧字段（例如 `roots/mode/max_auto`），需要在桥接层做最小兼容，
+      以便“warn 模式可继续跑、error 模式可 fail-closed”由 preflight gate 决定，而不是初始化期直接崩溃。
+
+    参数：
+    - skills_config：可能为 dict / pydantic model / 其它对象
+
+    返回：
+    - 归一后的 skills_config（尽量保持调用方意图；无法识别时原样返回）
+    """
+
+    if not isinstance(skills_config, dict):
+        return skills_config
+
+    # 兼容：允许传入完整 SDK config（包含 skills 根节点）
+    if isinstance(skills_config.get("skills"), dict):
+        skills_config = dict(skills_config["skills"])
+
+    allowed_keys = {
+        "env_var_missing_policy",
+        "versioning",
+        "strictness",
+        "spaces",
+        "sources",
+        "scan",
+        "injection",
+        "actions",
+        "references",
+    }
+    # 兼容：历史字段（上游 1.x 不再支持），由本仓 preflight/文档提示用户迁移
+    legacy_keys = {"roots", "mode", "max_auto"}
+
+    out: Dict[str, Any] = {}
+    for k, v in dict(skills_config).items():
+        if k in allowed_keys:
+            out[k] = v
+        elif k in legacy_keys:
+            continue
+        else:
+            # 未知字段：不在这里直接抛错（由 preflight gate 控制 fail-closed），
+            # 但必须过滤掉以避免 SDK loader/model_validate 直接异常。
+            continue
+    return out
+
+
+def _sanitize_sdk_overlay_dict_for_loader(overlay: Dict[str, Any]) -> tuple[Dict[str, Any], List[FrameworkIssue]]:
+    """
+    在调用上游 `load_config_dicts()` 前，对 overlay 做“最小清洗”，避免未知字段导致初始化期直接崩溃。
+
+    说明：
+    - 上游 `AgentSdkConfig/AgentSdkSkillsConfig` 默认 `extra=forbid`，因此 overlay 内出现未知字段会直接抛校验异常；
+    - 本仓需要在 preflight gate 中把问题以 `FrameworkIssue` 可观测化，并允许 warn 模式继续执行。
+
+    当前清洗范围（最小集合，覆盖本仓离线回归用例）：
+    - `skills.roots`：历史字段，产生 `SKILL_CONFIG_LEGACY_ROOTS_UNSUPPORTED` 并移除；
+    - `skills.scan` 下未知字段：产生 `SKILL_CONFIG_UNKNOWN_SCAN_OPTION` 并移除未知 key。
+
+    参数：
+    - overlay：单个 YAML overlay 的 dict（可包含多个顶层段）
+
+    返回：
+    - sanitized_overlay：移除已知不兼容字段后的 overlay
+    - issues：对应的 FrameworkIssue 列表（供 preflight gate 决策）
+    """
+
+    if not isinstance(overlay, dict):
+        return {}, []
+
+    issues: List[FrameworkIssue] = []
+    sanitized: Dict[str, Any] = dict(overlay)
+
+    skills = sanitized.get("skills")
+    if not isinstance(skills, dict):
+        return sanitized, issues
+
+    skills_obj: Dict[str, Any] = dict(skills)
+
+    if "roots" in skills_obj:
+        issues.append(
+            FrameworkIssue(
+                code="SKILL_CONFIG_LEGACY_ROOTS_UNSUPPORTED",
+                message="skills.roots is a legacy option and is not supported by skills-runtime-sdk>=1.x",
+                details={"path": "skills.roots"},
+            )
+        )
+        skills_obj.pop("roots", None)
+
+    scan = skills_obj.get("scan")
+    if isinstance(scan, dict):
+        scan_obj: Dict[str, Any] = dict(scan)
+        allowed_scan_keys = {
+            "ignore_dot_entries",
+            "max_depth",
+            "max_dirs_per_root",
+            "max_frontmatter_bytes",
+            "refresh_policy",
+            "ttl_sec",
+        }
+        unknown = [k for k in scan_obj.keys() if k not in allowed_scan_keys]
+        for k in unknown:
+            issues.append(
+                FrameworkIssue(
+                    code="SKILL_CONFIG_UNKNOWN_SCAN_OPTION",
+                    message="Unknown skills.scan option is not supported.",
+                    details={"path": f"skills.scan.{k}", "key": k},
+                )
+            )
+            scan_obj.pop(k, None)
+        skills_obj["scan"] = scan_obj
+
+    sanitized["skills"] = skills_obj
+    return sanitized, issues
 
 
 def _redact_issue(issue: FrameworkIssue) -> Dict[str, Any]:

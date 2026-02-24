@@ -96,8 +96,13 @@ async def test_pre_run_injection_meta_uses_minimal_disclosure(monkeypatch: pytes
     rt = _mk_runtime(monkeypatch)
 
     fake_events = [
-        AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="r1", payload={}),
-        AgentEvent(type="run_completed", ts="2026-02-10T00:00:01Z", run_id="r1", payload={"final_output": "ok", "events_path": "wal.jsonl"}),
+        AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id="r1", payload={}),
+        AgentEvent(
+            type="run_completed",
+            timestamp="2026-02-10T00:00:01Z",
+            run_id="r1",
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl"},
+        ),
     ]
     fake_agent = _FakeAgent(events=fake_events)
     monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
@@ -148,13 +153,13 @@ def test_tool_mode_registry_dispatch_records_rag_tool_and_redacts_content() -> N
 
     report = NodeReportBuilder().build(
         events=[
-            AgentEvent(type="run_started", ts="2026-02-10T00:00:00Z", run_id="rag-tool-run", payload={}),
+            AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id="rag-tool-run", payload={}),
             *emitted,
             AgentEvent(
                 type="run_completed",
-                ts="2026-02-10T00:00:01Z",
+                timestamp="2026-02-10T00:00:01Z",
                 run_id="rag-tool-run",
-                payload={"final_output": "ok", "events_path": "wal.jsonl"},
+                payload={"final_output": "ok", "wal_locator": "wal.jsonl"},
             ),
         ]
     )

@@ -6,7 +6,7 @@
 - NodeResult 是一次运行的对外返回值：final_output + node_report + events_path。
 
 对齐规格：
-- `docs/internal/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
+- `openspec/specs/evidence-chain/spec.md`
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ class NodeResultV2(BaseModel):
     字段：
     - final_output：面向用户的数据面输出（可能为自由文本）
     - node_report：控制面强结构（可编排、可审计）
-    - events_path：SDK WAL（JSONL）路径（来源于 SDK，不得伪造）
+    - events_path：SDK WAL 定位符（locator；上游 `skills-runtime-sdk>=1.0` 使用 `wal_locator`，本仓对外沿用 `events_path` 命名；不得伪造）
     - artifacts：产物路径列表（Phase 2 可能为空，但字段必须保留）
     """
 

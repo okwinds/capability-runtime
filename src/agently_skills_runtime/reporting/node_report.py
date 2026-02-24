@@ -2,7 +2,7 @@
 NodeReportBuilder：把 SDK `AgentEvent` 聚合为 NodeReport v2。
 
 对齐规格：
-- `docs/internal/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
+- `openspec/specs/evidence-chain/spec.md`
 """
 
 from __future__ import annotations
@@ -216,9 +216,13 @@ class NodeReportBuilder:
                             t["data"] = data
 
             if ev.type in ("run_completed", "run_failed", "run_cancelled"):
-                events_path_raw = ev.payload.get("events_path")
-                if isinstance(events_path_raw, str) and events_path_raw.strip():
-                    events_path = events_path_raw.strip()
+                # skills-runtime-sdk>=1.0 使用 `wal_locator` 作为 WAL/事件证据链定位符；
+                # 本仓对外仍沿用 `events_path` 字段名，语义上存放 locator 字符串（可能是文件路径，也可能是 wal://...）。
+                locator_raw = ev.payload.get("events_path")
+                if not (isinstance(locator_raw, str) and locator_raw.strip()):
+                    locator_raw = ev.payload.get("wal_locator")
+                if isinstance(locator_raw, str) and locator_raw.strip():
+                    events_path = locator_raw.strip()
 
                 # artifacts（run 级别产物列表）
                 artifacts_raw = ev.payload.get("artifacts")

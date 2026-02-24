@@ -47,10 +47,10 @@ async def test_run_failed_maps_to_failed(monkeypatch: pytest.MonkeyPatch) -> Non
     rt = _mk_runtime(
         monkeypatch,
         events=[
-            AgentEvent(type="run_started", ts="2026-02-24T00:00:00Z", run_id="r0", payload={}),
+            AgentEvent(type="run_started", timestamp="2026-02-24T00:00:00Z", run_id="r0", payload={}),
             AgentEvent(
                 type="run_failed",
-                ts="2026-02-24T00:00:01Z",
+                timestamp="2026-02-24T00:00:01Z",
                 run_id="r0",
                 payload={"error_kind": "permission", "message": "no"},
             ),
@@ -67,10 +67,10 @@ async def test_run_cancelled_maps_to_cancelled(monkeypatch: pytest.MonkeyPatch) 
     rt = _mk_runtime(
         monkeypatch,
         events=[
-            AgentEvent(type="run_started", ts="2026-02-24T00:00:00Z", run_id="r0", payload={}),
+            AgentEvent(type="run_started", timestamp="2026-02-24T00:00:00Z", run_id="r0", payload={}),
             AgentEvent(
                 type="run_cancelled",
-                ts="2026-02-24T00:00:01Z",
+                timestamp="2026-02-24T00:00:01Z",
                 run_id="r0",
                 payload={"message": "cancelled"},
             ),
@@ -87,24 +87,24 @@ async def test_approval_pending_maps_to_pending(monkeypatch: pytest.MonkeyPatch)
     rt = _mk_runtime(
         monkeypatch,
         events=[
-            AgentEvent(type="run_started", ts="2026-02-24T00:00:00Z", run_id="r0", payload={}),
+            AgentEvent(type="run_started", timestamp="2026-02-24T00:00:00Z", run_id="r0", payload={}),
             AgentEvent(
                 type="tool_call_requested",
-                ts="2026-02-24T00:00:00Z",
+                timestamp="2026-02-24T00:00:00Z",
                 run_id="r0",
                 step_id="s1",
                 payload={"call_id": "c1", "name": "file_write"},
             ),
             AgentEvent(
                 type="approval_requested",
-                ts="2026-02-24T00:00:00Z",
+                timestamp="2026-02-24T00:00:00Z",
                 run_id="r0",
                 step_id="s1",
                 payload={"tool": "file_write", "approval_key": "k"},
             ),
             AgentEvent(
                 type="run_cancelled",
-                ts="2026-02-24T00:00:01Z",
+                timestamp="2026-02-24T00:00:01Z",
                 run_id="r0",
                 payload={"message": "pending approval"},
             ),
@@ -114,4 +114,3 @@ async def test_approval_pending_maps_to_pending(monkeypatch: pytest.MonkeyPatch)
     assert out.status == CapabilityStatus.PENDING
     assert out.node_report is not None
     assert out.node_report.status == "needs_approval"
-

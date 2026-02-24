@@ -14,7 +14,7 @@ from agently_skills_runtime.host_toolkit.resume import build_resume_replay_summa
 
 
 def _ev(t: str, *, payload=None) -> AgentEvent:
-    return AgentEvent(type=t, ts="2026-02-23T00:00:00Z", run_id="r1", payload=payload or {})
+    return AgentEvent(type=t, timestamp="2026-02-23T00:00:00Z", run_id="r1", payload=payload or {})
 
 
 def test_resume_helper_builds_summary_without_leaking_tool_content(tmp_path: Path):
@@ -85,4 +85,3 @@ def test_explicit_initial_history_disables_sdk_auto_resume(tmp_path: Path):
     started = next(e for e in events2 if e.type == "run_started")
     resume = started.payload.get("resume") or {}
     assert resume.get("enabled") in (False, None)
-

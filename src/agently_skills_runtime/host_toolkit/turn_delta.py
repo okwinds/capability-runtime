@@ -87,7 +87,7 @@ class TurnDelta(BaseModel):
     - user_input：本回合用户输入（可选；若缺失则无法从 TurnDelta 组装回 user message）。
     - final_output：数据面输出（自由文本允许，但建议宿主按需脱敏）。
     - node_report：控制面强结构（NodeReport v2）。
-    - events_path：WAL 路径指针（来自 SDK/Bridge；不得伪造）。
+    - events_path：WAL 定位符（locator；来自 SDK/Bridge；不得伪造）。
     - created_at_ms：宿主记录的本回合创建时间（用于排序与回放）；不作为安全证据源。
     """
 
@@ -126,4 +126,3 @@ class TurnDelta(BaseModel):
             events_path=self.events_path,
             created_at_ms=self.created_at_ms,
         )
-

@@ -8,7 +8,7 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 - 解析阶段复用 SDK `ChatCompletionsSseParser`，确保 tool_calls delta 拼接口径不分叉。
 
 对齐规格：
-- `docs/internal/specs/engineering-spec/02_Technical_Design/INTEGRATION_AGENTLY.md`
+- `openspec/specs/upstream-bridge/spec.md`
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol
 
 from agent_sdk.core.agent import ChatBackend
 from agent_sdk.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
+from agent_sdk.llm.protocol import ChatRequest
 from agent_sdk.tools.protocol import ToolSpec, tool_spec_to_openai_tool
 
 
@@ -76,34 +77,41 @@ class AgentlyChatBackend(ChatBackend):
 
         self._config = config
 
-    async def stream_chat(  # type: ignore[override]
-        self,
-        *,
-        model: str,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[ToolSpec]] = None,
-    ) -> AsyncIterator[ChatStreamEvent]:
+    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
         """
         发起一次 chat.completions streaming 并 yield `ChatStreamEvent`。
 
         参数：
-        - `model`：模型名（来自 SDK config）
-        - `messages`：OpenAI wire messages（SDK 产出；必须原样透传）
-        - `tools`：工具 specs（SDK ToolRegistry 列表）
+        - `request`：上游 `ChatRequest` 参数包（包含 model/messages/tools 与可选推理参数）
         """
 
         requester = self._config.requester_factory()
         request_data = requester.generate_request_data()
 
-        if not isinstance(messages, list):
+        if not isinstance(request.messages, list):
             raise TypeError("messages must be a list[dict]")
 
-        request_data.data["messages"] = messages
-        request_data.request_options["model"] = model
+        request_data.data["messages"] = request.messages
+        request_data.request_options["model"] = request.model
         request_data.request_options["stream"] = True
         request_data.stream = True
 
-        tool_specs = tools or []
+        if request.temperature is not None:
+            request_data.request_options["temperature"] = float(request.temperature)
+        if request.max_tokens is not None:
+            request_data.request_options["max_tokens"] = int(request.max_tokens)
+        if request.top_p is not None:
+            request_data.request_options["top_p"] = float(request.top_p)
+        if request.response_format is not None:
+            request_data.request_options["response_format"] = dict(request.response_format)
+
+        # provider 特有扩展字段（best-effort 透传；冲突时以 request_options 显式字段为准）
+        if isinstance(request.extra, dict) and request.extra:
+            for k, v in request.extra.items():
+                if k not in request_data.request_options:
+                    request_data.request_options[k] = v
+
+        tool_specs = request.tools or []
         tools_wire = [tool_spec_to_openai_tool(spec) for spec in tool_specs]
         if tools_wire:
             request_data.request_options["tools"] = tools_wire

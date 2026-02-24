@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Union
 import pytest
 
 from agent_sdk.llm.chat_sse import ChatStreamEvent
+from agent_sdk.llm.protocol import ChatRequest
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -18,18 +19,8 @@ from agently_skills_runtime.runtime import Runtime
 class FakeChatBackend:
     """最小 ChatBackend：只回一个文本并 completed。"""
 
-    async def stream_chat(
-        self,
-        *,
-        model: str,
-        messages: List[Dict[str, Any]],
-        tools: Optional[List[Any]] = None,
-        temperature: Optional[float] = None,
-    ) -> AsyncIterator[Any]:
-        _ = model
-        _ = messages
-        _ = tools
-        _ = temperature
+    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        _ = request
         yield ChatStreamEvent(type="text_delta", text="ok")
         yield ChatStreamEvent(type="completed", finish_reason="stop")
 
@@ -62,4 +53,3 @@ async def test_sdk_native_run_stream_yields_events_and_terminal_result(monkeypat
     assert terminal.output == "ok"
     assert terminal.node_report is not None
     assert terminal.node_report.events_path is not None
-

@@ -20,7 +20,7 @@ class SystemPromptEvidence(BaseModel):
     """
     system prompt 注入证据（最小披露）。
 
-    字段对齐 `docs/internal/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`：
+    字段对齐 `openspec/specs/evidence-chain/spec.md`：
     - system_prompt_injected
     - system_prompt_sha256
     - system_prompt_bytes
@@ -63,4 +63,3 @@ class SystemPromptEvidenceHook:
             meta.setdefault("system_prompt_bytes", self.evidence.system_prompt_bytes)
         if self.evidence.system_policy_id is not None:
             meta.setdefault("system_policy_id", self.evidence.system_policy_id)
-
