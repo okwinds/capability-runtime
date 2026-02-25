@@ -20,24 +20,24 @@
 
 ```mermaid
 flowchart TD
-  subgraph Host["下游业务/宿主（不在本仓）"]
-    TF["TriggerFlow（推荐：顶层编排）"]
-    APP["业务代码：调用 Runtime.run()"]
+  subgraph Host["Host (outside this repo)"]
+    TF["TriggerFlow (top-level orchestration)"]
+    APP["Host code calls Runtime.run()"]
   end
 
-  subgraph BR["本仓：agently-skills-runtime"]
-    P["Protocol：AgentSpec/WorkflowSpec"]
-    R["Runtime：register/validate/run"]
-    NR["NodeReportV2（证据链）"]
+  subgraph BR["agently-skills-runtime (this repo)"]
+    P["Protocol: AgentSpec/WorkflowSpec"]
+    R["Runtime: register/validate/run"]
+    NR["NodeReportV2 (evidence chain)"]
   end
 
-  subgraph U1["上游：Agently"]
-    AGT["OpenAICompatible requester（可选：传输/流式）"]
+  subgraph U1["Upstream: Agently"]
+    AGT["OpenAICompatible requester (optional transport)"]
   end
 
-  subgraph U2["上游：skills_runtime（skills-runtime-sdk）"]
+  subgraph U2["Upstream: skills_runtime (skills-runtime-sdk)"]
     SDK["Agent loop + ToolRegistry + SkillsManager"]
-    EVT["AgentEvent/WAL（事件链）"]
+    EVT["AgentEvent/WAL"]
   end
 
   TF --> APP --> R
