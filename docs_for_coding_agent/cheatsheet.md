@@ -64,5 +64,5 @@ from agently_skills_runtime import (
 ## 4) 常见错误（最短排查路径）
 
 - 忘记 `validate()`：`Capability not found: ...`（先注册缺失能力再跑）
-- 误以为本仓还内置“skills 原语/注入机制”：本仓只暴露 Agent/Workflow；skills（catalog/mention/sources/preflight/tools/approvals/WAL）以 `agent_sdk` 为真相源
+- 误以为本仓还内置“skills 原语/注入机制”：本仓只暴露 Agent/Workflow；skills（catalog/mention/sources/preflight/tools/approvals/WAL）以 `skills_runtime` 为真相源
 - 想在本仓走 “TriggerFlow tool”：已按规格搁置归档；应在业务侧用 TriggerFlow 顶层调用 `Runtime.run()`

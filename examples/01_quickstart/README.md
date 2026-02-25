@@ -30,6 +30,5 @@ python examples/01_quickstart/run_bridge.py
 ```
 
 说明：
-- `mode="bridge"` 复用 Agently 的 OpenAICompatible requester 作为传输/流式层，但 **messages/tools wire** 仍由上游 `agent_sdk` 生产与解析（避免 tool_calls 口径分叉）。
-- 若你不想依赖 Agently，可将示例改为 `mode="sdk_native"`，使用 `agent_sdk` 原生 OpenAI backend（同样会产出 `NodeReportV2`）。
-
+- `mode="bridge"` 复用 Agently 的 OpenAICompatible requester 作为传输/流式层，但 **messages/tools wire** 仍由上游 `skills_runtime` 生产与解析（避免 tool_calls 口径分叉）。
+- 若你不想依赖 Agently，可将示例改为 `mode="sdk_native"`，使用 `skills_runtime` 原生 OpenAI backend（同样会产出 `NodeReportV2`）。

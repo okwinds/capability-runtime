@@ -35,7 +35,7 @@ flowchart TD
     AGT[OpenAICompatible requester\n（可选：传输/流式）]
   end
 
-  subgraph U2[上游：agent_sdk（skills-runtime-sdk）]
+  subgraph U2[上游：skills_runtime（skills-runtime-sdk）]
     SDK[Agent loop + ToolRegistry + SkillsManager]
     EVT[AgentEvent/WAL（事件链）]
   end
@@ -48,7 +48,7 @@ flowchart TD
 
 关键口径：
 
-- **skills 体系**（mention/sources/preflight/tools/approvals/WAL）全部以 `agent_sdk` 为真相源；本仓不再定义“第三种 skills 协议/注入原语”。
+- **skills 体系**（mention/sources/preflight/tools/approvals/WAL）全部以 `skills_runtime` 为真相源；本仓不再定义“第三种 skills 协议/注入原语”。
 - **Agently 在本仓的角色**：可替换的传输层（桥接 SSE streaming）+（推荐）顶层编排入口（TriggerFlow）。
 - **TriggerFlow tool（`triggerflow_run_flow`）不在主线**：按输入文档 2.5 搁置归档；推荐使用 TriggerFlow 顶层编排多个 `Runtime.run()`。
 

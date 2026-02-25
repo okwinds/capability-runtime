@@ -3,7 +3,7 @@
 一句话定位：一个**生产级的能力运行时（Capability Runtime）基座 + 双上游桥接层**。
 
 - 对外协议原语：仅 **Agent / Workflow**（可声明、可注册、可校验、可执行、可编排）
-- skills 引擎：由上游 `agent_sdk`（skills-runtime-sdk）提供（catalog/mention/sources/preflight/tools/approvals/WAL/events）
+- skills 引擎：由上游 `skills_runtime`（skills-runtime-sdk）提供（catalog/mention/sources/preflight/tools/approvals/WAL/events）
 - 证据链优先：桥接模式下产出稳定的结构化证据 `NodeReportV2`（控制面），同时保留生态友好的 `final_output`（数据面）
 
 > 重要决策：本仓当前不提供 “TriggerFlow 作为 SDK Agent tool（`triggerflow_run_flow`）” 的桥接；推荐使用 TriggerFlow 顶层编排多个 `Runtime.run()`。
@@ -62,7 +62,7 @@ flowchart TD
     AGT[OpenAICompatible requester\n（可选：传输/流式）]
   end
 
-  subgraph U2[上游：agent_sdk（skills-runtime-sdk）]
+  subgraph U2[上游：skills_runtime（skills-runtime-sdk）]
     SDK[Agent loop + ToolRegistry + SkillsManager]
     EVT[AgentEvent/WAL（事件链）]
   end
@@ -107,4 +107,3 @@ from agently_skills_runtime import (
   - 最短闭环：`docs_for_coding_agent/cheatsheet.md`
   - 心智模型：`docs_for_coding_agent/00-mental-model.md`
   - 任务契约：`docs_for_coding_agent/contract.md`
-
