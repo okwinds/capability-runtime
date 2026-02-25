@@ -1,4 +1,4 @@
-# agently-skills-runtime v0.4.0 示例配置（BridgeConfigModel）
+# agently-skills-runtime v0.0.0 示例配置（BridgeConfigModel）
 #
 # 说明：
 # - 本仓库主线为“胶水层”：依赖上游 Agently + skills-runtime-sdk；
