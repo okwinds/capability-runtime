@@ -58,7 +58,8 @@ def test_real_form_interview_pro_non_interactive(tmp_path: Path) -> None:
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
-        timeout=180,
+        # 真实模型与内网 provider 的响应时间可能波动较大；此处给足时间避免误报超时。
+        timeout=360,
     )
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
     assert (ws / "submission.json").exists()
@@ -86,7 +87,7 @@ def test_real_incident_triage_assistant_non_interactive(tmp_path: Path) -> None:
         cwd=_REPO_ROOT,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=360,
     )
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
     assert (ws / "incident.log").exists()
@@ -155,7 +156,7 @@ def test_real_rules_parser_pro_non_interactive(tmp_path: Path) -> None:
     json.loads((ws / "result.json").read_text(encoding="utf-8"))
 
 
-def _read_sse_until_terminal(*, url: str, timeout_sec: int = 20) -> dict:
+def _read_sse_until_terminal(*, url: str, timeout_sec: int = 40) -> dict:
     """读取 SSE 直到收到 terminal 或超时。"""
 
     with urlopen(url, timeout=timeout_sec) as resp:
@@ -192,7 +193,8 @@ def test_real_sse_gateway_minimal_smoke(tmp_path: Path) -> None:
         run_id = str(data.get("run_id") or "")
         assert run_id
 
-        terminal = _read_sse_until_terminal(url=f"http://{host}:{port}/events?run_id={run_id}", timeout_sec=25)
+        # 真实模型在流式场景可能更慢，避免 25s 超时误报
+        terminal = _read_sse_until_terminal(url=f"http://{host}:{port}/events?run_id={run_id}", timeout_sec=60)
         assert terminal.get("status") in {"success", "failed", "pending", "cancelled"}
         wal = terminal.get("wal_locator")
         assert isinstance(wal, str) and wal

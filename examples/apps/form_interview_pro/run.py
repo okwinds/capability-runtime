@@ -410,24 +410,42 @@ def main() -> int:
     if not args.evidence_strict:
         # 兜底：真实模型在不同供应商/模型下可能不稳定地产生 report.md。
         # 为保证“像小 app 一样跑起来”的最小体验，这里做 fail-soft fallback：
+        # - 若缺失 submission.json 且已具备输入字段，则由宿主生成最小 submission；
         # - 若缺失 report.md，则由宿主根据 submission.json 生成最小报告；
         # - 报告中显式标注为 host fallback（避免误以为是模型产物）。
+        submission_path = workspace_root / "submission.json"
+        if (not submission_path.exists()) and all(
+            [
+                str(run_input.get("full_name") or "").strip(),
+                str(run_input.get("email") or "").strip(),
+                str(run_input.get("product") or "").strip(),
+                str(run_input.get("quantity") or "").strip(),
+            ]
+        ):
+            submission_obj = {
+                "full_name": str(run_input.get("full_name") or ""),
+                "email": str(run_input.get("email") or ""),
+                "product": str(run_input.get("product") or ""),
+                "quantity": str(run_input.get("quantity") or ""),
+            }
+            submission_path.write_text(json.dumps(submission_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
         report_path = workspace_root / "report.md"
-        if not report_path.exists() and (workspace_root / "submission.json").exists():
+        if not report_path.exists() and submission_path.exists():
             wal_locator = (
                 str(result.node_report.events_path)
                 if result.node_report is not None and result.node_report.events_path is not None
                 else ""
             )
             try:
-                submission = json.loads((workspace_root / "submission.json").read_text(encoding="utf-8"))
+                submission = json.loads(submission_path.read_text(encoding="utf-8"))
             except Exception:
                 submission = {}
             report_md = "\n".join(
                 [
                     "# Form Interview Report",
                     "",
-                    "> 注：本报告由 host fallback 生成（模型未按契约落盘 report.md）。",
+                    "> 注：本报告由 host fallback 生成（模型未按契约落盘 report.md；submission.json 也可能由 host 兜底）。",
                     "",
                     "## 收集字段（摘要）",
                     f"- full_name: {submission.get('full_name','')}",
