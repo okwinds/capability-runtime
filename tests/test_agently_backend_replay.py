@@ -34,6 +34,48 @@ def _backend_from_items(items):
 
 
 @pytest.mark.asyncio
+async def test_backend_filters_non_jsonable_extra_fields_before_requester_serialization():
+    """
+    回归护栏：
+    - skills_runtime 可能把 on_retry=function 等回调塞进 ChatRequest.extra；
+    - 这类值不属于 wire payload，若透传会导致 requester JSON 序列化失败；
+    - backend 必须过滤掉不可 JSON 序列化字段，同时保留可序列化字段。
+    """
+
+    captured = {}
+
+    class _CapturingRequester(_FakeRequester):
+        async def request_model(self, request_data):
+            captured["options"] = dict(getattr(request_data, "request_options", {}) or {})
+            async for x in super().request_model(request_data):
+                yield x
+
+    def factory():
+        return _CapturingRequester([("message", "[DONE]")])
+
+    backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=factory))
+
+    out = [ev async for ev in backend.stream_chat(
+        ChatRequest(
+            model="m",
+            messages=[{"role": "user", "content": "x"}],
+            tools=[],
+            extra={
+                "seed": 1,
+                "on_retry": lambda *_a, **_k: None,
+                "bad": {"nested": (lambda: 1)},
+            },
+        )
+    )]
+
+    assert out and out[-1].type == "completed"
+    opts = captured.get("options") or {}
+    assert opts.get("seed") == 1
+    assert "on_retry" not in opts
+    assert "bad" not in opts
+
+
+@pytest.mark.asyncio
 async def test_backend_emits_text_delta_and_completed_on_stop_finish_reason():
     backend = _backend_from_items(
         [

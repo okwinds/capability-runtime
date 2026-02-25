@@ -106,9 +106,35 @@ class AgentlyChatBackend(ChatBackend):
             request_data.request_options["response_format"] = dict(request.response_format)
 
         # provider 特有扩展字段（best-effort 透传；冲突时以 request_options 显式字段为准）
+        #
+        # 重要：
+        # - request.extra 可能包含“运行时回调/非 JSON 值”（例如 on_retry=function），它们不属于 wire payload；
+        # - 这些值若被透传到 requester，可能导致 JSON 序列化失败并让 real 模式不可用。
         if isinstance(request.extra, dict) and request.extra:
+            import json
+
+            def _is_jsonable(value: Any) -> bool:
+                """
+                判断 value 是否可 JSON 序列化（最小、保守）。
+
+                说明：
+                - 我们不尝试做自定义 default 编码（避免改变 wire 契约语义）；
+                - 不可序列化的字段将被跳过（fail-closed），避免 real 模式因 requester 序列化失败而崩溃。
+                """
+
+                try:
+                    json.dumps(value)
+                    return True
+                except TypeError:
+                    return False
+
             for k, v in request.extra.items():
                 if k not in request_data.request_options:
+                    # 过滤明显的非 wire 字段（以及所有不可 JSON 序列化值）
+                    if k == "on_retry":
+                        continue
+                    if callable(v) or not _is_jsonable(v):
+                        continue
                     request_data.request_options[k] = v
 
         tool_specs = request.tools or []

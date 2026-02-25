@@ -480,10 +480,17 @@ class Runtime:
             skills_cfg = cfg.skills
 
         backend: Any
-        if mode == "bridge":
+        if self._config.sdk_backend is not None:
+            # 离线/测试注入：允许用 FakeChatBackend 等驱动真实 Agent loop，产出完整证据链。
+            backend = self._config.sdk_backend
+        elif mode == "bridge":
             if self._config.agently_agent is None:
                 raise ValueError("RuntimeConfig.agently_agent is required when mode='bridge'")
-            from .adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend, build_openai_compatible_requester_factory
+            from .adapters.agently_backend import (
+                AgentlyBackendConfig,
+                AgentlyChatBackend,
+                build_openai_compatible_requester_factory,
+            )
 
             requester_factory = build_openai_compatible_requester_factory(agently_agent=self._config.agently_agent)
             backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=requester_factory))
@@ -568,6 +575,8 @@ class Runtime:
             "human_io": self._config.human_io,
             "approval_provider": self._config.approval_provider,
             "cancel_checker": self._config.cancel_checker,
+            "exec_sessions": self._config.exec_sessions,
+            "collab_manager": self._config.collab_manager,
             "skills_manager": self._sdk_state.shared_skills_manager,
             # 建设期：直接依赖新版上游 WAL 抽象（不做旧版兼容探测）。
             "wal_backend": self._config.wal_backend,

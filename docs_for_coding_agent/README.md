@@ -12,6 +12,8 @@
 1. `cheatsheet.md` — 最短闭环（统一 Runtime）
 2. `00-mental-model.md` — 心智模型：Protocol → Runtime → Report
 3. `contract.md` — 编码任务契约（Spec-Driven + TDD）
+4. `capability-coverage-map.md` — 能力覆盖矩阵（无死角验收基线）
+5. `examples/README.md` — 可回归示例库（atomic + recipes）
 
 补充说明：
 - 本目录只维护“最短闭环”三份文档，避免为建设期引入多套叙事与学习面。
@@ -27,6 +29,15 @@
 
 入口：
 - `examples/README.md`
+
+## 本变更新增：可回归教学示例库（atomic + recipes）
+
+为让编码智能体通过小样本学习掌握“如何用本框架组织能力并落地代码”，新增：
+- `docs_for_coding_agent/examples/atomic/`：原子示例（每例只教 1 个能力点）
+- `docs_for_coding_agent/examples/recipes/`：组合配方（面向真实交付形态）
+
+入口：
+- `docs_for_coding_agent/examples/README.md`
 
 ## 协作规则
 

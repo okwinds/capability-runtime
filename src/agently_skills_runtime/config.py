@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
 
+from skills_runtime.core.agent import ChatBackend
+from skills_runtime.core.exec_sessions import ExecSessionsProvider
 from skills_runtime.safety.approvals import ApprovalProvider
 from skills_runtime.state.wal_protocol import WalBackend
 from skills_runtime.tools.protocol import HumanIOProvider, ToolSpec
@@ -67,8 +69,21 @@ class RuntimeConfig:
     approval_provider: Optional[ApprovalProvider] = None
     human_io: Optional[HumanIOProvider] = None
     cancel_checker: Optional[Callable[[], bool]] = None
+    exec_sessions: Optional[ExecSessionsProvider] = None
+    collab_manager: Optional[object] = None
     wal_backend: Optional[WalBackend] = None
     env_vars: Dict[str, str] = field(default_factory=dict)
+
+    # === SDK LLM backend 注入（离线回归/测试）===
+    #
+    # 说明：
+    # - 默认情况下 backend 由 mode 决定：
+    #   - bridge：AgentlyChatBackend（复用 OpenAICompatible requester 作为传输层）
+    #   - sdk_native：skills_runtime 原生 OpenAIChatCompletionsBackend
+    # - 当你需要离线可回归（不依赖外网/真实 key），可注入 FakeChatBackend 等实现驱动真实 Agent loop，
+    #   以获得完整的 tool/approvals/WAL/NodeReport 证据链。
+    # - 该字段仅改变“LLM 传输层”，不改变 tool/skills/WAL 的执行真相源（仍为 skills_runtime.Agent）。
+    sdk_backend: Optional[ChatBackend] = None
 
     # === Skills 配置 ===
     skills_config: Optional[Dict[str, Any]] = None
