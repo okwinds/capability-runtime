@@ -16,10 +16,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol
 
-from agent_sdk.core.agent import ChatBackend
-from agent_sdk.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
-from agent_sdk.llm.protocol import ChatRequest
-from agent_sdk.tools.protocol import ToolSpec, tool_spec_to_openai_tool
+from skills_runtime.core.agent import ChatBackend
+from skills_runtime.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
+from skills_runtime.llm.protocol import ChatRequest
+from skills_runtime.tools.protocol import ToolSpec, tool_spec_to_openai_tool
 
 
 class AgentlyRequester(Protocol):

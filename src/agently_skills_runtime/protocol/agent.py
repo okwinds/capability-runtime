@@ -41,12 +41,12 @@ class AgentSpec:
 
       注意：
       - 这不是 Host 的 system/developer 级策略提示词注入通道；
-      - Host 级策略提示词应通过上游 `agent_sdk` 的 prompt/config overlays 注入（避免 `initial_history` 漂移）。
+      - Host 级策略提示词应通过上游 `skills_runtime` 的 prompt/config overlays 注入（避免 `initial_history` 漂移）。
     """
 
     base: CapabilitySpec
     tools: List[str] = field(default_factory=list)
-    # skills：仅声明“希望使用的 skill 名称”，注入与执行由上游 agent_sdk 完成。
+    # skills：仅声明“希望使用的 skill 名称”，注入与执行由上游 skills_runtime 完成。
     skills: List[str] = field(default_factory=list)
     # skills_mention_map：把 skill_name 映射为 SDK 可识别的严格 mention（如 "$[account:domain].skill_name"）。
     skills_mention_map: Dict[str, str] = field(default_factory=dict)

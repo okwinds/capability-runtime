@@ -15,8 +15,8 @@ from typing import List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.state.replay import ResumeReplayState, rebuild_resume_replay_state
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.state.replay import ResumeReplayState, rebuild_resume_replay_state
 
 
 def load_agent_events_from_jsonl(*, events_path: Union[Path, str]) -> List[AgentEvent]:

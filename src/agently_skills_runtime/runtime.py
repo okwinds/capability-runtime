@@ -19,9 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.core.errors import FrameworkError, FrameworkIssue
-from agent_sdk.skills.manager import SkillsManager
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.core.errors import FrameworkError, FrameworkIssue
+from skills_runtime.skills.manager import SkillsManager
 
 from .config import RuntimeConfig, RuntimeMode, normalize_workspace_root
 from .guards import ExecutionGuards
@@ -294,12 +294,12 @@ class Runtime:
         import importlib.metadata
 
         def _get_version(names: List[str]) -> Optional[str]:
-            # 证据链上优先使用 agent_sdk.__version__（比 dist-info 更可靠，尤其在 editable 安装场景）。
+            # 证据链上优先使用 skills_runtime.__version__（比 dist-info 更可靠，尤其在 editable 安装场景）。
             if any(n in ("skills-runtime-sdk", "skills-runtime-sdk-python") for n in names):
                 try:
-                    import agent_sdk  # type: ignore
+                    import skills_runtime  # type: ignore
 
-                    v = getattr(agent_sdk, "__version__", None)
+                    v = getattr(skills_runtime, "__version__", None)
                     if isinstance(v, str) and v.strip():
                         return v.strip()
                 except Exception:
@@ -317,7 +317,7 @@ class Runtime:
             completion_reason=completion_reason,
             engine={
                 "name": "skills-runtime-sdk-python",
-                "module": "agent_sdk",
+                "module": "skills_runtime",
                 "version": _get_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
             },
             bridge={
@@ -459,8 +459,8 @@ class Runtime:
         workspace_root = normalize_workspace_root(self._config.workspace_root)
         config_paths = [Path(p).expanduser().resolve() for p in self._config.sdk_config_paths]
 
-        from agent_sdk.config.defaults import load_default_config_dict
-        from agent_sdk.config.loader import load_config_dicts
+        from skills_runtime.config.defaults import load_default_config_dict
+        from skills_runtime.config.loader import load_config_dicts
 
         overlays: List[Dict[str, Any]] = [load_default_config_dict()]
         overlay_issues: List[FrameworkIssue] = []
@@ -475,7 +475,7 @@ class Runtime:
         cfg = load_config_dicts(overlays)
 
         if self._config.skills_config is not None:
-            skills_cfg = _normalize_skills_config_for_agent_sdk(self._config.skills_config)
+            skills_cfg = _normalize_skills_config_for_skills_runtime(self._config.skills_config)
         else:
             skills_cfg = cfg.skills
 
@@ -488,7 +488,7 @@ class Runtime:
             requester_factory = build_openai_compatible_requester_factory(agently_agent=self._config.agently_agent)
             backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=requester_factory))
         else:
-            from agent_sdk.llm.openai_chat import OpenAIChatCompletionsBackend
+            from skills_runtime.llm.openai_chat import OpenAIChatCompletionsBackend
 
             backend = OpenAIChatCompletionsBackend(cfg.llm)
 
@@ -532,7 +532,7 @@ class Runtime:
         try:
             mgr = SkillsManager(
                 workspace_root=self._sdk_state.workspace_root,
-                skills_config=_normalize_skills_config_for_agent_sdk(self._sdk_state.skills_config),
+                skills_config=_normalize_skills_config_for_skills_runtime(self._sdk_state.skills_config),
             )
             upstream_issues = mgr.preflight()
             overlay_issues = list(getattr(self._sdk_state, "skills_config_overlay_issues", []) or [])
@@ -552,13 +552,13 @@ class Runtime:
         创建 per-run SDK Agent 实例（避免跨 run 共享可变状态）。
 
         返回：
-        - agent_sdk.core.agent.Agent 实例
+        - skills_runtime.core.agent.Agent 实例
         """
 
         if self._sdk_state is None:
             raise RuntimeError("SDK state is not initialized")
 
-        from agent_sdk.core.agent import Agent
+        from skills_runtime.core.agent import Agent
 
         kwargs: Dict[str, Any] = {
             "workspace_root": self._sdk_state.workspace_root,
@@ -604,9 +604,9 @@ def _load_yaml_dict(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def _normalize_skills_config_for_agent_sdk(skills_config: Any) -> Any:
+def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
     """
-    将 RuntimeConfig.skills_config 归一为上游 `AgentSdkSkillsConfig` 可接受的形态（dict 或 model）。
+    将 RuntimeConfig.skills_config 归一为上游 skills config 可接受的形态（dict 或 model）。
 
     背景：
     - `skills-runtime-sdk>=1.0` 对 skills 配置 schema 采用 `extra=forbid`，未知字段会直接导致校验异常；

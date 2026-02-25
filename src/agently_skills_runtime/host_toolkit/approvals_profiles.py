@@ -34,7 +34,7 @@ class ApprovalsProfile(BaseModel):
 
     def to_sdk_overlay(self) -> Dict[str, Any]:
         """
-        转为 agent_sdk 配置 overlays。
+        转为 skills_runtime 配置 overlays。
 
         返回：
         - overlays dict（可写入 YAML 并作为 config_paths 传入）

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 说明：
 - 本仓对外承诺的能力原语仅包含 `agent` 与 `workflow`（见 `CapabilityKind`）。
-- skills 的发现/治理/执行引擎属于上游 `agent_sdk`；本仓不把 `skill` 做成公共协议原语。
+- skills 的发现/治理/执行引擎属于上游 `skills_runtime`；本仓不把 `skill` 做成公共协议原语。
 """
 
 from dataclasses import dataclass, field

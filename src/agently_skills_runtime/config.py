@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from agent_sdk.safety.approvals import ApprovalProvider
-from agent_sdk.state.wal_protocol import WalBackend
-from agent_sdk.tools.protocol import HumanIOProvider, ToolSpec
+from skills_runtime.safety.approvals import ApprovalProvider
+from skills_runtime.state.wal_protocol import WalBackend
+from skills_runtime.tools.protocol import HumanIOProvider, ToolSpec
 
 
 PreflightMode = Literal["error", "warn", "off"]

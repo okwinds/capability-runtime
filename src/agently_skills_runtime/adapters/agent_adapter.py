@@ -2,7 +2,7 @@
 AgentAdapter：AgentSpec 的执行适配器（统一 mock/bridge/sdk_native）。
 
 说明：
-- 本仓不实现 skills 引擎；skills 的注入与执行由上游 `agent_sdk` 完成；
+- 本仓不实现 skills 引擎；skills 的注入与执行由上游 `skills_runtime` 完成；
 - 本适配器负责把 AgentSpec + input 翻译成 SDK Agent 的 task 文本，并驱动事件流执行；
 - `Runtime.run_stream()` 的事件转发语义依赖本适配器的流式执行能力。
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.core.errors import FrameworkIssue
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.core.errors import FrameworkIssue
 
 from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityResult, CapabilityStatus

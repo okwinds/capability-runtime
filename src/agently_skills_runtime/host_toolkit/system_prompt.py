@@ -3,7 +3,7 @@ system/developer 提示词（策略层）工具。
 
 MVR 约束：
 - system/developer 提示词不通过 `initial_history` 注入；
-- 由宿主生成 SDK overlays（prompt/config）并注入到 `agent_sdk.Agent`（或通过 Bridge 透传 config_paths）。
+- 由宿主生成 SDK overlays（prompt/config）并注入到 `skills_runtime.Agent`（或通过 Bridge 透传 config_paths）。
 """
 
 from __future__ import annotations
@@ -86,7 +86,7 @@ class StaticSystemPromptProvider:
 
 def build_prompt_overlay(*, prompt: SystemPrompt) -> Dict[str, Any]:
     """
-    把 SystemPrompt 转成 agent_sdk 配置 overlays（prompt.*）。
+    把 SystemPrompt 转成 skills_runtime 配置 overlays（prompt.*）。
 
     参数：
     - prompt：SystemPrompt
@@ -130,4 +130,3 @@ def compute_system_prompt_digest(*, prompt: SystemPrompt) -> SystemPromptDigest:
         bytes=len(raw),
         policy_id=prompt.policy_id,
     )
-

@@ -15,8 +15,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
-from agent_sdk.tools.protocol import ToolCall, ToolResult, ToolSpec
-from agent_sdk.tools.registry import ToolExecutionContext
+from skills_runtime.tools.protocol import ToolCall, ToolResult, ToolSpec
+from skills_runtime.tools.registry import ToolExecutionContext
 
 
 RAG_DEMO_TOOL_QUERY = "节点报告 tool 证据链"

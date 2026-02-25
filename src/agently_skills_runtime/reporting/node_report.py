@@ -11,18 +11,18 @@ import importlib.metadata
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from ..types import NodeReportV2, NodeToolCallReport
 
 
-def _get_agent_sdk_version() -> Optional[str]:
-    """读取 agent_sdk.__version__（若可用）。"""
+def _get_skills_runtime_version() -> Optional[str]:
+    """读取 skills_runtime.__version__（若可用）。"""
 
     try:
-        import agent_sdk  # type: ignore
+        import skills_runtime  # type: ignore
 
-        v = getattr(agent_sdk, "__version__", None)
+        v = getattr(skills_runtime, "__version__", None)
         if isinstance(v, str) and v.strip():
             return v.strip()
     except Exception:
@@ -296,8 +296,8 @@ class NodeReportBuilder:
             completion_reason=completion_reason or "",
             engine={
                 "name": "skills-runtime-sdk-python",
-                "module": "agent_sdk",
-                "version": _get_agent_sdk_version()
+                "module": "skills_runtime",
+                "version": _get_skills_runtime_version()
                 or _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
             },
             bridge={"name": "agently-skills-runtime", "version": _get_first_dist_version(["agently-skills-runtime"])},
