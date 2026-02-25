@@ -4,7 +4,7 @@
 
 - 对外协议原语：仅 **Agent / Workflow**（可声明、可注册、可校验、可执行、可编排）
 - skills 引擎：由上游 `skills_runtime`（skills-runtime-sdk）提供（catalog/mention/sources/preflight/tools/approvals/WAL/events）
-- 证据链优先：桥接模式下产出稳定的结构化证据 `NodeReportV2`（控制面），同时保留生态友好的 `final_output`（数据面）
+- 证据链优先：桥接模式下产出稳定的结构化证据 `NodeReportV2`（控制面），同时保留生态友好的 `output`（数据面）
 - 当前版本号：`0.0.0`（建设期；版本号已重置，暂不做历史继承口径）
 
 > 重要决策：本仓当前不提供 “TriggerFlow 作为 SDK Agent tool（`triggerflow_run_flow`）” 的桥接；推荐使用 TriggerFlow 顶层编排多个 `Runtime.run()`。
@@ -44,7 +44,7 @@ python examples/01_quickstart/run_bridge.py
 
 - **本仓对外承诺的能力原语**：仅 **Agent / Workflow**（可注册/可编排/可执行），统一入口为 `Runtime`。
 - **skills 引擎能力的真相源**：由上游 `skills_runtime`（`skills-runtime-sdk`）提供（strict catalog + mention + sources + preflight + tools/approvals + WAL/events）。本仓不把 `skill` 作为公共协议原语，也不重造 skills 注入/调度引擎，避免形成第二套 skills 体系。
-- **证据链优先**：编排分支与审计优先读取 `NodeReportV2` / WAL / tool evidence（控制面），而不是解析 `final_output` 自由文本（数据面）。
+- **证据链优先**：编排分支与审计优先读取 `NodeReportV2` / WAL / tool evidence（控制面），而不是解析 `output` 自由文本（数据面）。
 
 你可以把它理解为：**“协议二元（Agent/Workflow）+ 引擎一元（skills_runtime）+ 证据链闭环（NodeReport/WAL）”**。
 
@@ -59,31 +59,13 @@ python examples/01_quickstart/run_bridge.py
 > 若你在 GitHub 上看到 Mermaid 无法渲染/报错，请直接看下方的 ASCII 图（所有渲染器都稳定支持）。
 
 ```mermaid
-flowchart TD
-  subgraph Host["Host (outside this repo)"]
-    TF["TriggerFlow (top-level orchestration)"]
-    APP["Host code calls Runtime.run()"]
-  end
-
-  subgraph BR["agently-skills-runtime (this repo)"]
-    P["Protocol: AgentSpec/WorkflowSpec"]
-    R["Runtime: register/validate/run"]
-    NR["NodeReportV2 (evidence chain)"]
-  end
-
-  subgraph U1["Upstream: Agently"]
-    AGT["OpenAICompatible requester (optional transport)"]
-  end
-
-  subgraph U2["Upstream: skills_runtime (skills-runtime-sdk)"]
-    SDK["Agent loop + ToolRegistry + SkillsManager"]
-    EVT["AgentEvent/WAL"]
-  end
-
-  TF --> APP --> R
-  P --> R
-  R --> SDK --> EVT --> NR
-  AGT --> SDK
+flowchart LR
+  TF[TriggerFlow] --> APP[Host code]
+  APP --> R[Runtime.run / Runtime.run_stream]
+  P[AgentSpec / WorkflowSpec] --> R
+  R --> SDK[skills_runtime engine]
+  AGT[Agently OpenAICompatible] --> SDK
+  SDK --> EVT[WAL / AgentEvent] --> NR[NodeReportV2]
 ```
 
 ## 能力来源与执行闭环（ASCII 图）
@@ -110,7 +92,7 @@ flowchart TD
                              | (真实执行与 skills/tool/approvals 委托)
                              v
                     +------------------------+
-                    | Upstream: skills_runtime|
+                    | Upstream: skills_runtime |
                     | - Skills Engine        |
                     | - Tools/Approvals      |
                     | - WAL / AgentEvent     |
@@ -118,7 +100,7 @@ flowchart TD
                                 |
                                 | (events/evidence)
                                 v
-                     NodeReportV2 (控制面) + final_output (数据面)
+                     NodeReportV2 (控制面) + output (数据面)
 ```
 
 ### 图 2：面向能力的执行闭环（声明 → 注册 → 编排 → 执行 → 取证）
@@ -150,7 +132,7 @@ skills_runtime.Agent.run_stream_async(...)    (上游)
 NodeReportBuilder -> NodeReportV2             (本仓)
   |
   +--> 业务分支/审计看 NodeReport（控制面）
-  +--> 业务展示/落盘用 final_output（数据面）
+  +--> 业务展示/落盘用 output（数据面）
 ```
 
 ### 图 3：数据面 vs 控制面（为什么不只看输出文本）
@@ -181,6 +163,62 @@ your-domain/
   registry.py             # 一键 register：把 agents/workflows 注册进 Runtime
   main.py                 # 入口：run(workflow_id) -> NodeReportV2 + output
 ```
+
+### 图 5：三元“互相调用/引用”的落地策略（推荐 Scheme2：薄壳 Agent 节点）
+
+> 口径提醒：本仓不把 `skill` 当作公共协议原语；skills 的发现/mention/治理/执行在上游 `skills_runtime` 引擎层完成。  
+> 因此所谓“三元互调”，更多是**效果层互调**：Workflow 负责强结构编排，Agent 负责承载 skills 与必要的 host 侧桥梁。
+
+```text
+(A) Workflow 编排多个“以 skill 为核心的节点”
+
++-----------------------+        +----------------------------+
+| WorkflowSpec          |  step  | AgentSpec (thin shell)     |
+| (this repo)           +------->| (this repo)                |
+| - Step/Loop/Parallel  |        | - task 内引用 skills       |
++-----------------------+        +-------------+--------------+
+                                              |
+                                              | mention / overlays / approvals
+                                              v
+                                   +----------------------------+
+                                   | skills_runtime Skill/Tools |
+                                   | (upstream engine)          |
+                                   +----------------------------+
+
+(B) Agent 需要“触发另一个 Workflow”（非内置）：由 Host/TriggerFlow 负责顶层编排
+
+AgentSpec  --(host-provided callback/tool, optional)-->  Host / TriggerFlow
+Host / TriggerFlow  ------------------------------->  Runtime.run("WF-*")
+```
+
+### 图 6：把“skills 作为 workflow 节点”的推荐落地（仍然只用 Agent/Workflow 原语）
+
+```text
+你想要的业务效果：
+  Workflow 里每个节点都“基于某个 skill 做事”，最后汇总输出
+
+推荐落地（不创建 Skill 节点类型）：
+  - 为每个 skill（或一组 skills）创建一个薄壳 AgentSpec
+  - Workflow 的 Step 仍然只指向 Agent/Workflow
+
+  +---------------------+
+  | WorkflowSpec        |
+  |  - step: draft      +--> AgentSpec("draft")  : task 里引用某个 skill
+  |  - step: review     +--> AgentSpec("review") : task 里引用某个 skill
+  |  - step: final      +--> AgentSpec("final")  : 汇总 step_outputs / evidence
+  +---------------------+
+```
+
+## 实现落点（从 README 直达代码）
+
+> 目标：把“主旨/结构/用法”落到真实代码位置，避免 README 变成抽象口号。
+
+- `Runtime`（唯一入口）：`src/agently_skills_runtime/runtime.py`
+  - `Runtime.register*()`：注册
+  - `Runtime.run()` / `Runtime.run_stream()`：执行
+- `WorkflowAdapter`（强结构编排）：`src/agently_skills_runtime/adapters/workflow_adapter.py`
+- `AgentAdapter`（承载 skills/桥接）：`src/agently_skills_runtime/adapters/agent_adapter.py`
+- `NodeReportV2`（证据链聚合）：`src/agently_skills_runtime/reporting/node_report.py`
 
 ## 运行模式（RuntimeConfig.mode）
 

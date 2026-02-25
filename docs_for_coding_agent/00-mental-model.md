@@ -19,32 +19,16 @@
 本仓是 runtime/adapter/bridge 的契约收敛层，不 fork 上游引擎。
 
 ```mermaid
-flowchart TD
-  subgraph Host["Host (outside this repo)"]
-    TF["TriggerFlow (top-level orchestration)"]
-    APP["Host code calls Runtime.run()"]
-  end
-
-  subgraph BR["agently-skills-runtime (this repo)"]
-    P["Protocol: AgentSpec/WorkflowSpec"]
-    R["Runtime: register/validate/run"]
-    NR["NodeReportV2 (evidence chain)"]
-  end
-
-  subgraph U1["Upstream: Agently"]
-    AGT["OpenAICompatible requester (optional transport)"]
-  end
-
-  subgraph U2["Upstream: skills_runtime (skills-runtime-sdk)"]
-    SDK["Agent loop + ToolRegistry + SkillsManager"]
-    EVT["AgentEvent/WAL"]
-  end
-
-  TF --> APP --> R
-  P --> R
-  R --> SDK --> EVT --> NR
-  AGT --> SDK
+flowchart LR
+  TF[TriggerFlow] --> APP[Host code]
+  APP --> R[Runtime.run / Runtime.run_stream]
+  P[AgentSpec / WorkflowSpec] --> R
+  R --> SDK[skills_runtime engine]
+  AGT[Agently OpenAICompatible] --> SDK
+  SDK --> EVT[WAL / AgentEvent] --> NR[NodeReportV2]
 ```
+
+> 若你在 GitHub 上看到 Mermaid 无法渲染/报错，请直接看 `README.md` 的 ASCII 图（所有渲染器都稳定支持）。
 
 关键口径：
 
