@@ -14,6 +14,6 @@ def test_dependency_pins_skills_runtime_sdk_version() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert '"skills-runtime-sdk==0.1.4.post1"' in pyproject_text
+    assert '"skills-runtime-sdk==0.1.4.post2"' in pyproject_text
     assert '"skills-runtime-sdk==1.0.4.post1"' not in pyproject_text
     assert '"skills-runtime-sdk==0.1.4"' not in pyproject_text
