@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -36,7 +36,7 @@ class _FakeAgent:
 
 
 def _mk_runtime(monkeypatch: pytest.MonkeyPatch, *, events: List[AgentEvent]) -> Runtime:
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **kwargs: _FakeAgent(events=events, **kwargs))
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **kwargs: _FakeAgent(events=events, **kwargs))
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
     return rt

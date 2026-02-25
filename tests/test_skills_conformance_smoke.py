@@ -4,15 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from agent_sdk.core.errors import FrameworkError
-from agent_sdk.skills.manager import SkillsManager
-from agent_sdk.skills.mentions import extract_skill_mentions
-from agent_sdk.tools.builtin.skill_exec import _parse_single_skill_mention as _parse_single_skill_mention_exec
-from agent_sdk.tools.builtin.skill_exec import skill_exec
-from agent_sdk.tools.builtin.skill_ref_read import _parse_single_skill_mention as _parse_single_skill_mention_ref
-from agent_sdk.tools.builtin.skill_ref_read import skill_ref_read
-from agent_sdk.tools.protocol import ToolCall
-from agent_sdk.tools.registry import ToolExecutionContext
+from skills_runtime.core.errors import FrameworkError
+from skills_runtime.skills.manager import SkillsManager
+from skills_runtime.skills.mentions import extract_skill_mentions
+from skills_runtime.tools.builtin.skill_exec import _parse_single_skill_mention as _parse_single_skill_mention_exec
+from skills_runtime.tools.builtin.skill_exec import skill_exec
+from skills_runtime.tools.builtin.skill_ref_read import _parse_single_skill_mention as _parse_single_skill_mention_ref
+from skills_runtime.tools.builtin.skill_ref_read import skill_ref_read
+from skills_runtime.tools.protocol import ToolCall
+from skills_runtime.tools.registry import ToolExecutionContext
 
 
 def _write_minimal_skill_md(path: Path, *, name: str = "hello_skill", description: str = "desc") -> None:
@@ -119,7 +119,7 @@ def test_b005_scan_frontmatter_only_does_not_load_skill_body(tmp_path: Path, mon
     _write_minimal_skill_md(tmp_path / "skills" / "s1" / "SKILL.md", name="hello_skill", description="d")
 
     # scan 阶段必须 metadata-only：不允许走 load_skill_from_path（会读取全文并解析 body）。
-    import agent_sdk.skills.loader as loader
+    import skills_runtime.skills.loader as loader
 
     def _boom(*args, **kwargs):
         raise AssertionError("scan must not call load_skill_from_path (body load)")

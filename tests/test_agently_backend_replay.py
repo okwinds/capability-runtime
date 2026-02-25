@@ -1,7 +1,7 @@
 import pytest
 
 from agently_skills_runtime.adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend
-from agent_sdk.llm.protocol import ChatRequest
+from skills_runtime.llm.protocol import ChatRequest
 
 
 class _FakeRequestData:

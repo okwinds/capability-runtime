@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -27,7 +27,7 @@ class _FakeAgent:
 
 
 def _mk_runtime(monkeypatch):
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: _FakeAgent(events=[]))
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **_: _FakeAgent(events=[]))
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
     return rt
@@ -45,7 +45,7 @@ async def test_run_async_passes_initial_history_to_sdk_agent(monkeypatch):
         ),
     ]
     fake_agent = _FakeAgent(events=fake_events)
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **_: fake_agent)
 
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
@@ -71,7 +71,7 @@ async def test_run_async_injects_session_and_turn_id_into_node_report_meta(monke
         ),
     ]
     fake_agent = _FakeAgent(events=fake_events)
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **_: fake_agent)
 
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))

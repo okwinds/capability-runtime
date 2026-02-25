@@ -5,7 +5,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -36,7 +36,7 @@ async def test_run_async_passes_report_artifacts_to_node_result(monkeypatch, tmp
     回归护栏：CapabilityResult.artifacts 必须透传 NodeReport.artifacts（证据链对齐）。
     """
 
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=tmp_path, preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
 

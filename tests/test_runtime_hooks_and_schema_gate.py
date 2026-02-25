@@ -5,7 +5,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -49,7 +49,7 @@ def _mk_runtime(
     output_validation_mode: str = "off",
     output_validator=None,
 ) -> Runtime:
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
     rt = Runtime(
         RuntimeConfig(
             mode="sdk_native",

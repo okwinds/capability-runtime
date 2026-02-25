@@ -3,8 +3,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.core.errors import FrameworkIssue
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.core.errors import FrameworkIssue
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -49,7 +49,7 @@ class _FakeAgent:
 
 
 def _mk_runtime(monkeypatch: pytest.MonkeyPatch, *, preflight_mode: str, config_paths: Optional[List[Path]] = None) -> Runtime:
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
     rt = Runtime(
         RuntimeConfig(
             mode="sdk_native",
@@ -121,7 +121,7 @@ async def test_run_preflight_error_does_not_fail_open_when_preflight_raises(monk
 
     rt = _mk_runtime(monkeypatch, preflight_mode="error")
 
-    import agent_sdk.skills.manager as skills_manager_mod
+    import skills_runtime.skills.manager as skills_manager_mod
 
     def boom(_self) -> list[FrameworkIssue]:
         raise RuntimeError("preflight boom")

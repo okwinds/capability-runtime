@@ -5,10 +5,10 @@ from typing import List, Optional
 
 import pytest
 
-from agent_sdk.core.agent import Agent
-from agent_sdk.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
-from agent_sdk.llm.fake import FakeChatBackend, FakeChatCall
-from agent_sdk.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
+from skills_runtime.core.agent import Agent
+from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
+from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
+from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
 from agently_skills_runtime.reporting.node_report import NodeReportBuilder
 

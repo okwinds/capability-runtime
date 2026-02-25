@@ -5,10 +5,10 @@ from typing import List, Optional
 
 import pytest
 
-from agent_sdk.core.agent import Agent
-from agent_sdk.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
-from agent_sdk.llm.fake import FakeChatBackend, FakeChatCall
-from agent_sdk.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
+from skills_runtime.core.agent import Agent
+from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
+from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
+from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
 from agently_skills_runtime.reporting.node_report import NodeReportBuilder
 
@@ -71,4 +71,3 @@ def test_approval_evidence_chain_for_file_write_is_auditable_and_no_content_leak
     assert report.events_path, "expected events_path from SDK WAL"
     wal_text = Path(report.events_path).read_text(encoding="utf-8")
     assert secret_content not in wal_text
-

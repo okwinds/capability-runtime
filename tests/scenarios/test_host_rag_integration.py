@@ -8,9 +8,9 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.tools.protocol import ToolCall
-from agent_sdk.tools.registry import ToolExecutionContext, ToolRegistry
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.tools.protocol import ToolCall
+from skills_runtime.tools.registry import ToolExecutionContext, ToolRegistry
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -62,7 +62,7 @@ class _FakeAgent:
 def _mk_runtime(monkeypatch: pytest.MonkeyPatch) -> Runtime:
     """构造用于离线场景回归的 Runtime（sdk_native）。"""
 
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: _FakeAgent(events=[]))
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **_: _FakeAgent(events=[]))
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
     return rt
@@ -105,7 +105,7 @@ async def test_pre_run_injection_meta_uses_minimal_disclosure(monkeypatch: pytes
         ),
     ]
     fake_agent = _FakeAgent(events=fake_events)
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", lambda **_: fake_agent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **_: fake_agent)
 
     provider = InMemoryRagProvider.from_documents(
         [

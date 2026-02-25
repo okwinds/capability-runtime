@@ -6,8 +6,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.tools.protocol import ToolSpec
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.tools.protocol import ToolSpec
 
 from agently_skills_runtime.config import CustomTool, RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -48,7 +48,7 @@ class _FakeAgent:
 
 @pytest.mark.asyncio
 async def test_custom_tools_override_flag_is_propagated(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
 
     spec = ToolSpec(
         name="t",

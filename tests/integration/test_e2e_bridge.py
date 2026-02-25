@@ -15,8 +15,8 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from agent_sdk.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
-from agent_sdk.tools.protocol import ToolCall, ToolSpec
+from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
+from skills_runtime.tools.protocol import ToolCall, ToolSpec
 
 from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
 from agently_skills_runtime.config import CustomTool
@@ -137,4 +137,3 @@ async def test_e2e_bridge_smoke_tool_call_and_node_report(tmp_path: Path) -> Non
 
     tool_calls = getattr(terminal.node_report, "tool_calls", None) or []
     assert len(tool_calls) >= 1, "模型未触发 tool_call；请确认 provider/模型支持 tools/function calling。"
-

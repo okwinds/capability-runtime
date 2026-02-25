@@ -5,7 +5,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -66,7 +66,7 @@ def test_bridge_mode_calls_requester_factory(monkeypatch: pytest.MonkeyPatch, tm
 
     monkeypatch.setattr(ab, "build_openai_compatible_requester_factory", _factory)
     monkeypatch.setattr(ab, "AgentlyChatBackend", _FakeAgentlyChatBackend)
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
 
     rt = Runtime(RuntimeConfig(mode="bridge", workspace_root=tmp_path, agently_agent=object(), preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
@@ -82,7 +82,7 @@ async def test_sdk_native_mode_does_not_call_requester_factory(monkeypatch: pyte
         "build_openai_compatible_requester_factory",
         lambda **_: (_ for _ in ()).throw(AssertionError("must not call requester factory in sdk_native")),
     )
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
 
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=tmp_path, preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
@@ -92,7 +92,7 @@ async def test_sdk_native_mode_does_not_call_requester_factory(monkeypatch: pyte
 
 @pytest.mark.asyncio
 async def test_sdk_native_mode_passes_openai_backend_to_agent(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
 
     rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=tmp_path, preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))

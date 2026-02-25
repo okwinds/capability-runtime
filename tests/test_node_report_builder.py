@@ -1,6 +1,6 @@
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
+from skills_runtime.core.contracts import AgentEvent
 
 from agently_skills_runtime.reporting.node_report import NodeReportBuilder
 
@@ -209,32 +209,32 @@ def test_report_raises_on_empty_events():
         NodeReportBuilder().build(events=[])
 
 
-def test_report_engine_version_prefers_agent_sdk_dunder_version(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_report_engine_version_prefers_skills_runtime_dunder_version(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    回归护栏：证据链里 engine.version 应优先使用 agent_sdk.__version__。
+    回归护栏：证据链里 engine.version 应优先使用 skills_runtime.__version__。
 
     原因：
     - editable 安装或某些打包环境下 dist-info 版本可能漂移/滞后；
-    - agent_sdk.__version__ 与运行时代码更一致，取证更可靠。
+    - skills_runtime.__version__ 与运行时代码更一致，取证更可靠。
     """
 
-    import agent_sdk
+    import skills_runtime
     import agently_skills_runtime.reporting.node_report as node_report_mod
 
     def fake_version(_: str) -> str:
-        raise AssertionError("engine.version 不应依赖 importlib.metadata.version（优先使用 agent_sdk.__version__）")
+        raise AssertionError("engine.version 不应依赖 importlib.metadata.version（优先使用 skills_runtime.__version__）")
 
     monkeypatch.setattr(node_report_mod.importlib.metadata, "version", fake_version)
 
     events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"})]
     rep = NodeReportBuilder().build(events=events)
 
-    assert rep.engine.get("version") == agent_sdk.__version__
+    assert rep.engine.get("version") == skills_runtime.__version__
 
 
 def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    回归护栏：当无法读取 agent_sdk.__version__ 时，仍需按 dist 名称顺序回退。
+    回归护栏：当无法读取 skills_runtime.__version__ 时，仍需按 dist 名称顺序回退。
 
     历史原因某些环境可能仍以 `skills-runtime-sdk-python` 作为 dist 名，
     bridge 层应优先尝试 `skills-runtime-sdk` 并兼容回退。
@@ -244,7 +244,7 @@ def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest
 
     calls: list[str] = []
 
-    def fake_get_agent_sdk_version() -> None:
+    def fake_get_skills_runtime_version() -> None:
         return None
 
     def fake_version(dist_name: str) -> str:
@@ -255,7 +255,7 @@ def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest
             return "0.3.0"
         raise Exception("not found")
 
-    monkeypatch.setattr(node_report_mod, "_get_agent_sdk_version", fake_get_agent_sdk_version)
+    monkeypatch.setattr(node_report_mod, "_get_skills_runtime_version", fake_get_skills_runtime_version)
     monkeypatch.setattr(node_report_mod.importlib.metadata, "version", fake_version)
 
     events = [_ev("run_started"), _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"})]

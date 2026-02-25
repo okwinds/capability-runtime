@@ -5,10 +5,10 @@ from typing import List
 
 import pytest
 
-from agent_sdk.core.agent import Agent
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
-from agent_sdk.llm.fake import FakeChatBackend, FakeChatCall
+from skills_runtime.core.agent import Agent
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
+from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 
 from agently_skills_runtime.host_toolkit.resume import build_resume_replay_summary, load_agent_events_from_jsonl
 

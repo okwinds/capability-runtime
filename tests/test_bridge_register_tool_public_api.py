@@ -5,8 +5,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import pytest
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.tools.protocol import ToolSpec
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.tools.protocol import ToolSpec
 
 class _FakeAgent:
     last_instance = None
@@ -42,7 +42,7 @@ async def test_custom_tools_are_injected_into_sdk_agent(monkeypatch: pytest.Monk
     回归护栏：RuntimeConfig.custom_tools 必须在每次创建 SDK Agent 时注入（公共扩展点）。
     """
 
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
 
     spec = ToolSpec(
         name="run_workflow",

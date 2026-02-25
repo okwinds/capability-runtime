@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agent_sdk.config.defaults import load_default_config_dict
-from agent_sdk.config.loader import load_config_dicts
-from agent_sdk.skills.manager import SkillsManager
+from skills_runtime.config.defaults import load_default_config_dict
+from skills_runtime.config.loader import load_config_dicts
+from skills_runtime.skills.manager import SkillsManager
 
 
 @pytest.mark.integration

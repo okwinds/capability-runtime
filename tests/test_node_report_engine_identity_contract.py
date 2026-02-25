@@ -6,8 +6,8 @@ import pytest
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from agent_sdk.core.contracts import AgentEvent
-from agent_sdk.core.errors import FrameworkIssue
+from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.core.errors import FrameworkIssue
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -39,7 +39,7 @@ class _FakeAgent:
 
 
 def _mk_runtime(monkeypatch: pytest.MonkeyPatch, *, preflight_mode: str, output_validation_mode: str = "off", output_validator=None) -> Runtime:
-    monkeypatch.setattr("agent_sdk.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
     rt = Runtime(
         RuntimeConfig(
             mode="sdk_native",
@@ -67,7 +67,7 @@ async def test_engine_name_is_fixed_when_preflight_fail_closed(monkeypatch: pyte
     out = await rt.run("A", context=ExecutionContext(run_id="rid-preflight"))
     assert out.node_report is not None
     assert out.node_report.engine.get("name") == "skills-runtime-sdk-python"
-    assert out.node_report.engine.get("module") == "agent_sdk"
+    assert out.node_report.engine.get("module") == "skills_runtime"
 
 
 @pytest.mark.asyncio
@@ -86,4 +86,4 @@ async def test_engine_name_is_fixed_when_output_validation_fail_closed(monkeypat
     out = await rt.run("A", context=ExecutionContext(run_id="rid-ov"))
     assert out.node_report is not None
     assert out.node_report.engine.get("name") == "skills-runtime-sdk-python"
-    assert out.node_report.engine.get("module") == "agent_sdk"
+    assert out.node_report.engine.get("module") == "skills_runtime"

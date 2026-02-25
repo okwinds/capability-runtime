@@ -7,8 +7,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 import pytest
 
-from agent_sdk.llm.chat_sse import ChatStreamEvent
-from agent_sdk.llm.protocol import ChatRequest
+from skills_runtime.llm.chat_sse import ChatStreamEvent
+from skills_runtime.llm.protocol import ChatRequest
 
 from agently_skills_runtime.config import RuntimeConfig
 from agently_skills_runtime.protocol.agent import AgentSpec
@@ -29,11 +29,11 @@ class FakeChatBackend:
 async def test_sdk_native_run_stream_yields_events_and_terminal_result(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
     验收点：
-    - 使用真实 agent_sdk.Agent loop
+    - 使用真实 skills_runtime.Agent loop
     - Runtime.run_stream 能先转发 AgentEvent，再产出 CapabilityResult
     """
 
-    import agent_sdk.llm.openai_chat as openai_chat
+    import skills_runtime.llm.openai_chat as openai_chat
 
     monkeypatch.setattr(openai_chat, "OpenAIChatCompletionsBackend", lambda *_args, **_kwargs: FakeChatBackend())
 
