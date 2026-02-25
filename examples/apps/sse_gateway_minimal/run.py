@@ -39,6 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 from examples.apps._shared.app_support import (  # noqa: E402
     AutoApprovalProvider,
     ScriptedApprovalProvider,
+    build_evidence_strict_output_validator,
     build_bridge_runtime_from_env,
     env_or_default,
     load_env_file,
@@ -127,8 +128,9 @@ class _RunHandle:
 class _AppState:
     """服务端全局状态（线程安全：用 GIL + Queue 即可）。"""
 
-    def __init__(self, runtime: Runtime, workspace_root: Path) -> None:
+    def __init__(self, runtime: Runtime, strict_runtime: Runtime, workspace_root: Path) -> None:
         self.runtime = runtime
+        self.strict_runtime = strict_runtime
         self.workspace_root = workspace_root
         self.runs: Dict[str, _RunHandle] = {}
 
@@ -139,11 +141,12 @@ class _AppState:
 
         def _worker() -> None:
             guards = ExecutionGuards(max_total_loop_iterations=50000)
-            ctx = ExecutionContext(run_id=run_id, max_depth=10, guards=guards, bag={})
+            ctx = ExecutionContext(run_id=run_id, max_depth=10, guards=guards, bag={"evidence_strict": bool(evidence_strict)})
+            runtime = self.strict_runtime if evidence_strict else self.runtime
 
             async def _async_worker() -> None:
                 try:
-                    async for item in self.runtime.run_stream(
+                    async for item in runtime.run_stream(
                         "app.sse_gateway_minimal",
                         input={"topic": topic},
                         context=ctx,
@@ -173,6 +176,12 @@ class _AppState:
                                     if str(t.data.get("path") or "") == "report.md":
                                         has_report_evidence = True
                                         break
+                                # evidence-strict：把 Runtime 的 output_validation 摘要一并暴露到 SSE terminal（便于教学与验收）。
+                                # 注意：这里只透出“最小披露摘要”，不包含 tool 输出明文。
+                                if evidence_strict:
+                                    ov = (item.node_report.meta or {}).get("output_validation")
+                                    if isinstance(ov, dict):
+                                        terminal_payload["output_validation"] = ov
 
                             if evidence_strict and (not has_report_evidence):
                                 terminal_payload["status"] = "failed"
@@ -344,7 +353,25 @@ def create_server(
     _register_capability(runtime)
     assert runtime.validate() == []
 
-    st = _AppState(runtime=runtime, workspace_root=workspace_root)
+    # strict runtime：以 RuntimeConfig.output_validator(mode=error) 写入 NodeReport.meta.output_validation，
+    # 并在缺失关键 tool evidence 时 fail-closed（与终端 app 的 strict 口径一致）。
+    strict_runtime = build_bridge_runtime_from_env(
+        workspace_root=workspace_root,
+        overlay=overlay,
+        sdk_backend=sdk_backend,
+        approval_provider=approval_provider,
+        human_io=None,
+        output_validation_mode="error",
+        output_validator=build_evidence_strict_output_validator(
+            schema_id="examples.sse_gateway_minimal.evidence_strict.v1",
+            require_file_writes=["report.md"],
+            require_tools_ok=[],
+        ),
+    )
+    _register_capability(strict_runtime)
+    assert strict_runtime.validate() == []
+
+    st = _AppState(runtime=runtime, strict_runtime=strict_runtime, workspace_root=workspace_root)
     httpd = ThreadingHTTPServer((host, int(port)), Handler)
     httpd.app_state = st  # type: ignore[attr-defined]
     return httpd

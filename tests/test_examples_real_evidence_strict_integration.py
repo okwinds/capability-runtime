@@ -205,6 +205,16 @@ def test_real_sse_gateway_minimal_evidence_strict(tmp_path: Path) -> None:
         if terminal.get("status") == "failed":
             # strict 下缺少 tool evidence 必须 fail-closed（这是“证据严格模式”的预期行为）。
             assert "evidence_strict" in str(terminal.get("error") or "")
+            ov = terminal.get("output_validation")
+            assert isinstance(ov, dict), terminal
+            assert ov.get("schema_id") == "examples.sse_gateway_minimal.evidence_strict.v1", terminal
+            assert ov.get("ok") is False, terminal
+            assert isinstance(ov.get("errors"), list) and ov.get("errors"), terminal
+        else:
+            ov = terminal.get("output_validation")
+            assert isinstance(ov, dict), terminal
+            assert ov.get("schema_id") == "examples.sse_gateway_minimal.evidence_strict.v1", terminal
+            assert ov.get("ok") is True, terminal
         wal = terminal.get("wal_locator")
         assert isinstance(wal, str) and wal
         assert Path(wal).exists()
