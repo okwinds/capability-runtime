@@ -125,7 +125,7 @@ AgentAdapter.execute_stream(...)              (本仓内部)
   |
   | 5) 真实执行：skills/tool/approvals/WAL/events
   v
-skills_runtime.Agent.run_stream_async(...)    (上游)
+skills_runtime.core.agent.Agent.run_stream_async(...)    (上游)
   |
   | 6) 聚合证据链并返回
   v
