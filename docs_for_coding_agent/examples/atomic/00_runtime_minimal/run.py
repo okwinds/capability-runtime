@@ -5,7 +5,7 @@ Atomic 示例：00_runtime_minimal
 
 演示内容：
 - Runtime.register / validate / run
-- 离线注入 FakeChatBackend（走真实 skills_runtime.Agent loop）
+- 离线注入 FakeChatBackend（走真实 skills_runtime.core.agent.Agent loop）
 - 产出可审计证据链：WAL locator（NodeReportV2.events_path）
 """
 

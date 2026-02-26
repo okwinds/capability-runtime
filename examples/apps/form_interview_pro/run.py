@@ -268,15 +268,25 @@ def main() -> int:
     app_dir = Path(__file__).resolve().parent
     skills_root = (app_dir / "skills").resolve()
 
+    from agently_skills_runtime.upstream_compat import detect_skills_space_schema
+
+    space_schema = detect_skills_space_schema()
+    namespace_for_demo = "examples:apps:form-interview" if space_schema == "namespace" else None
+
     # overlay 写入 workspace，保证“产物与配置同处一个 workspace”
     overlay = write_overlay_for_app(
         workspace_root=workspace_root,
         skills_root=skills_root,
         max_steps=60,
         safety_mode="ask",
+        namespace=namespace_for_demo,
         planner_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if args.mode == "real" else None,
         executor_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if args.mode == "real" else None,
     )
+
+    if namespace_for_demo:
+        print(f"namespace={namespace_for_demo}")
+        print(f"skill_mentions=$[{namespace_for_demo}].form-interviewer / form-validator / form-reporter")
 
     if args.mode == "offline":
         answers = {

@@ -72,6 +72,7 @@ def write_sdk_overlay_for_examples(
     tool_allowlist: Optional[List[str]] = None,
     account: str = "examples",
     domain: str = "agent",
+    namespace: Optional[str] = None,
     enable_references: bool = False,
     enable_actions: bool = False,
 ) -> Path:
@@ -84,7 +85,8 @@ def write_sdk_overlay_for_examples(
     - max_steps：run.max_steps
     - safety_mode：ask|allow|deny
     - tool_allowlist：低风险工具白名单（减少审批交互；示例一般仍使用 ask + 审批证据链）
-    - account/domain：skills space 前缀（用于 `$[account:domain].skill`）
+    - account/domain：legacy skills space 字段（用于 `$[account:domain].skill`；必要时映射为 namespace）
+    - namespace：v0.1.5+ skills space 字段（用于 `$[namespace].skill`；在 legacy 上游仅支持 2 段映射）
     - enable_references/actions：是否启用 skills 的 references/actions 扩展能力
 
     返回：
@@ -93,6 +95,30 @@ def write_sdk_overlay_for_examples(
 
     allowlist = tool_allowlist or ["read_file", "grep_files", "list_dir", "file_read"]
     overlay_path = workspace_root / "runtime.yaml"
+
+    from agently_skills_runtime.upstream_compat import (
+        build_namespace_from_account_domain,
+        detect_skills_space_schema,
+        split_namespace_to_account_domain,
+    )
+
+    space_schema = detect_skills_space_schema()
+    account_for_overlay = account
+    domain_for_overlay = domain
+    namespace_for_overlay = namespace
+    if space_schema == "namespace":
+        if namespace_for_overlay is None:
+            namespace_for_overlay = build_namespace_from_account_domain(account=account_for_overlay, domain=domain_for_overlay)
+    else:
+        if namespace_for_overlay is not None:
+            account_for_overlay, domain_for_overlay = split_namespace_to_account_domain(namespace_for_overlay)
+            namespace_for_overlay = None
+
+    space_lines = (
+        f"                  namespace: {namespace_for_overlay!r}\n"
+        if space_schema == "namespace"
+        else f"                  account: {account_for_overlay!r}\n                  domain: {domain_for_overlay!r}\n"
+    )
     overlay_path.write_text(
         textwrap.dedent(
             f"""\
@@ -120,8 +146,7 @@ def write_sdk_overlay_for_examples(
                 enabled: {str(bool(enable_actions)).lower()}
               spaces:
                 - id: example-space
-                  account: {account!r}
-                  domain: {domain!r}
+{space_lines.rstrip()}
                   sources: [example-fs]
                   enabled: true
               sources:

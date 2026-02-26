@@ -41,6 +41,7 @@ def _run_example(*, rel_script: str, workspace_root: Path, timeout_sec: int = 90
         "docs_for_coding_agent/examples/recipes/00_review_fix_qa_report/run.py",
         "docs_for_coding_agent/examples/recipes/01_map_reduce_parallel/run.py",
         "docs_for_coding_agent/examples/recipes/02_policy_references_patch/run.py",
+        "docs_for_coding_agent/examples/recipes/03_skill_exec_actions/run.py",
     ],
 )
 def test_recipe_examples_offline_smoke(tmp_path: Path, rel_script: str) -> None:
@@ -56,4 +57,3 @@ def test_recipe_examples_offline_smoke(tmp_path: Path, rel_script: str) -> None:
     wal = wal_line.split("=", 1)[1].strip()
     assert wal
     assert Path(wal).exists()
-

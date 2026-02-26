@@ -89,8 +89,7 @@ def main() -> int:
         "spaces": [
             {
                 "id": "example-space",
-                "account": "examples",
-                "domain": "agent",
+                "namespace": "examples:agent",
                 "sources": ["example-fs"],
                 "enabled": True,
             }

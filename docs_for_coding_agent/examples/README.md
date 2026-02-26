@@ -21,12 +21,14 @@
 7. `atomic/06_collab_stub/`：collab stub（spawn_agent/wait/close_agent）
 8. `atomic/07_web_search_offline/`：web_search 默认 fail-closed
 9. `atomic/08_view_image_offline/`：view_image 离线读取图片
+10. `atomic/09_multiseg_namespace_mention/`：多段 namespace + strict mention（可观察 skill_injected）
 
 ## Recipes（组合配方）
 
 - `recipes/00_review_fix_qa_report/`：Review→Fix→QA→Report（最小工程闭环）
 - `recipes/01_map_reduce_parallel/`：Map-Reduce 并行子任务汇总（stub）
 - `recipes/02_policy_references_patch/`：Policy/References 驱动补丁（skill_ref_read + apply_patch）
+- `recipes/03_skill_exec_actions/`：Skills Actions（skill_exec：frontmatter.actions → approvals → tool evidence）
 
 ## 离线回归（门禁）
 
@@ -34,4 +36,3 @@
 pytest -q tests/test_coding_agent_examples_atomic.py
 pytest -q tests/test_coding_agent_examples_recipes.py
 ```
-

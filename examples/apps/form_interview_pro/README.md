@@ -21,6 +21,10 @@ python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-for
   - `runtime.yaml`（overlay）
 - 最终输出中包含 wal_locator（NodeReportV2.events_path）
 
+本示例的 namespace 口径（pinned: `skills-runtime-sdk==0.1.5.post1`）：
+- overlay：`skills.spaces[].namespace="examples:apps:form-interview"`（≥3 段）
+- strict mention：`$[examples:apps:form-interview].form-interviewer`（同一 namespace 下的多个 skill 同理）
+
 ## 2) 真模型运行（OpenAI-compatible）
 
 准备 `.env`（仅本地使用，不入库）：

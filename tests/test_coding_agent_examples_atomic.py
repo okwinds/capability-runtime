@@ -52,6 +52,7 @@ def _run_example(*, rel_script: str, workspace_root: Path, timeout_sec: int = 60
         "docs_for_coding_agent/examples/atomic/06_collab_stub/run.py",
         "docs_for_coding_agent/examples/atomic/07_web_search_offline/run.py",
         "docs_for_coding_agent/examples/atomic/08_view_image_offline/run.py",
+        "docs_for_coding_agent/examples/atomic/09_multiseg_namespace_mention/run.py",
     ],
 )
 def test_atomic_examples_offline_smoke(tmp_path: Path, rel_script: str) -> None:
@@ -69,4 +70,3 @@ def test_atomic_examples_offline_smoke(tmp_path: Path, rel_script: str) -> None:
         wal = line.split("=", 1)[1].strip()
         assert wal
         assert Path(wal).exists()
-

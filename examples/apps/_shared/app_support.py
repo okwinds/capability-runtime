@@ -65,6 +65,7 @@ def write_overlay_for_app(
     tool_allowlist: Optional[List[str]] = None,
     account: str = "examples",
     domain: str = "app",
+    namespace: Optional[str] = None,
     enable_references: bool = False,
     enable_actions: bool = False,
     planner_model: Optional[str] = None,
@@ -79,7 +80,8 @@ def write_overlay_for_app(
     - max_steps：run.max_steps（防止 loop 失控）
     - safety_mode：ask|allow|deny
     - tool_allowlist：低风险工具白名单（减少交互成本）
-    - account/domain：skills space 的 account/domain（用于 `$[account:domain].skill`）
+    - account/domain：legacy skills space 字段（用于 `$[account:domain].skill`；会在需要时映射到 namespace）
+    - namespace：v0.1.5+ skills space 字段（用于 `$[namespace].skill`；当运行在 legacy 上游时仅支持 2 段映射）
     - enable_references/actions：是否启用 skill_ref_read/skill_exec（默认禁用）
     - planner_model/executor_model：可选模型名（真实模式推荐显式设置；离线可忽略）
 
@@ -93,6 +95,25 @@ def write_overlay_for_app(
     # - update_plan：只影响运行期 UI/进度展示
     # - file_write：只写 workspace（示例契约要求产物落盘；避免每次都审批导致体验碎片化）
     allowlist = tool_allowlist or ["read_file", "grep_files", "list_dir", "file_read", "update_plan", "file_write"]
+
+    # v0.1.5 兼容：spaces schema（account/domain ↔ namespace）
+    from agently_skills_runtime.upstream_compat import (
+        build_namespace_from_account_domain,
+        detect_skills_space_schema,
+        split_namespace_to_account_domain,
+    )
+
+    space_schema = detect_skills_space_schema()
+    account_for_overlay = account
+    domain_for_overlay = domain
+    namespace_for_overlay = namespace
+    if space_schema == "namespace":
+        if namespace_for_overlay is None:
+            namespace_for_overlay = build_namespace_from_account_domain(account=account_for_overlay, domain=domain_for_overlay)
+    else:
+        if namespace_for_overlay is not None:
+            account_for_overlay, domain_for_overlay = split_namespace_to_account_domain(namespace_for_overlay)
+            namespace_for_overlay = None
 
     lines: List[str] = []
     lines.extend(
@@ -123,8 +144,11 @@ def write_overlay_for_app(
             f"    enabled: {str(bool(enable_actions)).lower()}",
             "  spaces:",
             "    - id: app-space",
-            f"      account: {str(account)!r}",
-            f"      domain: {str(domain)!r}",
+            *(  # skills-runtime-sdk v0.1.5+
+                [f"      namespace: {str(namespace_for_overlay)!r}"]
+                if space_schema == "namespace"
+                else [f"      account: {str(account_for_overlay)!r}", f"      domain: {str(domain_for_overlay)!r}"]
+            ),
             "      sources: [app-fs]",
             "      enabled: true",
             "  sources:",

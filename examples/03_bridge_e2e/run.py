@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from agent_sdk.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
-from agent_sdk.tools.protocol import ToolCall, ToolSpec
+from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
+from skills_runtime.tools.protocol import ToolCall, ToolSpec
 
 from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
 from agently_skills_runtime.config import CustomTool
@@ -67,13 +67,14 @@ class AutoApproveProvider(ApprovalProvider):
         timeout_ms: Optional[int] = None,
     ) -> ApprovalDecision:
         _ = timeout_ms
+        approval_key = str(getattr(request, "approval_key", "") or "")
         print(
             "[auto_approve] "
             f"tool={request.tool} "
-            f"key={request.approval_key[:10]} "
+            f"key={approval_key[:10]} "
             f"summary={request.summary}"
         )
-        return ApprovalDecision.APPROVED
+        return ApprovalDecision.APPROVED_FOR_SESSION
 
 
 def build_file_write_tool(*, root_dir: Path) -> tuple[ToolSpec, Any]:
