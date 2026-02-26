@@ -2,13 +2,17 @@
 
 一句话定位：一个**生产级的能力运行时（Capability Runtime）基座 + 双上游桥接层**。
 
-- 对外协议原语：仅 **Agent / Workflow**（可声明、可注册、可校验、可执行、可编排）
-- skills 引擎：由上游 `skills_runtime`（skills-runtime-sdk）提供（catalog/mention/sources/preflight/tools/approvals/WAL/events）
-- 证据链优先：桥接模式下产出稳定的结构化证据 `NodeReport`（控制面），同时保留生态友好的 `output`（数据面）
-- 当前版本号：`0.0.0`（建设期；版本号已重置，暂不做历史继承口径）
+## 概览（你会得到什么）
 
-> 重要决策：本仓当前不提供 “TriggerFlow 作为 SDK Agent tool（`triggerflow_run_flow`）” 的桥接；推荐使用 TriggerFlow 顶层编排多个 `Runtime.run()`。
-> 同时，Workflow 在 Runtime 内部已经复用 TriggerFlow 引擎，调用方不需要直接学习 TriggerFlow API。
+- **对外协议原语**：仅 **Agent / Workflow**（可声明、可注册、可校验、可执行、可编排）
+- **skills 引擎**：由上游 `skills_runtime`（skills-runtime-sdk）提供（catalog/mention/sources/preflight/tools/approvals/WAL/events）
+- **证据链优先**：桥接模式下产出稳定的结构化证据 `NodeReport`（控制面），同时保留生态友好的 `output`（数据面）
+- **当前版本号**：`0.0.0`（建设期；版本号已重置，暂不做历史继承口径）
+
+### 关键设计决策（避免学习成本扩散）
+
+> 本仓当前不提供 “TriggerFlow 作为 SDK Agent tool（`triggerflow_run_flow`）” 的桥接；推荐使用 TriggerFlow 在宿主侧顶层编排多个 `Runtime.run()`。
+> 同时，Workflow 在 Runtime 内部已经复用 TriggerFlow 引擎：调用方不需要直接学习 TriggerFlow API 才能使用 Workflow。
 
 ## 安装
 
@@ -24,7 +28,7 @@ python -m pip install -e .
 python -m pip install -e ".[dev]"
 ```
 
-## Quick Start
+## 快速开始（Quick Start）
 
 ### 1) 离线 mock（无需真实 LLM）
 
@@ -39,7 +43,7 @@ cp examples/01_quickstart/.env.example examples/01_quickstart/.env
 python examples/01_quickstart/run_bridge.py
 ```
 
-## 一页心智模型图
+## 一页心智模型图（总览）
 
 ```mermaid
 flowchart TD
@@ -56,19 +60,19 @@ flowchart TD
   E --> K[final_output（数据面）]
 ```
 
-## 核心概念：范式三元对等，协议二元承诺
+## 核心概念与边界（对外承诺）
 
-在完整系统里，**Skill / Agent / Workflow 在能力范式上都是一等公民**；但需要注意“边界与承诺”：
+在完整系统里，**Skill / Agent / Workflow 在能力范式上都是一等公民**；但本仓对外的“公共承诺”需要稳定且可回归：
 
-- **本仓对外承诺的能力原语**：仅 **Agent / Workflow**（可注册/可编排/可执行），统一入口为 `Runtime`。
+- **对外承诺的能力原语**：仅 **Agent / Workflow**（可注册/可编排/可执行），统一入口为 `Runtime`。
 - **skills 引擎能力的真相源**：由上游 `skills_runtime`（`skills-runtime-sdk`）提供（strict catalog + mention + sources + preflight + tools/approvals + WAL/events）。本仓不把 `skill` 作为公共协议原语，也不重造 skills 注入/调度引擎，避免形成第二套 skills 体系。
 - **证据链优先**：编排分支与审计优先读取 `NodeReport` / WAL / tool evidence（控制面），而不是解析 `output` 自由文本（数据面）。
 
-你可以把它理解为：**“协议二元（Agent/Workflow）+ 引擎一元（skills_runtime）+ 证据链闭环（NodeReport/WAL）”**。
+可将本仓理解为：**“协议二元（Agent/Workflow）+ 引擎一元（skills_runtime）+ 证据链闭环（NodeReport/WAL）”**。
 
 ## 核心心智模型：Protocol → Runtime → Report
 
-你可以把本仓当作“三件套”：
+本仓可以归纳为“三件套”（从调用方视角）：
 
 1. **Protocol**：`AgentSpec` / `WorkflowSpec`（声明）
 2. **Runtime**：`Runtime`（唯一执行入口：`run()` / `run_stream()`）
@@ -168,6 +172,8 @@ CapabilityResult
       - meta (脱敏摘要)              (可观测，不泄露)
 ```
 
+## 推荐落地模式（保持“协议二元”，降低引擎细节暴露）
+
 ### 图 4：业务域如何“面向能力”组织（建议结构，不绑定具体业务）
 
 ```text
@@ -182,10 +188,10 @@ your-domain/
   main.py                 # 入口：run(workflow_id) -> NodeReport + output
 ```
 
-### 图 5：三元“互相调用/引用”的落地策略（推荐 Scheme2：薄壳 Agent 节点）
+### 图 5：范式三元的落地策略（推荐 Scheme2：薄壳 Agent 节点）
 
 > 口径提醒：本仓不把 `skill` 当作公共协议原语；skills 的发现/mention/治理/执行在上游 `skills_runtime` 引擎层完成。  
-> 因此所谓“三元互调”，更多是**效果层互调**：Workflow 负责强结构编排，Agent 负责承载 skills 与必要的 host 侧桥梁。
+> 因此“三元互调”更多发生在**效果层**：Workflow 负责强结构编排，Agent 负责承载 skills 与必要的 host 侧桥梁。
 
 ```text
 (A) Workflow 编排多个“以 skill 为核心的节点”
@@ -209,13 +215,13 @@ AgentSpec  --(host-provided callback/tool, optional)-->  Host / TriggerFlow
 Host / TriggerFlow  ------------------------------->  Runtime.run("WF-*")
 ```
 
-### 图 6：把“skills 作为 workflow 节点”的推荐落地（仍然只用 Agent/Workflow 原语）
+### 图 6：将“skills 作为 workflow 节点”的推荐做法（仍然只用 Agent/Workflow 原语）
 
 ```text
-你想要的业务效果：
-  Workflow 里每个节点都“基于某个 skill 做事”，最后汇总输出
+目标形态（业务视角）：
+  Workflow 里每个节点都以某个 skill（或一组 skills）为核心完成工作，最后汇总输出
 
-推荐落地（不创建 Skill 节点类型）：
+推荐做法（不创建 Skill 节点类型）：
   - 为每个 skill（或一组 skills）创建一个薄壳 AgentSpec
   - Workflow 的 Step 仍然只指向 Agent/Workflow
 
@@ -226,23 +232,6 @@ Host / TriggerFlow  ------------------------------->  Runtime.run("WF-*")
   |  - step: final      +--> AgentSpec("final")  : 汇总 step_outputs / evidence
   +---------------------+
 ```
-
-## 实现落点（从 README 直达代码）
-
-> 目标：把“主旨/结构/用法”落到真实代码位置，避免 README 变成抽象口号。
-
-- `Runtime`（唯一入口）：`src/agently_skills_runtime/runtime.py`
-  - `Runtime.register*()`：注册
-  - `Runtime.run()` / `Runtime.run_stream()`：执行
-- `TriggerFlowWorkflowEngine`（Workflow 内部编排引擎）：`src/agently_skills_runtime/adapters/triggerflow_workflow_engine.py`
-- `AgentAdapter`（承载 skills/桥接）：`src/agently_skills_runtime/adapters/agent_adapter.py`
-- `NodeReport`（证据链聚合）：`src/agently_skills_runtime/reporting/node_report.py`
-
-## 运行模式（RuntimeConfig.mode）
-
-- `mock`：离线回归/单测优先；不依赖真实 LLM
-- `bridge`：使用 Agently OpenAICompatible requester 作为传输层；SDK 负责 messages/tools wire 与事件解析
-- `sdk_native`：不依赖 Agently，直接使用 SDK 原生 OpenAI backend（同样产出事件与 NodeReport）
 
 ## 公共 API（对外承诺）
 
@@ -264,6 +253,23 @@ from agently_skills_runtime import (
     AdapterNotFoundError,
 )
 ```
+
+## 运行模式（RuntimeConfig.mode）
+
+- `mock`：离线回归/单测优先；不依赖真实 LLM
+- `bridge`：使用 Agently OpenAICompatible requester 作为传输层；SDK 负责 messages/tools wire 与事件解析
+- `sdk_native`：不依赖 Agently，直接使用 SDK 原生 OpenAI backend（同样产出事件与 NodeReport）
+
+## 实现落点（从 README 直达代码）
+
+> 目标：把“主旨/结构/用法”落到真实代码位置，避免 README 变成抽象口号。
+
+- `Runtime`（唯一入口）：`src/agently_skills_runtime/runtime.py`
+  - `Runtime.register*()`：注册
+  - `Runtime.run()` / `Runtime.run_stream()`：执行
+- `TriggerFlowWorkflowEngine`（Workflow 内部编排引擎）：`src/agently_skills_runtime/adapters/triggerflow_workflow_engine.py`
+- `AgentAdapter`（承载 skills/桥接）：`src/agently_skills_runtime/adapters/agent_adapter.py`
+- `NodeReport`（证据链聚合）：`src/agently_skills_runtime/reporting/node_report.py`
 
 ## 代码导航（建议从这里读）
 
