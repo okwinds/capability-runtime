@@ -290,3 +290,4 @@ from agently_skills_runtime import (
 ## 鸣谢
 
 - Agently：本仓的上游依赖之一（TriggerFlow / OpenAICompatible requester），感谢原项目与社区贡献者：<https://github.com/AgentEra/Agently>
+- skills-runtime-sdk：本仓的上游依赖之一（`skills_runtime` 引擎：skills/tools/approvals/WAL/events），感谢原项目与社区贡献者：<https://github.com/okwinds/skills-runtime-sdk>
