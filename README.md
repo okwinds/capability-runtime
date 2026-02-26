@@ -286,3 +286,7 @@ from agently_skills_runtime import (
   - 最短闭环：`docs_for_coding_agent/cheatsheet.md`
   - 心智模型：`docs_for_coding_agent/00-mental-model.md`
   - 任务契约：`docs_for_coding_agent/contract.md`
+
+## 鸣谢
+
+- Agently：本仓的上游依赖之一（TriggerFlow / OpenAICompatible requester），感谢原项目与社区贡献者：<https://github.com/AgentEra/Agently>
