@@ -1,5 +1,5 @@
 """
-NodeReportBuilder：把 SDK `AgentEvent` 聚合为 NodeReport v2。
+NodeReportBuilder：把 SDK `AgentEvent` 聚合为 NodeReport（schema v1）。
 
 对齐规格：
 - `openspec/specs/evidence-chain/spec.md`
@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from skills_runtime.core.contracts import AgentEvent
 
-from ..types import NodeReportV2, NodeToolCallReport
+from ..types import NodeReport, NodeToolCallReport
 
 
 def _get_skills_runtime_version() -> Optional[str]:
@@ -68,15 +68,15 @@ class NodeReportBuilder:
     - 不把 stdout/stderr 大段塞进 NodeReport（避免泄露与膨胀）
     """
 
-    def build(self, *, events: List[AgentEvent]) -> NodeReportV2:
+    def build(self, *, events: List[AgentEvent]) -> NodeReport:
         """
-        从一次 run 的事件序列构造 NodeReport v2。
+        从一次 run 的事件序列构造 NodeReport（schema v1）。
 
         参数：
         - `events`：按发生顺序排列的 SDK AgentEvent 列表
 
         返回：
-        - NodeReportV2
+        - NodeReport
         """
 
         if not events:
@@ -290,7 +290,7 @@ class NodeReportBuilder:
             NodeToolCallReport.model_validate(item) for item in tool_calls.values() if isinstance(item, dict)
         ]
 
-        report = NodeReportV2(
+        report = NodeReport(
             status=status,  # type: ignore[arg-type]
             reason=reason,
             completion_reason=completion_reason or "",
@@ -325,8 +325,8 @@ class NodeReportBuilder:
         return report
 
 
-def build_node_report_from_events(events: Iterable[AgentEvent]) -> NodeReportV2:
-    """便捷函数：从事件迭代器构造 NodeReport v2。"""
+def build_node_report_from_events(events: Iterable[AgentEvent]) -> NodeReport:
+    """便捷函数：从事件迭代器构造 NodeReport（schema v1）。"""
 
     builder = NodeReportBuilder()
     return builder.build(events=list(events))

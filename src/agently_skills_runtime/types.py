@@ -1,8 +1,8 @@
 """
-桥接层对外数据结构（NodeReport v2 / NodeResult）。
+桥接层对外数据结构（NodeReport / NodeResult）。
 
 说明：
-- NodeReport 是“控制面强结构”输出，供 TriggerFlow 做分支/审计/回归。
+- NodeReport 是“控制面强结构”输出，供 Workflow/业务编排做分支/审计/回归。
 - NodeResult 是一次运行的对外返回值：final_output + node_report + events_path。
 
 对齐规格：
@@ -42,12 +42,12 @@ class NodeToolCallReport(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
-class NodeReportV2(BaseModel):
-    """NodeReport v2（控制面强结构）。"""
+class NodeReport(BaseModel):
+    """NodeReport（控制面强结构，schema v1）。"""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema_id: str = Field(default="agently-skills-runtime.node_report.v2", alias="schema")
+    schema_id: str = Field(default="agently-skills-runtime.node_report.v1", alias="schema")
     status: NodeStatus
     reason: Optional[str] = None
     completion_reason: str = ""
@@ -66,7 +66,7 @@ class NodeReportV2(BaseModel):
     meta: Dict[str, Any] = Field(default_factory=dict)
 
 
-class NodeResultV2(BaseModel):
+class NodeResult(BaseModel):
     """
     桥接层一次运行的返回值。
 
@@ -80,6 +80,6 @@ class NodeResultV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     final_output: str
-    node_report: NodeReportV2
+    node_report: NodeReport
     events_path: Optional[str] = None
     artifacts: List[str] = Field(default_factory=list)

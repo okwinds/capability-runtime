@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from agently_skills_runtime.host_toolkit.history import HistoryAssembler
 from agently_skills_runtime.host_toolkit.turn_delta import TurnDelta
-from agently_skills_runtime.types import NodeReportV2
+from agently_skills_runtime.types import NodeReport
 
 
 def test_history_assembler_outputs_minimal_user_assistant_messages_only():
-    report = NodeReportV2(
+    report = NodeReport(
         status="success",
         reason=None,
         completion_reason="run_completed",

@@ -12,8 +12,8 @@ def test_public_api_all_exports_are_stable() -> None:
         "Runtime",
         "RuntimeConfig",
         # Reports
-        "NodeReportV2",
-        "NodeResultV2",
+        "NodeReport",
+        "NodeResult",
         # Protocol
         "CapabilityKind",
         "CapabilityRef",

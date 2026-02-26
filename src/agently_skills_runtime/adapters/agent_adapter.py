@@ -46,7 +46,7 @@ class AgentAdapter:
         - 不产出中间事件（只产出最终 CapabilityResult）
 
         bridge/sdk_native 模式：
-        - 转发 SDK AgentEvent，并聚合 NodeReportV2 写入 CapabilityResult.node_report
+        - 转发 SDK AgentEvent，并聚合 NodeReport 写入 CapabilityResult.node_report
         """
 
         mode = str(getattr(self._runtime.config, "mode", "mock"))

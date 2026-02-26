@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 离线回归：通过 RuntimeConfig 注入 SDK ChatBackend（FakeChatBackend），
 确保离线也能走真实 skills_runtime.Agent loop 并产出可审计证据链：
-- WAL locator（NodeReportV2.events_path）
+- WAL locator（NodeReport.events_path）
 - tool_calls + approvals evidence
 - activated_skills（skills-first）
 """
@@ -35,9 +35,9 @@ async def test_offline_injected_fake_backend_produces_wal_node_report_tool_evide
     """
     验收点：
     - 通过 RuntimeConfig 注入 FakeChatBackend（无需 monkeypatch）
-    - 离线也能生成 WAL locator（NodeReportV2.events_path）
-    - NodeReportV2 能聚合 tool_calls + approvals evidence
-    - skills-first：NodeReportV2.activated_skills 可观测
+    - 离线也能生成 WAL locator（NodeReport.events_path）
+    - NodeReport 能聚合 tool_calls + approvals evidence
+    - skills-first：NodeReport.activated_skills 可观测
     """
 
     # --- skills bundle（filesystem source）---

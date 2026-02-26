@@ -6,7 +6,7 @@ from .config import RuntimeConfig
 from .runtime import Runtime
 
 # === 报告类型 ===
-from .types import NodeReportV2, NodeResultV2
+from .types import NodeReport, NodeResult
 
 # === Protocol 导出 ===
 from .protocol.agent import AgentIOSchema, AgentSpec
@@ -35,8 +35,8 @@ __all__ = [
     "Runtime",
     "RuntimeConfig",
     # Reports
-    "NodeReportV2",
-    "NodeResultV2",
+    "NodeReport",
+    "NodeResult",
     # Protocol
     "CapabilityKind",
     "CapabilityRef",

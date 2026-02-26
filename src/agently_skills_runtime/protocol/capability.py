@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from ..types import NodeReportV2
+from ..types import NodeReport
 
 
 class CapabilityKind(str, Enum):
@@ -90,7 +90,7 @@ class CapabilityResult:
     output: Any = None
     error: Optional[str] = None
     report: Optional[Any] = None
-    node_report: Optional[NodeReportV2] = None
+    node_report: Optional[NodeReport] = None
     artifacts: List[str] = field(default_factory=list)
     duration_ms: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)

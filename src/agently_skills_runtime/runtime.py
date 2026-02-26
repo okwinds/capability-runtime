@@ -6,7 +6,7 @@ from __future__ import annotations
 定位：
 - 对外只提供一个执行入口（Runtime），避免“双入口/双路径”导致的语义分叉；
 - mock/bridge/sdk_native 通过 `RuntimeConfig.mode` 切换；
-- 控制面证据链以 `NodeReportV2` 为主（事件聚合），数据面输出保持生态兼容。
+- 控制面证据链以 `NodeReport` 为主（事件聚合），数据面输出保持生态兼容。
 """
 
 import asyncio
@@ -30,8 +30,9 @@ from .protocol.capability import CapabilityKind, CapabilityResult, CapabilitySta
 from .protocol.context import ExecutionContext, RecursionLimitError
 from .protocol.workflow import WorkflowSpec
 from .registry import AnySpec, CapabilityRegistry, _get_base
-from .reporting.node_report import NodeReportBuilder
-from .types import NodeReportV2
+from .types import NodeReport
+from .adapters.workflow_engine import WorkflowStreamEvent
+from .adapters.triggerflow_workflow_engine import TriggerFlowWorkflowEngine
 
 
 @dataclass(frozen=True)
@@ -67,12 +68,13 @@ class Runtime:
 
         self._config = config
         self._registry = CapabilityRegistry()
-        self._last_node_report: Optional[NodeReportV2] = None
+        self._last_node_report: Optional[NodeReport] = None
         self._sdk_state: Optional[_SdkInitState] = None
         self._last_lock = asyncio.Lock()
         from .adapters.agent_adapter import AgentAdapter
 
         self._agent_adapter = AgentAdapter(runtime=self)
+        self._workflow_engine = TriggerFlowWorkflowEngine()
 
         if config.mode in ("bridge", "sdk_native"):
             self._sdk_state = self._init_sdk_state(mode=config.mode)
@@ -105,7 +107,7 @@ class Runtime:
         能力注册表（只读视角）。
 
         说明：
-        - 主要用于 WorkflowAdapter 递归分发执行时查询 target spec；
+        - 主要用于 workflow 引擎递归分发执行时查询 target spec；
         - 调用方不应直接修改内部状态（注册应通过 Runtime.register* 完成）。
         """
 
@@ -154,13 +156,14 @@ class Runtime:
         *,
         input: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None,
-    ) -> AsyncIterator[Union[AgentEvent, CapabilityResult]]:
+    ) -> AsyncIterator[Union[AgentEvent, WorkflowStreamEvent, CapabilityResult]]:
         """
         流式执行：先转发事件（如有），最后产出 CapabilityResult。
 
         约束：
         - mock 模式可仅产出 CapabilityResult（无中间事件）；
         - bridge/sdk_native 模式 MUST 转发上游 SDK AgentEvent。
+        - workflow 路径默认输出轻量 workflow 事件（字典）；深审计仍依赖 WAL/events。
         """
 
         spec = self._registry.get(capability_id)
@@ -189,9 +192,10 @@ class Runtime:
                 yield x
             return
 
-        result = await self._execute(spec=spec, input=input or {}, context=ctx)
-        result.duration_ms = (time.monotonic() - started) * 1000
-        yield result
+        async for x in self._execute_workflow_stream(spec=spec, input=input or {}, context=ctx):
+            if isinstance(x, CapabilityResult):
+                x.duration_ms = (time.monotonic() - started) * 1000
+            yield x
         return
 
     async def _execute(self, *, spec: AnySpec, input: Dict[str, Any], context: ExecutionContext) -> CapabilityResult:
@@ -227,9 +231,37 @@ class Runtime:
                 status=CapabilityStatus.FAILED,
                 error=f"Invalid workflow spec type: {type(spec).__name__}",
             )
-        from .adapters.workflow_adapter import WorkflowAdapter
+        return await self._workflow_engine.execute(spec=spec, input=input, context=child_ctx, runtime=self)
 
-        return await WorkflowAdapter().execute(spec=spec, input=input, context=child_ctx, runtime=self)
+    async def _execute_workflow_stream(
+        self,
+        *,
+        spec: AnySpec,
+        input: Dict[str, Any],
+        context: ExecutionContext,
+    ) -> AsyncIterator[Union[WorkflowStreamEvent, CapabilityResult]]:
+        """执行 WorkflowSpec（流式）：轻量 workflow 事件 + 终态 CapabilityResult。"""
+
+        base = _get_base(spec)
+        try:
+            child_ctx = context.child(base.id)
+        except RecursionLimitError as exc:
+            yield CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=str(exc),
+                metadata={"error_type": "recursion_limit"},
+            )
+            return
+
+        if not isinstance(spec, WorkflowSpec):
+            yield CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"Invalid workflow spec type: {type(spec).__name__}",
+            )
+            return
+
+        async for item in self._workflow_engine.execute_stream(spec=spec, input=input, context=child_ctx, runtime=self):
+            yield item
 
     async def _execute_agent_stream(
         self, *, spec: AnySpec, input: Dict[str, Any], context: ExecutionContext
@@ -239,7 +271,7 @@ class Runtime:
 
         说明：
         - mock 模式：直接调用 mock_handler，产出 CapabilityResult；
-        - bridge/sdk_native：使用上游 SDK Agent 执行并转发 AgentEvent，最终聚合 NodeReportV2。
+        - bridge/sdk_native：使用上游 SDK Agent 执行并转发 AgentEvent，最终聚合 NodeReport。
         """
 
         if not isinstance(spec, AgentSpec):
@@ -255,7 +287,7 @@ class Runtime:
                     self._last_node_report = item.node_report
             yield item
 
-    def _map_node_status(self, report: NodeReportV2) -> CapabilityStatus:
+    def _map_node_status(self, report: NodeReport) -> CapabilityStatus:
         """
         将 NodeReport 控制面状态映射为 CapabilityStatus。
 
@@ -281,7 +313,7 @@ class Runtime:
         reason: Optional[str],
         completion_reason: str,
         meta: Dict[str, Any],
-    ) -> NodeReportV2:
+    ) -> NodeReport:
         """
         构造不依赖事件流的最小 NodeReport（用于 fail-closed 分支）。
 
@@ -311,7 +343,7 @@ class Runtime:
                     continue
             return None
 
-        return NodeReportV2(
+        return NodeReport(
             status=status,  # type: ignore[arg-type]
             reason=reason,
             completion_reason=completion_reason,
@@ -337,7 +369,7 @@ class Runtime:
         self,
         *,
         final_output: str,
-        report: NodeReportV2,
+        report: NodeReport,
         context: Dict[str, Any],
     ) -> None:
         """
@@ -590,7 +622,7 @@ class Runtime:
         return agent
 
     @property
-    def last_node_report(self) -> Optional[NodeReportV2]:
+    def last_node_report(self) -> Optional[NodeReport]:
         """最近一次 bridge/sdk_native 执行产出的 NodeReport（可选便利属性）。"""
 
         return self._last_node_report

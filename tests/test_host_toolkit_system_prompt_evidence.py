@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from agently_skills_runtime.host_toolkit.evidence_hooks import SystemPromptEvidence, SystemPromptEvidenceHook
 from agently_skills_runtime.host_toolkit.system_prompt import SystemPrompt, compute_system_prompt_digest
-from agently_skills_runtime.types import NodeReportV2, NodeResultV2
+from agently_skills_runtime.types import NodeReport, NodeResult
 
 
 def test_system_prompt_digest_is_minimal_and_does_not_contain_plaintext():
@@ -32,7 +32,7 @@ def test_system_prompt_evidence_hook_writes_meta_without_plaintext():
     )
     hook = SystemPromptEvidenceHook(evidence=evidence)
 
-    report = NodeReportV2(
+    report = NodeReport(
         status="success",
         reason=None,
         completion_reason="run_completed",
@@ -46,7 +46,7 @@ def test_system_prompt_evidence_hook_writes_meta_without_plaintext():
         artifacts=[],
         meta={},
     )
-    node_result = NodeResultV2(final_output="ok", node_report=report, events_path="wal.jsonl", artifacts=[])
+    node_result = NodeResult(final_output="ok", node_report=report, events_path="wal.jsonl", artifacts=[])
 
     hook.before_return_result({}, node_result)
 

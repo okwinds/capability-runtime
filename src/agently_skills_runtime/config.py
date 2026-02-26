@@ -103,7 +103,7 @@ class RuntimeConfig:
     # - 取代旧的 SchemaGate/SchemaGateMode：以 callback 方式提供输出校验；
     # - callback 返回值应是“可观测摘要”，不得把大段 payload 原文塞入 meta；
     # - 推荐签名（keyword-only）：
-    #   validate(*, final_output: str, node_report: NodeReportV2, context: dict) -> dict
+    #   validate(*, final_output: str, node_report: NodeReport, context: dict) -> dict
     output_validation_mode: OutputValidationMode = "off"
     output_validator: Optional[Callable[..., Any]] = None
 

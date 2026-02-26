@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from agently_skills_runtime.host_toolkit.turn_delta import TurnDelta, TruncatingTurnDeltaRedactor
-from agently_skills_runtime.types import NodeReportV2
+from agently_skills_runtime.types import NodeReport
 
 
 def test_turn_delta_can_represent_data_and_control_and_events_pointer():
-    report = NodeReportV2(
+    report = NodeReport(
         status="success",
         reason=None,
         completion_reason="run_completed",
@@ -34,7 +34,7 @@ def test_turn_delta_can_represent_data_and_control_and_events_pointer():
 
 
 def test_turn_delta_redactor_truncates_user_and_assistant_text_only():
-    report = NodeReportV2(
+    report = NodeReport(
         status="success",
         reason=None,
         completion_reason="run_completed",

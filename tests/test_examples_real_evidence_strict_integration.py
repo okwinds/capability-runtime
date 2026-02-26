@@ -6,10 +6,11 @@ from __future__ import annotations
 - 目标：验证 examples/apps/* 在 `--mode real --non-interactive --evidence-strict` 下可端到端跑通；
 - 重点：strict 模式必须走 tool evidence（禁用 host fallback），并生成契约产物；
 - 注意：这些测试会访问真实 OpenAI-compatible provider（需要本地 `.env` 配置），因此必须标记为
-  `pytest -m integration`，并在缺少 `.env` 时自动 skip。
+  `pytest -m integration`，并在缺少 `.env` 或未设置 `RUN_REAL_INTEGRATION=1` 时自动 skip。
 """
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -27,8 +28,18 @@ pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptio
 
 
 def _env_exists(app_name: str) -> bool:
-    """检查 examples/apps/<app_name>/.env 是否存在（集成测试开关）。"""
+    """
+    检查 examples/apps/<app_name>/.env 是否存在（集成测试开关）。
 
+    说明：
+    - 真实模型（real mode）回归天然具备外部不确定性（网络波动、provider 行为变化、模型漂移等）；
+    - 因此默认不在 `pytest -q` 中自动触发，需显式设置环境变量开关：
+      `RUN_REAL_INTEGRATION=1`。
+    """
+
+    flag = str(os.environ.get("RUN_REAL_INTEGRATION", "")).strip().lower()
+    if flag not in {"1", "true", "yes"}:
+        return False
     return (_REPO_ROOT / "examples" / "apps" / app_name / ".env").exists()
 
 

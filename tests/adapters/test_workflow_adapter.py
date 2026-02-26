@@ -22,7 +22,7 @@ from agently_skills_runtime.protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.types import NodeReportV2
+from agently_skills_runtime.types import NodeReport
 from agently_skills_runtime.runtime import Runtime
 from agently_skills_runtime.config import RuntimeConfig
 
@@ -38,7 +38,7 @@ def _build_runtime(*, agents: list[AgentSpec], handler) -> Runtime:
     构造 mock Runtime，并注册 AgentSpec 列表。
 
     说明：
-    - WorkflowAdapter 由 Runtime 内部负责调用（不需要在测试中显式注入）。
+    - Workflow 由 Runtime 内部 WorkflowEngine 负责执行（不需要在测试中显式注入）。
     - handler 可返回：
       - Any（将被包装为 CapabilityResult.SUCCESS.output）
       - CapabilityResult（将被 Runtime 直接透传）
@@ -280,7 +280,7 @@ async def test_conditional_step_can_route_by_step_report_status():
 
     def handler(spec: AgentSpec, _input: Dict[str, Any]):
         if spec.base.id == "CLASSIFIER":
-            report = NodeReportV2(
+            report = NodeReport(
                 status="needs_approval",
                 reason="approval_pending",
                 completion_reason="run_cancelled",
@@ -390,7 +390,7 @@ async def test_step_pending_aborts_workflow() -> None:
                 status=CapabilityStatus.PENDING,
                 output=None,
                 error=None,
-                report=NodeReportV2(
+                report=NodeReport(
                     status="needs_approval",
                     reason="approval_pending",
                     completion_reason="run_cancelled",
@@ -448,3 +448,110 @@ async def test_iterate_over_not_list():
     result = await rt.run("WF-X", input={"items": "not-a-list"})
     assert result.status == CapabilityStatus.FAILED
     assert "expected list" in (result.error or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_stream_emits_lightweight_events() -> None:
+    """
+    验收护栏：
+    - Workflow 路径 run_stream 默认输出轻量事件字典；
+    - 终态仍通过 CapabilityResult 返回。
+    """
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-STREAM", kind=CapabilityKind.WORKFLOW, name="stream"),
+        steps=[
+            Step(id="s1", capability=CapabilityRef(id="A")),
+            Step(id="s2", capability=CapabilityRef(id="B")),
+        ],
+    )
+
+    def handler(spec: AgentSpec, input_dict: Dict[str, Any]):
+        return {**input_dict, "__agent__": spec.base.id}
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    events: list[dict[str, Any]] = []
+    terminal: CapabilityResult | None = None
+    async for item in rt.run_stream("WF-STREAM", input={"topic": "t"}):
+        if isinstance(item, CapabilityResult):
+            terminal = item
+        else:
+            assert isinstance(item, dict)
+            events.append(item)
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.SUCCESS
+    assert [e["type"] for e in events] == [
+        "workflow.started",
+        "workflow.step.started",
+        "workflow.step.finished",
+        "workflow.step.started",
+        "workflow.step.finished",
+        "workflow.finished",
+    ]
+    assert [e.get("step_id") for e in events if e["type"] == "workflow.step.started"] == ["s1", "s2"]
+    assert events[-1]["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_workflow_run_stream_pending_propagates_and_stops_next_steps() -> None:
+    """
+    验收护栏：
+    - 中间步骤返回 PENDING 时，workflow 终态必须为 PENDING；
+    - 后续步骤不得继续执行；
+    - completed 轻量事件状态应反映 pending。
+    """
+
+    called = {"C": 0}
+
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "B":
+            return CapabilityResult(
+                status=CapabilityStatus.PENDING,
+                report=NodeReport(
+                    status="needs_approval",
+                    reason="approval_pending",
+                    completion_reason="run_cancelled",
+                    engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+                    bridge={"name": "agently-skills-runtime"},
+                    run_id="r1",
+                    events_path="wal.jsonl",
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                ),
+            )
+        if spec.base.id == "C":
+            called["C"] += 1
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-STREAM-PENDING", kind=CapabilityKind.WORKFLOW, name="stream-pending"),
+        steps=[
+            Step(id="s1", capability=CapabilityRef(id="A")),
+            Step(id="s2", capability=CapabilityRef(id="B")),
+            Step(id="s3", capability=CapabilityRef(id="C")),
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B"), _make_agent("C")], handler=handler)
+    rt.register(wf)
+
+    events: list[dict[str, Any]] = []
+    terminal: CapabilityResult | None = None
+    async for item in rt.run_stream("WF-STREAM-PENDING"):
+        if isinstance(item, CapabilityResult):
+            terminal = item
+        else:
+            assert isinstance(item, dict)
+            events.append(item)
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.PENDING
+    assert called["C"] == 0
+    assert not any(e.get("step_id") == "s3" for e in events)
+    assert events[-1]["type"] == "workflow.finished"
+    assert events[-1]["status"] == "pending"

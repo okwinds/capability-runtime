@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict
 
-from ..types import NodeResultV2
+from ..types import NodeResult
 
 
 class SystemPromptEvidence(BaseModel):
@@ -46,7 +46,7 @@ class SystemPromptEvidenceHook:
 
     evidence: SystemPromptEvidence
 
-    def before_return_result(self, context: Dict[str, Any], node_result: NodeResultV2) -> None:
+    def before_return_result(self, context: Dict[str, Any], node_result: NodeResult) -> None:
         """
         在 Bridge 返回 NodeResult 前写入证据链摘要。
 
