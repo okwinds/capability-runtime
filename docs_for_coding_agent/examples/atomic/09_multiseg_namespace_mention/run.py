@@ -9,7 +9,7 @@ Atomic 示例：09_multiseg_namespace_mention
 - 可观察证据：
   - stdout 打印 namespace + expected mention
   - WAL 中存在 skill_injected(mention_text=expected)
-  - NodeReportV2.activated_skills 记录被注入的 skill_name
+  - NodeReport.activated_skills 记录被注入的 skill_name
 """
 
 import argparse

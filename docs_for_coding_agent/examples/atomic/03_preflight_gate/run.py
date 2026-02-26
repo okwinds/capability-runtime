@@ -5,7 +5,7 @@ Atomic 示例：03_preflight_gate
 
 演示内容：
 - preflight_mode=error：遇到 overlay 问题 fail-closed（events_path=None）
-- preflight_mode=warn：继续执行，并将 preflight_issues 写入 NodeReportV2.meta
+- preflight_mode=warn：继续执行，并将 preflight_issues 写入 NodeReport.meta
 """
 
 import argparse

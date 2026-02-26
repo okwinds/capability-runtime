@@ -4,8 +4,8 @@ from __future__ import annotations
 Atomic 示例：02_read_node_report
 
 演示内容：
-- NodeReportV2.tool_calls：工具证据（是否成功/错误类型/审批决策）
-- NodeReportV2.activated_skills：skills-first 证据
+- NodeReport.tool_calls：工具证据（是否成功/错误类型/审批决策）
+- NodeReport.activated_skills：skills-first 证据
 """
 
 import argparse

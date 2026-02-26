@@ -5,7 +5,7 @@ Atomic 示例：04_custom_tool
 
 演示内容：
 - 自定义工具注入（CustomTool + ToolSpec + handler）
-- NodeReportV2.tool_calls 中出现自定义工具调用证据
+- NodeReport.tool_calls 中出现自定义工具调用证据
 """
 
 import argparse

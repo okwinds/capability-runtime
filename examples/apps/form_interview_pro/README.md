@@ -5,7 +5,7 @@
 - 任务推进可见：`update_plan`
 - 产物落盘：`file_write`（`submission.json`、`report.md`）
 - 最小确定性校验：`shell_exec`（本地断言）
-- 证据链：WAL + NodeReportV2（tool_calls/approvals/activated_skills）
+- 证据链：WAL + NodeReport（tool_calls/approvals/activated_skills）
 
 ## 1) 离线运行（默认，用于回归）
 
@@ -19,7 +19,7 @@ python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-for
   - `submission.json`
   - `report.md`
   - `runtime.yaml`（overlay）
-- 最终输出中包含 wal_locator（NodeReportV2.events_path）
+- 最终输出中包含 wal_locator（NodeReport.events_path）
 
 本示例的 namespace 口径（pinned: `skills-runtime-sdk==0.1.5.post1`）：
 - overlay：`skills.spaces[].namespace="examples:apps:form-interview"`（≥3 段）

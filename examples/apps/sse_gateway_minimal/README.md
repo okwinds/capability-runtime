@@ -2,7 +2,7 @@
 
 目标：提供一个最小可跑的 HTTP/SSE 服务形态，让人直观看到：
 - 事件流（SSE）如何转发执行过程（skills/tool/approval）
-- 终态如何返回 `output` 与 `wal_locator`（NodeReportV2.events_path）
+- 终态如何返回 `output` 与 `wal_locator`（NodeReport.events_path）
 - 同时支持 `offline/real` 双模式
 
 ## 1) 离线运行（默认）

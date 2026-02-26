@@ -25,7 +25,7 @@ class ApproveAll(ApprovalProvider):
 
     注意：
     - 用于“离线门禁”时，这能确保示例稳定跑通；
-    - 若你需要验证“审批证据链”，应在示例内断言 NodeReportV2.tool_calls[*].approval_decision。
+    - 若你需要验证“审批证据链”，应在示例内断言 NodeReport.tool_calls[*].approval_decision。
     """
 
     async def request_approval(self, *, request: ApprovalRequest, timeout_ms: Optional[int] = None) -> ApprovalDecision:

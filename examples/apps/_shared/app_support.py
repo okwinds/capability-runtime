@@ -430,7 +430,7 @@ def build_evidence_strict_output_validator(
     构造 evidence-strict 的 output_validator（用于 RuntimeConfig.output_validator）。
 
     说明：
-    - 校验只基于 `NodeReportV2.tool_calls`（证据链真相源），避免扫描 WAL 原文；
+    - 校验只基于 `NodeReport.tool_calls`（证据链真相源），避免扫描 WAL 原文；
     - 只做最小可披露摘要：errors 列表（kind/path/message）。
 
     参数：

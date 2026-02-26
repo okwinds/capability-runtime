@@ -4,7 +4,7 @@
 
 你将看到：
 - 如何用 `RuntimeConfig.custom_tools` 注入一个宿主工具 `host_ping`
-- 如何在 NodeReportV2.tool_calls 中看到该工具的证据
+- 如何在 NodeReport.tool_calls 中看到该工具的证据
 
 离线运行（用于回归）：
 

@@ -2,7 +2,7 @@
 
 本目录用于**让编码智能体通过小样本学习**，掌握如何在本仓中：
 - skills-first（system prompt 变薄）
-- evidence-first（WAL + NodeReportV2 + tool/approvals 证据）
+- evidence-first（WAL + NodeReport + tool/approvals 证据）
 - 离线可回归（pytest 作为门禁）
 
 ## 目录结构
@@ -14,7 +14,7 @@
 
 1. `atomic/00_runtime_minimal/`：Runtime 最小闭环（register/validate/run）
 2. `atomic/01_sdk_native_minimal/`：run_stream 的事件流协议
-3. `atomic/02_read_node_report/`：如何读 NodeReportV2 的稳定证据
+3. `atomic/02_read_node_report/`：如何读 NodeReport 的稳定证据
 4. `atomic/03_preflight_gate/`：preflight gate（off/warn/error）
 5. `atomic/04_custom_tool/`：custom_tools 注入
 6. `atomic/05_exec_sessions_stub/`：exec sessions stub（exec_command/write_stdin）

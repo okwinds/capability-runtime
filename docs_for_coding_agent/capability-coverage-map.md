@@ -11,7 +11,7 @@
    - 契约入口（openspec/specs + src 入口）
    - 可运行示例（examples/ 或 docs_for_coding_agent/examples/）
    - 离线回归门禁（pytest）
-   - evidence 断言点（WAL locator + NodeReportV2/tool evidence）
+   - evidence 断言点（WAL locator + NodeReport/tool evidence）
 3. 跑最小离线命令，确认示例与证据链可复现。
 
 ## 1) 能力点（CAP-*）→ 证据入口映射
@@ -21,12 +21,12 @@
 | CAP | 能力点 | 契约入口 | Code 入口 | 示例入口 | 离线测试入口 | evidence 断言点 |
 |---|---|---|---|---|---|---|
 | CAP-CR-001 | Protocol：仅 Agent/Workflow | `openspec/specs/capability-runtime/spec.md` | `src/agently_skills_runtime/protocol/` | `examples/02_workflow/` | `pytest -q`（本仓） | `CapabilityResult.status` 与 `context.step_outputs` |
-| CAP-CR-002 | Runtime：register/validate/run | `openspec/specs/capability-runtime/spec.md` | `src/agently_skills_runtime/runtime.py` | `docs_for_coding_agent/examples/atomic/00_runtime_minimal/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k runtime_minimal` | `NodeReportV2.events_path` + `hello.txt` |
+| CAP-CR-002 | Runtime：register/validate/run | `openspec/specs/capability-runtime/spec.md` | `src/agently_skills_runtime/runtime.py` | `docs_for_coding_agent/examples/atomic/00_runtime_minimal/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k runtime_minimal` | `NodeReport.events_path` + `hello.txt` |
 | CAP-CR-003 | Workflow：顺序/循环/条件/并行 | `openspec/specs/capability-runtime/spec.md` | `src/agently_skills_runtime/adapters/workflow_adapter.py` | `examples/02_workflow/` | `pytest -q`（本仓） | `context.step_results[*].status` |
 | CAP-BRIDGE-001 | bridge：事件转发 + 终态收敛 | `openspec/specs/upstream-bridge/spec.md` | `src/agently_skills_runtime/adapters/agent_adapter.py` | `examples/03_bridge_e2e/` | `pytest -q`（本仓，offline stub） | `run_stream()` 先 yield `AgentEvent` 再 yield `CapabilityResult` |
-| CAP-BRIDGE-002 | sdk_native：不依赖 Agently 的 OpenAI backend | `openspec/specs/upstream-bridge/spec.md` | `src/agently_skills_runtime/runtime.py` | `docs_for_coding_agent/examples/atomic/01_sdk_native_minimal/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k sdk_native_minimal` | `NodeReportV2.engine.module == "skills_runtime"` |
-| CAP-BRIDGE-003 | 离线注入：Fake backend 仍产出证据链 | `openspec/specs/examples-human-apps/spec.md` | `src/agently_skills_runtime/config.py` + `src/agently_skills_runtime/runtime.py` | `examples/apps/* --mode offline`（本变更创建） | `pytest -q tests/test_examples_smoke.py`（本变更创建） | `NodeReportV2.events_path != None` 且可读 |
-| CAP-EVID-001 | NodeReportV2：状态/原因/证据链 | `openspec/specs/evidence-chain/spec.md` | `src/agently_skills_runtime/reporting/node_report.py` | `docs_for_coding_agent/examples/atomic/02_read_node_report/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k read_node_report` | `report.tool_calls[*].ok/error_kind/approval_decision` |
+| CAP-BRIDGE-002 | sdk_native：不依赖 Agently 的 OpenAI backend | `openspec/specs/upstream-bridge/spec.md` | `src/agently_skills_runtime/runtime.py` | `docs_for_coding_agent/examples/atomic/01_sdk_native_minimal/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k sdk_native_minimal` | `NodeReport.engine.module == "skills_runtime"` |
+| CAP-BRIDGE-003 | 离线注入：Fake backend 仍产出证据链 | `openspec/specs/examples-human-apps/spec.md` | `src/agently_skills_runtime/config.py` + `src/agently_skills_runtime/runtime.py` | `examples/apps/* --mode offline`（本变更创建） | `pytest -q tests/test_examples_smoke.py`（本变更创建） | `NodeReport.events_path != None` 且可读 |
+| CAP-EVID-001 | NodeReport：状态/原因/证据链 | `openspec/specs/evidence-chain/spec.md` | `src/agently_skills_runtime/reporting/node_report.py` | `docs_for_coding_agent/examples/atomic/02_read_node_report/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k read_node_report` | `report.tool_calls[*].ok/error_kind/approval_decision` |
 | CAP-SKILLS-001 | skills-first：mention 注入（Scheme2） | `openspec/specs/upstream-bridge/spec.md` | `src/agently_skills_runtime/adapters/agent_adapter.py` | `docs_for_coding_agent/examples/atomic/09_multiseg_namespace_mention/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k multiseg_namespace_mention` | WAL 中 `skill_injected.mention_text`（含多段 namespace）+ `report.activated_skills` |
 | CAP-SKILLS-002 | preflight gate：warn/error/off | `openspec/specs/capability-runtime/spec.md` | `src/agently_skills_runtime/adapters/agent_adapter.py` | `docs_for_coding_agent/examples/atomic/03_preflight_gate/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k preflight_gate` | error：`events_path=None`；warn：`meta.preflight_issues` |
 | CAP-TOOLS-001 | 内置工具：标准库（read/grep/list/write/patch/shell） | 上游 tools 契约（由 `skills_runtime` 提供） | （上游）`skills_runtime/tools/builtin/*` | `docs_for_coding_agent/examples/atomic/00_runtime_minimal/` + `docs_for_coding_agent/examples/atomic/02_read_node_report/` + `docs_for_coding_agent/examples/recipes/00_review_fix_qa_report/` | `pytest -q tests/test_coding_agent_examples_atomic.py` + `pytest -q tests/test_coding_agent_examples_recipes.py` | `report.tool_calls[*].name/ok/error_kind` |

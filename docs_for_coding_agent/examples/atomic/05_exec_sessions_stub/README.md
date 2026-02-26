@@ -5,7 +5,7 @@
 你将看到：
 - 如何向 `RuntimeConfig.exec_sessions` 注入一个 stub provider
 - 如何在离线环境运行 `exec_command`（不依赖真实 PTY）
-- 如何在 NodeReportV2.tool_calls 中看到 `session_id/stdout/exit_code`
+- 如何在 NodeReport.tool_calls 中看到 `session_id/stdout/exit_code`
 
 离线运行（用于回归）：
 

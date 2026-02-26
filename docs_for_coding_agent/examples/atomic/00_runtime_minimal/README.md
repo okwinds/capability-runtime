@@ -5,7 +5,7 @@
 你将看到：
 - 如何注册 `AgentSpec`
 - 如何用 `Runtime.run()` 执行一次离线 run
-- 如何通过 `NodeReportV2.events_path` 找到 WAL（events.jsonl）
+- 如何通过 `NodeReport.events_path` 找到 WAL（events.jsonl）
 
 离线运行（用于回归）：
 

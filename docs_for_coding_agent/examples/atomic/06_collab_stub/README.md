@@ -5,7 +5,7 @@
 你将看到：
 - 如何向 `RuntimeConfig.collab_manager` 注入一个 stub manager
 - 如何离线跑通 `spawn_agent/send_input/wait/close_agent`
-- 如何在 NodeReportV2.tool_calls 中观察 `data.results[*].final_output`
+- 如何在 NodeReport.tool_calls 中观察 `data.results[*].final_output`
 
 离线运行（用于回归）：
 

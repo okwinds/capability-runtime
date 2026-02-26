@@ -5,7 +5,7 @@
 你将看到：
 - overlay 中出现不被上游支持的 legacy 字段（如 `skills.roots`）时
 - `preflight_mode="error"` 会 fail-closed（不启动执行引擎；`events_path=None`）
-- `preflight_mode="warn"` 会继续执行，但把问题记录进 `NodeReportV2.meta.preflight_issues`
+- `preflight_mode="warn"` 会继续执行，但把问题记录进 `NodeReport.meta.preflight_issues`
 
 离线运行（用于回归）：
 

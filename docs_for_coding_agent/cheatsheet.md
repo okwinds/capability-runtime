@@ -8,7 +8,7 @@
 
 1. **Protocol**：声明 Agent/Workflow（dataclass/Enum），不依赖上游
 2. **Runtime**：唯一执行入口 `Runtime.run()` / `Runtime.run_stream()`
-3. **Report**：桥接模式下会聚合上游事件，产出 `NodeReportV2`（系统级证据链）
+3. **Report**：桥接模式下会聚合上游事件，产出 `NodeReport`（系统级证据链）
 
 ## 1) 10 行代码最小闭环（mock，离线可跑）
 
@@ -41,7 +41,7 @@ from agently_skills_runtime import (
 )
 
 # === 报告（消费结果用）===
-from agently_skills_runtime import NodeReportV2, NodeResultV2
+from agently_skills_runtime import NodeReport, NodeResult
 
 # === 错误 ===
 from agently_skills_runtime import (
@@ -57,7 +57,8 @@ from agently_skills_runtime import (
   - 返回：`CapabilityResult`（终态）
   - 适用：业务代码“只要结果”，不需要中间事件
 - `async for x in Runtime.run_stream(...):`
-  - 先产出：上游 `AgentEvent`（bridge/sdk_native）
+  - Agent 路径先产出：上游 `AgentEvent`（bridge/sdk_native）
+  - Workflow 路径先产出：轻量事件（`workflow.started`、`workflow.step.started/finished`、`workflow.finished`）
   - 最后产出：`CapabilityResult`（终态）
   - 适用：宿主需要把事件写入日志、做可观测、或构建额外审计链
 

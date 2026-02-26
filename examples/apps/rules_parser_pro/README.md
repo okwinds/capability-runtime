@@ -3,7 +3,7 @@
 目标：演示一个“规则驱动的确定性执行”小应用（MVP），让人直观看到：
 - 规则（人类可读）如何被整理为 `plan.json`（可审计的中间表示）
 - 如何用 **确定性执行**（非 LLM）把 `plan.json + input.json` 转换为 `result.json`
-- 全过程保留 WAL + NodeReportV2 证据链（含 tool_calls / approvals / activated_skills）
+- 全过程保留 WAL + NodeReport 证据链（含 tool_calls / approvals / activated_skills）
 
 ## 1) 离线运行（默认，用于回归）
 
@@ -19,7 +19,7 @@ python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/asr-app-rules
   - `result.json`（确定性执行结果）
   - `report.md`
   - `runtime.yaml`（overlay）
-- 终端输出包含 `wal_locator=...`（NodeReportV2.events_path）
+- 终端输出包含 `wal_locator=...`（NodeReport.events_path）
 
 ## 2) 真模型运行（OpenAI-compatible）
 

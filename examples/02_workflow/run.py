@@ -37,7 +37,7 @@ def handler(spec: AgentSpec, input: Dict[str, Any], context=None) -> Any:
         return {"name": name, "upper": name.upper()}
     if spec.base.id == "agent.summarize_positive":
         processed = input.get("processed") or []
-        return {"summary": f\"处理完成（positive）：{len(processed)} items\"}
+        return {"summary": f"处理完成（positive）：{len(processed)} items"}
     if spec.base.id == "agent.summarize_default":
         return {"summary": "默认分支（default）"}
 

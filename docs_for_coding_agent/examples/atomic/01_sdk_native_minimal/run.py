@@ -5,7 +5,7 @@ Atomic 示例：01_sdk_native_minimal
 
 演示内容：
 - Runtime.run_stream：先 yield AgentEvent，再 yield CapabilityResult
-- NodeReportV2.engine.module == "skills_runtime"（证据链：执行引擎身份）
+- NodeReport.engine.module == "skills_runtime"（证据链：执行引擎身份）
 """
 
 import argparse
