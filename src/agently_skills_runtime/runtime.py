@@ -660,6 +660,27 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
             # 未知字段：不在这里直接抛错（由 preflight gate 控制 fail-closed），
             # 但必须过滤掉以避免 SDK loader/model_validate 直接异常。
             continue
+
+    # === v0.1.5 兼容：skills.spaces schema（account/domain ↔ namespace）===
+    #
+    # 说明：
+    # - 上游 v0.1.5 将 spaces 从 account/domain 升级为 namespace，并在 loader 层显式拒绝 legacy 字段；
+    # - 本仓需要在进入上游 loader 前做最小转换，避免初始化期直接崩溃；
+    # - 若 namespace 无法无损映射回 legacy（多段），必须 fail-closed，避免产生错误定位。
+    spaces = out.get("spaces")
+    if spaces is not None:
+        from .upstream_compat import detect_skills_space_schema, normalize_spaces_for_upstream
+
+        target_schema = detect_skills_space_schema()
+        normalized, warnings = normalize_spaces_for_upstream(spaces=spaces, target_schema=target_schema)
+        if normalized is not None:
+            out["spaces"] = normalized
+        elif warnings:
+            raise FrameworkError(
+                code="SKILL_CONFIG_SPACES_SCHEMA_INCOMPATIBLE",
+                message="skills.spaces schema is incompatible with installed skills-runtime-sdk",
+                details={"target_schema": target_schema, "warnings": warnings},
+            )
     return out
 
 
@@ -704,6 +725,34 @@ def _sanitize_sdk_overlay_dict_for_loader(overlay: Dict[str, Any]) -> tuple[Dict
             )
         )
         skills_obj.pop("roots", None)
+
+    # v0.1.5 兼容：spaces schema（account/domain ↔ namespace）
+    spaces = skills_obj.get("spaces")
+    if spaces is not None:
+        from .upstream_compat import detect_skills_space_schema, normalize_spaces_for_upstream
+
+        target_schema = detect_skills_space_schema()
+        normalized, warnings = normalize_spaces_for_upstream(spaces=spaces, target_schema=target_schema)
+        if normalized is not None:
+            skills_obj["spaces"] = normalized
+            for w in warnings:
+                issues.append(
+                    FrameworkIssue(
+                        code="SKILL_CONFIG_SPACES_SCHEMA_NORMALIZED",
+                        message="skills.spaces schema normalized for upstream compatibility",
+                        details={"path": "skills.spaces", "target_schema": target_schema, "warning": w},
+                    )
+                )
+        elif warnings:
+            # overlay 的目标是“不让初始化期直接崩”，因此这里做 best-effort：丢弃 spaces 并把原因写入 issues。
+            skills_obj.pop("spaces", None)
+            issues.append(
+                FrameworkIssue(
+                    code="SKILL_CONFIG_SPACES_SCHEMA_INCOMPATIBLE_DROPPED",
+                    message="skills.spaces is incompatible with installed skills-runtime-sdk; dropped from overlay",
+                    details={"path": "skills.spaces", "target_schema": target_schema, "warnings": warnings},
+                )
+            )
 
     scan = skills_obj.get("scan")
     if isinstance(scan, dict):

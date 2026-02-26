@@ -19,6 +19,7 @@ from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
 from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from agently_skills_runtime.upstream_compat import detect_skills_space_schema
 
 
 class _ApproveAll(ApprovalProvider):
@@ -57,41 +58,57 @@ async def test_offline_injected_fake_backend_produces_wal_node_report_tool_evide
     )
 
     # --- SDK overlay（skills spaces + safety）---
+    space_schema = detect_skills_space_schema()
     overlay = tmp_path / "runtime.yaml"
-    overlay.write_text(
-        textwrap.dedent(
-            f"""\
-            run:
-              max_steps: 30
-            safety:
-              mode: "ask"
-              approval_timeout_ms: 60000
-              tool_allowlist:
-                - "read_file"
-                - "grep_files"
-                - "list_dir"
-            sandbox:
-              default_policy: none
-            skills:
-              strictness:
-                unknown_mention: error
-                duplicate_name: error
-                mention_format: strict
-              spaces:
-                - id: app-space
-                  account: examples
-                  domain: app
-                  sources: [app-fs]
-                  enabled: true
-              sources:
-                - id: app-fs
-                  type: filesystem
-                  options:
-                    root: "{skills_root.as_posix()}"
-            """
-        ),
-        encoding="utf-8",
+    lines = [
+        "run:",
+        "  max_steps: 30",
+        "safety:",
+        '  mode: "ask"',
+        "  approval_timeout_ms: 60000",
+        "  tool_allowlist:",
+        '    - "read_file"',
+        '    - "grep_files"',
+        '    - "list_dir"',
+        "sandbox:",
+        "  default_policy: none",
+        "skills:",
+        "  strictness:",
+        "    unknown_mention: error",
+        "    duplicate_name: error",
+        "    mention_format: strict",
+    ]
+    if space_schema == "namespace":
+        lines.extend(
+            [
+                "  spaces:",
+                "    - id: app-space",
+                '      namespace: "examples:app"',
+                "      sources: [app-fs]",
+                "      enabled: true",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "  spaces:",
+                "    - id: app-space",
+                "      account: examples",
+                "      domain: app",
+                "      sources: [app-fs]",
+                "      enabled: true",
+            ]
+        )
+    lines.extend(
+        [
+            "  sources:",
+            "    - id: app-fs",
+            "      type: filesystem",
+            "      options:",
+            f'        root: "{skills_root.as_posix()}"',
+        ]
     )
+    overlay.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     patch = "\n".join(
         [
@@ -159,4 +176,3 @@ async def test_offline_injected_fake_backend_produces_wal_node_report_tool_evide
     t0 = next(t for t in tools if t.call_id == "c1")
     assert t0.requires_approval is True
     assert t0.approval_decision in {"approved", "approved_for_session"}
-

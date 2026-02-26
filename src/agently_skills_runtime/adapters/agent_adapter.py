@@ -262,11 +262,15 @@ class AgentAdapter:
 
     def _infer_space_prefix(self, skills_cfg: Any) -> Optional[str]:
         """
-        从 skills_config 推断 `$[account:domain]` 前缀。
+        从 skills_config 推断 strict mention 的 space 前缀（版本感知）。
 
         说明：
         - 该逻辑是 best-effort：skills_config 的具体形态由上游决定（dict / pydantic model / dataclass）。
         - 无法推断时返回 None（调用方将不输出 mention）。
+
+        返回值形态：
+        - legacy：`[account:domain]`
+        - v0.1.5+：`[namespace]`（namespace 允许 `a:b:c` 多段）
         """
 
         spaces = None
@@ -286,6 +290,9 @@ class AgentAdapter:
             return str(v).strip() if isinstance(v, str) and str(v).strip() else None
 
         for sp in spaces:
+            namespace = _get(sp, "namespace")
+            if namespace:
+                return f"[{namespace}]"
             account = _get(sp, "account")
             domain = _get(sp, "domain")
             if account and domain:

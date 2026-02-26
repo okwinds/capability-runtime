@@ -48,7 +48,9 @@ class AgentSpec:
     tools: List[str] = field(default_factory=list)
     # skills：仅声明“希望使用的 skill 名称”，注入与执行由上游 skills_runtime 完成。
     skills: List[str] = field(default_factory=list)
-    # skills_mention_map：把 skill_name 映射为 SDK 可识别的严格 mention（如 "$[account:domain].skill_name"）。
+    # skills_mention_map：把 skill_name 映射为 SDK 可识别的严格 mention。
+    # - legacy（≤0.1.4.post2）："$[account:domain].skill_name"
+    # - v0.1.5+："$[namespace].skill_name"（namespace 可为 "a:b:c" 多段）
     skills_mention_map: Dict[str, str] = field(default_factory=dict)
     collaborators: List[CapabilityRef] = field(default_factory=list)
     callable_workflows: List[CapabilityRef] = field(default_factory=list)

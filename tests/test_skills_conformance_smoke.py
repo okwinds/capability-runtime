@@ -14,6 +14,8 @@ from skills_runtime.tools.builtin.skill_ref_read import skill_ref_read
 from skills_runtime.tools.protocol import ToolCall
 from skills_runtime.tools.registry import ToolExecutionContext
 
+from agently_skills_runtime.upstream_compat import detect_skills_space_schema
+
 
 def _write_minimal_skill_md(path: Path, *, name: str = "hello_skill", description: str = "desc") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -34,19 +36,23 @@ def _write_minimal_skill_md(path: Path, *, name: str = "hello_skill", descriptio
 
 
 def _mk_manager(*, workspace_root: Path, skills_root: str, refresh_policy: str = "ttl") -> SkillsManager:
+    space_schema = detect_skills_space_schema()
+    space: dict = {
+        "id": "space-1",
+        "sources": ["src-fs"],
+        "enabled": True,
+    }
+    if space_schema == "namespace":
+        space["namespace"] = "alice:engineering"
+    else:
+        space["account"] = "alice"
+        space["domain"] = "engineering"
+
     return SkillsManager(
         workspace_root=workspace_root,
         skills_config={
             # strictness 默认值由 SDK 负责；桥接层只做“不要绕过/不要破坏”的冒烟。
-            "spaces": [
-                {
-                    "id": "space-1",
-                    "account": "alice",
-                    "domain": "engineering",
-                    "sources": ["src-fs"],
-                    "enabled": True,
-                }
-            ],
+            "spaces": [space],
             "sources": [{"id": "src-fs", "type": "filesystem", "options": {"root": skills_root}}],
             "scan": {"refresh_policy": refresh_policy, "ttl_sec": 60, "max_frontmatter_bytes": 16384, "max_depth": 4},
         },
@@ -61,9 +67,16 @@ def test_b001_free_text_mention_extract_only():
         "suffix"
     )
     mentions = extract_skill_mentions(text)
-    assert [(m.account, m.domain, m.skill_name, m.mention_text) for m in mentions] == [
-        ("alice", "engineering", "hello_skill", "$[alice:engineering].hello_skill")
-    ]
+    assert len(mentions) == 1
+    m = mentions[0]
+    assert m.skill_name == "hello_skill"
+    assert m.mention_text == "$[alice:engineering].hello_skill"
+    if hasattr(m, "namespace"):
+        assert getattr(m, "namespace") == "alice:engineering"
+        assert getattr(m, "segments") == ("alice", "engineering")
+    else:
+        assert getattr(m, "account") == "alice"
+        assert getattr(m, "domain") == "engineering"
 
 
 @pytest.mark.parametrize(
@@ -90,9 +103,13 @@ def test_b002_tool_args_skill_mention_must_be_single_full_token(raw: str):
 
 def test_b002_tool_args_skill_mention_single_token_ok():
     mention = _parse_single_skill_mention_exec("$[aa:bb].xx")
-    assert mention.account == "aa"
-    assert mention.domain == "bb"
     assert mention.skill_name == "xx"
+    if hasattr(mention, "namespace"):
+        assert getattr(mention, "namespace") == "aa:bb"
+        assert getattr(mention, "segments") == ("aa", "bb")
+    else:
+        assert getattr(mention, "account") == "aa"
+        assert getattr(mention, "domain") == "bb"
 
 
 def test_b004_refresh_policy_ttl_refresh_failed_fallback_to_cached_ok(tmp_path: Path):
