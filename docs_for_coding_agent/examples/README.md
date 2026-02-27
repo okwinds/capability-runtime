@@ -29,6 +29,8 @@
 - `recipes/01_map_reduce_parallel/`：Map-Reduce 并行子任务汇总（stub）
 - `recipes/02_policy_references_patch/`：Policy/References 驱动补丁（skill_ref_read + apply_patch）
 - `recipes/03_skill_exec_actions/`：Skills Actions（skill_exec：frontmatter.actions → approvals → tool evidence）
+- `recipes/04_invoke_capability_child_agent/`：渐进式披露：skills 驱动委托子 Agent（invoke_capability）
+- `recipes/05_invoke_capability_child_workflow/`：Agent → 子 Workflow（invoke_capability）
 
 ## 离线回归（门禁）
 

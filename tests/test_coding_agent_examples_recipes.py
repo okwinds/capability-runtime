@@ -42,6 +42,8 @@ def _run_example(*, rel_script: str, workspace_root: Path, timeout_sec: int = 90
         "docs_for_coding_agent/examples/recipes/01_map_reduce_parallel/run.py",
         "docs_for_coding_agent/examples/recipes/02_policy_references_patch/run.py",
         "docs_for_coding_agent/examples/recipes/03_skill_exec_actions/run.py",
+        "docs_for_coding_agent/examples/recipes/04_invoke_capability_child_agent/run.py",
+        "docs_for_coding_agent/examples/recipes/05_invoke_capability_child_workflow/run.py",
     ],
 )
 def test_recipe_examples_offline_smoke(tmp_path: Path, rel_script: str) -> None:

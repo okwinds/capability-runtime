@@ -30,6 +30,7 @@ python examples/02_workflow/run.py
 | 02 | `02_workflow/` | 顺序 + 循环 + 条件分支（统一 Runtime） | ❌ |
 | 03 | `03_bridge_e2e/` | 真实 LLM：tool_call + 自动审批 + NodeReport 证据链 | ✅ |
 | 04 | `04_triggerflow_orchestration/` | TriggerFlow 顶层编排多个 `Runtime.run()` | ✅ |
+| 05 | `05_workflow_skills_first/` | Workflow 编排 skills-first Agent（离线可回归） | ❌ |
 
 ## 人类小应用（apps/）
 
