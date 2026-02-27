@@ -12,6 +12,7 @@ Host toolkit（宿主工具箱）。
 from .approvals_profiles import ApprovalsProfile, ApprovalsProfiles, validate_approvals_profile
 from .evidence_hooks import SystemPromptEvidence, SystemPromptEvidenceHook
 from .history import HistoryAssembler, HistoryAssemblerConfig
+from .invoke_capability import InvokeCapabilityAllowlist, make_invoke_capability_tool
 from .resume import ResumeReplaySummary, build_resume_replay_summary, load_agent_events_from_jsonl
 from .system_prompt import (
     StaticSystemPromptProvider,
@@ -31,6 +32,8 @@ __all__ = [
     "SystemPromptEvidenceHook",
     "HistoryAssembler",
     "HistoryAssemblerConfig",
+    "InvokeCapabilityAllowlist",
+    "make_invoke_capability_tool",
     "ResumeReplaySummary",
     "build_resume_replay_summary",
     "load_agent_events_from_jsonl",
@@ -44,4 +47,3 @@ __all__ = [
     "TurnDeltaRedactor",
     "TruncatingTurnDeltaRedactor",
 ]
-

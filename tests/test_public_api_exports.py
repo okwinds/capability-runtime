@@ -11,9 +11,13 @@ def test_public_api_all_exports_are_stable() -> None:
         # Runtime
         "Runtime",
         "RuntimeConfig",
+        "CustomTool",
         # Reports
         "NodeReport",
         "NodeResult",
+        # Host toolkit (selected)
+        "InvokeCapabilityAllowlist",
+        "make_invoke_capability_tool",
         # Protocol
         "CapabilityKind",
         "CapabilityRef",
@@ -62,4 +66,3 @@ def test_public_api_does_not_expose_internal_impl_details() -> None:
     ]
     for name in forbidden:
         assert not hasattr(asr, name), name
-
