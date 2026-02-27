@@ -70,6 +70,25 @@ flowchart TD
 
 可将本仓理解为：**“协议二元（Agent/Workflow）+ 引擎一元（skills_runtime）+ 证据链闭环（NodeReport/WAL）”**。
 
+### 三层视角：协议 / 执行 / 证据
+
+为避免把“能力范式三元对等（Skill/Agent/Workflow）”误读成“协议层三元寻址”，可用三层视角理解本仓边界：
+
+```text
+[协议层 / Public Contract]（本仓对外稳定承诺）
+  - 原语：AgentSpec / WorkflowSpec
+  - 入口：Runtime.register / validate / run / run_stream
+
+[执行层 / Execution Semantics]（能力范式层面的“一等公民”）
+  - Skill：由上游 skills_runtime 负责注入、tools/approvals、WAL/events
+  - Agent：以 Skill 为主要驱动的宿主节点（thin shell）
+  - Workflow：强结构编排，组合 Agent/Workflow
+
+[证据层 / Evidence Chain]（可审计、可回归的真相源）
+  - WAL/events/tool evidence → NodeReport（schema v1）
+  - 编排分支与审计优先读取 NodeReport.status/reason，而非解析自由文本 output
+```
+
 ## 核心心智模型：Protocol → Runtime → Report
 
 本仓可以归纳为“三件套”（从调用方视角）：
@@ -90,6 +109,28 @@ flowchart LR
   SDK --> EVT[WAL / AgentEvent] --> NR[NodeReport]
 ```
 
+### 执行路径骨架（Agent vs Workflow）
+
+```text
+Runtime.run_stream(capability_id)
+  ├─ Registry.get(spec)
+  ├─ ExecutionContext + Guards（深度/循环上限）
+  ├─ if Agent:
+  │    AgentAdapter.execute_stream
+  │      ├─ (bridge/sdk_native) preflight gate
+  │      ├─ sdk Agent.run_stream_async(...) -> yield AgentEvent*
+  │      ├─ NodeReportBuilder.build(events) -> NodeReport(schema v1)
+  │      └─ yield CapabilityResult(output=final_output, node_report=NodeReport)
+  └─ if Workflow:
+       TriggerFlowWorkflowEngine.execute_stream
+         ├─ yield workflow.* 轻量事件（started/step.* /finished）
+         ├─ 每个 step 内部：runtime._execute(...) 获取 step 终态结果
+         └─ yield CapabilityResult(output=mappings or step_outputs)
+
+说明：
+- Workflow 默认不透传内部 AgentEvent；深审计以 WAL/events + NodeReport 为主（控制面优先）。
+```
+
 ## 能力来源与执行闭环（ASCII 图）
 
 ### 图 1：能力来源（两上游 + 本仓桥接）
@@ -97,21 +138,21 @@ flowchart LR
 ```text
                     +------------------------+
                     | Upstream: Agently      |
-                    | - TriggerFlow (入口)   |
+                    | - TriggerFlow (entry)  |
                     | - OpenAICompatible     |
                     +-----------+------------+
                                 |
-                                | (LLM 传输/编排入口，可选)
+                                | (optional: LLM transport / orchestration entry)
                                 v
 +---------------------------------------------------------------------+
 | This Repo: agently-skills-runtime                                   |
-| - Protocol: AgentSpec / WorkflowSpec   (对外承诺的能力原语)          |
-| - Runtime:  Runtime                   (register/validate/run)       |
-| - Adapters: TriggerFlowWorkflowEngine / AgentAdapter                |
-| - Reporting: NodeReportBuilder -> NodeReport (证据链聚合)          |
+| - Protocol:  AgentSpec / WorkflowSpec (capability primitives)       |
+| - Runtime:   Runtime (register/validate/run)                        |
+| - Adapters:  TriggerFlowWorkflowEngine / AgentAdapter               |
+| - Reporting: NodeReportBuilder -> NodeReport (evidence aggregation) |
 +----------------------------+----------------------------------------+
                              |
-                             | (真实执行与 skills/tool/approvals 委托)
+                             | (delegate execution: skills/tool/approvals)
                              v
                     +------------------------+
                     | Upstream: skills_runtime |
@@ -122,7 +163,7 @@ flowchart LR
                                 |
                                 | (events/evidence)
                                 v
-                     NodeReport (控制面) + output (数据面)
+                     NodeReport (control plane) + output (data plane)
 ```
 
 ### 图 2：面向能力的执行闭环（声明 → 注册 → 编排 → 执行 → 取证）
@@ -172,7 +213,7 @@ CapabilityResult
       - meta (脱敏摘要)              (可观测，不泄露)
 ```
 
-## 推荐落地模式（保持“协议二元”，降低引擎细节暴露）
+## 推荐落地模式（协议二元 + 证据链优先）
 
 ### 图 4：业务域如何“面向能力”组织（建议结构，不绑定具体业务）
 
@@ -199,7 +240,7 @@ your-domain/
 +-----------------------+        +----------------------------+
 | WorkflowSpec          |  step  | AgentSpec (thin shell)     |
 | (this repo)           +------->| (this repo)                |
-| - Step/Loop/Parallel  |        | - task 内引用 skills       |
+| - Step/Loop/Parallel  |        | - task references skills   |
 +-----------------------+        +-------------+--------------+
                                               |
                                               | mention / overlays / approvals
@@ -233,12 +274,27 @@ Host / TriggerFlow  ------------------------------->  Runtime.run("WF-*")
   +---------------------+
 ```
 
+### 能力委托工具：invoke_capability（宿主自定义工具）
+
+当你需要实现以下调用关系时（仍保持协议层只承诺 Agent/Workflow，不引入 Skill 寻址）：
+
+- skills 驱动的 Agent 在运行中按需委托子 Agent/子 Workflow（渐进式披露）
+- Agent → Workflow（或 Agent → Agent）的能力调用（带 approvals + tool evidence）
+
+推荐做法：由宿主通过 `RuntimeConfig.custom_tools` 注入一个自定义工具（建议名 `invoke_capability`），其 handler 在宿主进程内调用 `Runtime.run(...)`（或 `Runtime.run_stream(...)`）完成子调用，并返回最小披露摘要（artifact 指针 + digest）。
+
+重要约束（上游现实约束）：
+- 上游 tool handler 为同步函数（tool dispatch 为同步路径），因此在 handler 内不能直接 `await`。
+- 当子能力调用本身为 async API（例如 `Runtime.run(...)`）时，宿主应使用“后台线程 + 独立 event loop”执行子调用并等待结果返回；不要在运行中的 event loop 中直接调用 `asyncio.run()`。
+
+参考实现（公共 API，推荐包根导入）：`agently_skills_runtime.make_invoke_capability_tool`（实现文件：`src/agently_skills_runtime/host_toolkit/invoke_capability.py`）。
+
 ## 公共 API（对外承诺）
 
 按输入文档 `docs/context/refactoring-spec.md` 的 2.7 节收敛后，本仓对外推荐只从包根导入：
 
 ```python
-from agently_skills_runtime import Runtime, RuntimeConfig
+from agently_skills_runtime import Runtime, RuntimeConfig, CustomTool
 from agently_skills_runtime import (
     CapabilitySpec, CapabilityKind, CapabilityRef,
     CapabilityResult, CapabilityStatus,

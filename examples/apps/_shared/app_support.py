@@ -24,6 +24,58 @@ from skills_runtime.tools.protocol import HumanIOProvider
 from agently_skills_runtime import Runtime, RuntimeConfig
 
 
+def detect_skills_space_schema() -> str:
+    """
+    探测当前安装的 skills-runtime-sdk 期望的 skills.spaces schema。
+
+    返回：
+    - "namespace"：上游要求 `skills.spaces[].namespace`
+    - "account_domain"：上游要求 `skills.spaces[].account` + `domain`
+    """
+
+    try:
+        import skills_runtime.config.loader as loader
+
+        space = getattr(getattr(loader, "AgentSdkSkillsConfig", None), "Space", None)
+        if space is not None:
+            fields = getattr(space, "model_fields", None)
+            if isinstance(fields, dict) and "namespace" in fields:
+                return "namespace"
+    except Exception:
+        return "account_domain"
+
+    try:
+        import skills_runtime.skills.mentions as mentions
+
+        if hasattr(mentions, "is_valid_namespace"):
+            return "namespace"
+    except Exception:
+        return "account_domain"
+
+    return "account_domain"
+
+
+def _build_namespace_from_account_domain(*, account: str, domain: str) -> str:
+    """将 legacy account/domain 映射为两段 namespace（`account:domain`）。"""
+
+    return f"{str(account).strip()}:{str(domain).strip()}"
+
+
+def _split_namespace_to_account_domain(namespace: str) -> Tuple[str, str]:
+    """
+    将两段 namespace 映射回 legacy account/domain（仅当恰好 2 段时允许）。
+
+    异常：
+    - ValueError：namespace 不是 2 段时（无法无损映射）
+    """
+
+    raw = str(namespace).strip()
+    parts = [p for p in raw.split(":") if p]
+    if len(parts) != 2:
+        raise ValueError("namespace must have exactly 2 segments to map into legacy account/domain")
+    return parts[0], parts[1]
+
+
 def env_or_default(name: str, default: str) -> str:
     """
     读取环境变量（不存在则返回 default）。
@@ -96,23 +148,16 @@ def write_overlay_for_app(
     # - file_write：只写 workspace（示例契约要求产物落盘；避免每次都审批导致体验碎片化）
     allowlist = tool_allowlist or ["read_file", "grep_files", "list_dir", "file_read", "update_plan", "file_write"]
 
-    # v0.1.5 兼容：spaces schema（account/domain ↔ namespace）
-    from agently_skills_runtime.upstream_compat import (
-        build_namespace_from_account_domain,
-        detect_skills_space_schema,
-        split_namespace_to_account_domain,
-    )
-
     space_schema = detect_skills_space_schema()
     account_for_overlay = account
     domain_for_overlay = domain
     namespace_for_overlay = namespace
     if space_schema == "namespace":
         if namespace_for_overlay is None:
-            namespace_for_overlay = build_namespace_from_account_domain(account=account_for_overlay, domain=domain_for_overlay)
+            namespace_for_overlay = _build_namespace_from_account_domain(account=account_for_overlay, domain=domain_for_overlay)
     else:
         if namespace_for_overlay is not None:
-            account_for_overlay, domain_for_overlay = split_namespace_to_account_domain(namespace_for_overlay)
+            account_for_overlay, domain_for_overlay = _split_namespace_to_account_domain(namespace_for_overlay)
             namespace_for_overlay = None
 
     lines: List[str] = []

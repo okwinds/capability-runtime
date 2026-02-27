@@ -25,7 +25,7 @@ for p in (str(_REPO_ROOT), str(_SRC_ROOT)):
         sys.path.insert(0, p)
 
 from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext  # noqa: E402
-from agently_skills_runtime.config import CustomTool  # noqa: E402
+from agently_skills_runtime import CustomTool  # noqa: E402
 
 from docs_for_coding_agent.examples._shared.example_support import (  # noqa: E402
     build_offline_runtime,
@@ -128,4 +128,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

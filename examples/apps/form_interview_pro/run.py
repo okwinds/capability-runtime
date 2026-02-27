@@ -268,7 +268,7 @@ def main() -> int:
     app_dir = Path(__file__).resolve().parent
     skills_root = (app_dir / "skills").resolve()
 
-    from agently_skills_runtime.upstream_compat import detect_skills_space_schema
+    from examples.apps._shared.app_support import detect_skills_space_schema
 
     space_schema = detect_skills_space_schema()
     namespace_for_demo = "examples:apps:form-interview" if space_schema == "namespace" else None

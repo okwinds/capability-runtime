@@ -23,7 +23,7 @@ from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, 
 from skills_runtime.tools.protocol import ToolCall, ToolSpec
 
 from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
-from agently_skills_runtime.config import CustomTool
+from agently_skills_runtime import CustomTool
 
 REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
 

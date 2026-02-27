@@ -29,7 +29,7 @@ print(res.node_report)
 
 ```python
 # === 唯一入口 ===
-from agently_skills_runtime import Runtime, RuntimeConfig
+from agently_skills_runtime import Runtime, RuntimeConfig, CustomTool
 
 # === 协议（声明能力用）===
 from agently_skills_runtime import (
@@ -67,3 +67,14 @@ from agently_skills_runtime import (
 - 忘记 `validate()`：`Capability not found: ...`（先注册缺失能力再跑）
 - 误以为本仓还内置“skills 原语/注入机制”：本仓只暴露 Agent/Workflow；skills（catalog/mention/sources/preflight/tools/approvals/WAL）以 `skills_runtime` 为真相源
 - 想在本仓走 “TriggerFlow tool”：已按规格搁置归档；应在业务侧用 TriggerFlow 顶层调用 `Runtime.run()`
+
+## 5) invoke_capability（能力委托工具）要点
+
+当你需要在一次 run 内实现 “Agent → 子 Agent/子 Workflow”（渐进式披露/能力委托）时，可由宿主注入自定义工具 `invoke_capability`（`RuntimeConfig.custom_tools`）。
+
+关键约束（上游现实约束）：
+- tool handler 为同步函数；不要在 handler 内直接 `await`
+- 不要在运行中的 event loop 中直接调用 `asyncio.run()`
+- 推荐使用“后台线程 + 独立 event loop”执行 `await Runtime.run(...)` 并等待返回
+
+公共 API 入口（推荐）：`agently_skills_runtime.make_invoke_capability_tool`。

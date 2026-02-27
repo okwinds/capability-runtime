@@ -30,7 +30,6 @@ from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision
 
 from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext, Runtime
-from agently_skills_runtime.guards import ExecutionGuards
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -140,8 +139,10 @@ class _AppState:
         self.runs[run_id] = h
 
         def _worker() -> None:
-            guards = ExecutionGuards(max_total_loop_iterations=50000)
-            ctx = ExecutionContext(run_id=run_id, max_depth=10, guards=guards, bag={"evidence_strict": bool(evidence_strict)})
+            # 说明：
+            # - LoopStep 的熔断守卫由 Runtime 在 run/run_stream 内部统一注入（context.guards 为空时会填充默认值）；
+            # - app 示例只固定 run_id / bag，避免依赖内部实现类型（单一公共入口：包根 API）。
+            ctx = ExecutionContext(run_id=run_id, max_depth=10, bag={"evidence_strict": bool(evidence_strict)})
             runtime = self.strict_runtime if evidence_strict else self.runtime
 
             async def _async_worker() -> None:
