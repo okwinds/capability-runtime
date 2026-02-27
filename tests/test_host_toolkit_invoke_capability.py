@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -120,3 +121,83 @@ def test_invoke_capability_tool_returns_artifact_digest(tmp_path: Path) -> None:
     obj = json.loads(p.read_text(encoding="utf-8"))
     assert obj.get("schema") == "agently-skills-runtime.invoke_capability.v1"
     assert "child_output_sha256" in obj
+
+
+def test_invoke_capability_tool_timeout_sets_error_kind(tmp_path: Path) -> None:
+    # Arrange: outer runtime 触发 invoke_capability，但 child 在 mock handler 中阻塞，导致超时。
+    outer_backend = FakeChatBackend(
+        calls=[
+            FakeChatCall(
+                events=[
+                    ChatStreamEvent(
+                        type="tool_calls",
+                        tool_calls=[
+                            LlmToolCall(
+                                call_id="ic_timeout",
+                                name="invoke_capability",
+                                args={"capability_id": "child.slow", "input": {"x": 1}},
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatStreamEvent(type="completed", finish_reason="tool_calls"),
+                ]
+            ),
+            FakeChatCall(events=[ChatStreamEvent(type="text_delta", text="ok"), ChatStreamEvent(type="completed")]),
+        ]
+    )
+
+    cfg = RuntimeConfig(
+        mode="sdk_native",
+        workspace_root=tmp_path,
+        sdk_config_paths=[],
+        sdk_backend=outer_backend,
+        preflight_mode="off",
+        approval_provider=_ApproveAll(),
+    )
+
+    def _slow_mock_handler(spec: CapabilitySpec, input_dict: dict) -> str:
+        _ = (spec, input_dict)
+        time.sleep(0.05)
+        return "child"
+
+    from agently_skills_runtime.host_toolkit.invoke_capability import InvokeCapabilityAllowlist, make_invoke_capability_tool
+
+    tool = make_invoke_capability_tool(
+        allowlist=InvokeCapabilityAllowlist(allowed_ids=["child.slow"]),
+        child_runtime_config=replace(cfg, mode="mock", sdk_backend=None, mock_handler=_slow_mock_handler),
+        child_specs=[
+            AgentSpec(
+                base=CapabilitySpec(
+                    id="child.slow",
+                    kind=CapabilityKind.AGENT,
+                    name="ChildSlow",
+                    description="child agent (slow mock handler)",
+                )
+            )
+        ],
+        requires_approval=True,
+        timeout_ms=1,
+    )
+
+    rt = Runtime(replace(cfg, custom_tools=[tool]))
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(
+                id="outer_timeout",
+                kind=CapabilityKind.AGENT,
+                name="OuterTimeout",
+                description="call invoke_capability then say ok",
+            )
+        )
+    )
+    assert rt.validate() == []
+
+    ctx = ExecutionContext(run_id="t_invoke_capability_timeout", max_depth=5, guards=None, bag={})
+    result = asyncio.run(rt.run("outer_timeout", input={}, context=ctx))
+    assert result.node_report is not None
+
+    ic = next((t for t in (result.node_report.tool_calls or []) if t.name == "invoke_capability"), None)
+    assert ic is not None
+    assert ic.ok is False
+    assert ic.error_kind == "timeout"
