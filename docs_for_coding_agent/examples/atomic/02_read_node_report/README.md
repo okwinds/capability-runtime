@@ -9,6 +9,6 @@
 离线运行（用于回归）：
 
 ```bash
-python docs_for_coding_agent/examples/atomic/02_read_node_report/run.py --workspace-root /tmp/asr-atomic-02
+python docs_for_coding_agent/examples/atomic/02_read_node_report/run.py --workspace-root /tmp/caprt-atomic-02
 ```
 

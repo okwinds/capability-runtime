@@ -14,7 +14,7 @@ from __future__ import annotations
 - 本文件保留用于防止历史概念回流到主线 API。
 """
 
-from agently_skills_runtime.config import RuntimeConfig
+from capability_runtime.config import RuntimeConfig
 
 
 def test_runtime_config_has_no_upstream_verification_fields() -> None:

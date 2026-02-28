@@ -5,22 +5,22 @@ from typing import Any, Dict
 
 import pytest
 
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.protocol.workflow import (
     InputMapping,
     LoopStep,
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.runtime import Runtime
-from agently_skills_runtime.config import RuntimeConfig
+from capability_runtime.runtime import Runtime
+from capability_runtime.config import RuntimeConfig
 
 
 def _handler(spec: AgentSpec, input_dict: Dict[str, Any]) -> CapabilityResult:

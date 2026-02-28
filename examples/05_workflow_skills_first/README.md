@@ -10,6 +10,6 @@
 运行：
 
 ```bash
-python examples/05_workflow_skills_first/run.py --workspace-root /tmp/asr-ex-05
+python examples/05_workflow_skills_first/run.py --workspace-root /tmp/caprt-ex-05
 ```
 

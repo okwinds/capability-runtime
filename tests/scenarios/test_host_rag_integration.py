@@ -12,12 +12,12 @@ from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.tools.protocol import ToolCall
 from skills_runtime.tools.registry import ToolExecutionContext, ToolRegistry
 
-from agently_skills_runtime.config import RuntimeConfig
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.runtime import Runtime
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.config import RuntimeConfig
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import CapabilityKind, CapabilitySpec
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.runtime import Runtime
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
 def _add_archive_backend_src_to_path() -> None:

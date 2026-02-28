@@ -7,11 +7,11 @@ import pytest
 
 from skills_runtime.core.contracts import AgentEvent
 
-from agently_skills_runtime.config import RuntimeConfig
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.runtime import Runtime
+from capability_runtime.config import RuntimeConfig
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import CapabilityKind, CapabilitySpec
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.runtime import Runtime
 
 
 class _FakeAgent:
@@ -62,7 +62,7 @@ def test_bridge_mode_calls_requester_factory(monkeypatch: pytest.MonkeyPatch, tm
         def __init__(self, *, config: Any) -> None:
             self.config = config
 
-    import agently_skills_runtime.adapters.agently_backend as ab
+    import capability_runtime.adapters.agently_backend as ab
 
     monkeypatch.setattr(ab, "build_openai_compatible_requester_factory", _factory)
     monkeypatch.setattr(ab, "AgentlyChatBackend", _FakeAgentlyChatBackend)
@@ -75,7 +75,7 @@ def test_bridge_mode_calls_requester_factory(monkeypatch: pytest.MonkeyPatch, tm
 
 @pytest.mark.asyncio
 async def test_sdk_native_mode_does_not_call_requester_factory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import agently_skills_runtime.adapters.agently_backend as ab
+    import capability_runtime.adapters.agently_backend as ab
 
     monkeypatch.setattr(
         ab,

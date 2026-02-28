@@ -32,7 +32,7 @@ from ..registry import AnySpec
 from ..runtime import Runtime
 
 
-_ARTIFACT_SCHEMA_ID = "agently-skills-runtime.invoke_capability.v1"
+_ARTIFACT_SCHEMA_ID = "capability-runtime.invoke_capability.v1"
 
 
 class InvokeCapabilityArgs(BaseModel):
@@ -293,4 +293,3 @@ def make_invoke_capability_tool(
             )
 
     return CustomTool(spec=spec, handler=handler, override=bool(override))
-

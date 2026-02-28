@@ -14,7 +14,7 @@ from skills_runtime.tools.builtin.skill_ref_read import skill_ref_read
 from skills_runtime.tools.protocol import ToolCall
 from skills_runtime.tools.registry import ToolExecutionContext
 
-from agently_skills_runtime.upstream_compat import detect_skills_space_schema
+from capability_runtime.upstream_compat import detect_skills_space_schema
 
 
 def _write_minimal_skill_md(path: Path, *, name: str = "hello_skill", description: str = "desc") -> None:

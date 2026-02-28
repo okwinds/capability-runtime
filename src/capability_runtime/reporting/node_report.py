@@ -300,7 +300,7 @@ class NodeReportBuilder:
                 "version": _get_skills_runtime_version()
                 or _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
             },
-            bridge={"name": "agently-skills-runtime", "version": _get_first_dist_version(["agently-skills-runtime"])},
+            bridge={"name": "capability-runtime", "version": _get_first_dist_version(["capability-runtime"])},
             run_id=run_id,
             turn_id=turn_id,
             events_path=events_path,

@@ -1,6 +1,6 @@
 import pytest
 
-from agently_skills_runtime.adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend
+from capability_runtime.adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend
 from skills_runtime.llm.protocol import ChatRequest
 
 

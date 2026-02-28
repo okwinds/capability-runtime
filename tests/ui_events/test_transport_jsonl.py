@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from agently_skills_runtime.ui_events.transport import encode_json_line
-from agently_skills_runtime.ui_events.v1 import PathSegment, RuntimeEvent, StreamLevel
+from capability_runtime.ui_events.transport import encode_json_line
+from capability_runtime.ui_events.v1 import PathSegment, RuntimeEvent, StreamLevel
 
 
 def test_encode_json_line_jsonl_and_sse_subset() -> None:
     ev = RuntimeEvent(
-        schema="agently-skills-runtime.runtime_event.v1",
+        schema="capability-runtime.runtime_event.v1",
         type="heartbeat",
         run_id="r1",
         seq=1,

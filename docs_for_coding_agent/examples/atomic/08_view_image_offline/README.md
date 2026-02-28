@@ -10,6 +10,6 @@
 离线运行（用于回归）：
 
 ```bash
-python docs_for_coding_agent/examples/atomic/08_view_image_offline/run.py --workspace-root /tmp/asr-atomic-08
+python docs_for_coding_agent/examples/atomic/08_view_image_offline/run.py --workspace-root /tmp/caprt-atomic-08
 ```
 

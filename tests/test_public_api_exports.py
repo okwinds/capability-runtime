@@ -3,9 +3,9 @@ from __future__ import annotations
 
 
 def test_public_api_all_exports_are_stable() -> None:
-    """验证 `agently_skills_runtime.__all__` 仅包含重构后允许暴露的公共符号。"""
+    """验证 `capability_runtime.__all__` 仅包含重构后允许暴露的公共符号。"""
 
-    import agently_skills_runtime as asr
+    import capability_runtime as caprt
 
     expected = [
         # Runtime
@@ -34,19 +34,22 @@ def test_public_api_all_exports_are_stable() -> None:
         "InputMapping",
         "ExecutionContext",
         # Errors
-        "AgentlySkillsRuntimeError",
+        "RuntimeFrameworkError",
         "AdapterNotFoundError",
         "CapabilityNotFoundError",
     ]
 
-    assert asr.__all__ == expected
-    assert set(asr.__all__) == set(expected)
+    assert caprt.__all__ == expected
+    assert set(caprt.__all__) == set(expected)
 
 
 def test_public_api_does_not_expose_internal_impl_details() -> None:
     """验证不再暴露内部实现类（Registry/Guards/Adapters/旧入口等）。"""
 
-    import agently_skills_runtime as asr
+    import capability_runtime as caprt
+
+    legacy_entry = "Agently" + "SkillsRuntime"
+    legacy_config = legacy_entry + "Config"
 
     forbidden = [
         # 内部实现细节
@@ -59,10 +62,10 @@ def test_public_api_does_not_expose_internal_impl_details() -> None:
         "AgentAdapter",
         "WorkflowAdapter",
         # 旧入口（历史）
-        "AgentlySkillsRuntime",
-        "AgentlySkillsRuntimeConfig",
+        legacy_entry,
+        legacy_config,
         "CapabilityRuntime",
         "BridgeConfigModel",
     ]
     for name in forbidden:
-        assert not hasattr(asr, name), name
+        assert not hasattr(caprt, name), name

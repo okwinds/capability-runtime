@@ -2,7 +2,7 @@ import pytest
 
 from skills_runtime.core.contracts import AgentEvent
 
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
 def _ev(t, *, run_id="r1", turn_id="t1", payload=None):
@@ -21,7 +21,7 @@ def test_report_success_from_run_completed():
         _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
     ]
     rep = NodeReportBuilder().build(events=events)
-    assert rep.schema_id == "agently-skills-runtime.node_report.v1"
+    assert rep.schema_id == "capability-runtime.node_report.v1"
     assert rep.status == "success"
     assert rep.engine.get("name") == "skills-runtime-sdk-python"
     assert rep.events_path == "wal.jsonl"
@@ -220,7 +220,7 @@ def test_report_engine_version_prefers_skills_runtime_dunder_version(monkeypatch
     """
 
     import skills_runtime
-    import agently_skills_runtime.reporting.node_report as node_report_mod
+    import capability_runtime.reporting.node_report as node_report_mod
 
     def fake_version(_: str) -> str:
         raise AssertionError("engine.version 不应依赖 importlib.metadata.version（优先使用 skills_runtime.__version__）")
@@ -241,7 +241,7 @@ def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest
     bridge 层应优先尝试 `skills-runtime-sdk` 并兼容回退。
     """
 
-    import agently_skills_runtime.reporting.node_report as node_report_mod
+    import capability_runtime.reporting.node_report as node_report_mod
 
     calls: list[str] = []
 
@@ -252,7 +252,7 @@ def test_report_engine_version_falls_back_to_dist_name_order(monkeypatch: pytest
         calls.append(dist_name)
         if dist_name == "skills-runtime-sdk":
             return "9.9.9"
-        if dist_name == "agently-skills-runtime":
+        if dist_name == "capability-runtime":
             return "0.3.0"
         raise Exception("not found")
 

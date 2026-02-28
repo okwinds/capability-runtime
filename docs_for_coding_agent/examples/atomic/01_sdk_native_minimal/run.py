@@ -24,7 +24,7 @@ for p in (str(_REPO_ROOT), str(_SRC_ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext  # noqa: E402
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext  # noqa: E402
 
 from docs_for_coding_agent.examples._shared.example_support import (  # noqa: E402
     build_offline_runtime,

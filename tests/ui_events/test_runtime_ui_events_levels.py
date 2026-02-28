@@ -9,8 +9,8 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
-from agently_skills_runtime.ui_events.v1 import StreamLevel
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime.ui_events.v1 import StreamLevel
 
 
 class _ApproveAll(ApprovalProvider):
@@ -64,7 +64,7 @@ async def test_lite_level_does_not_emit_tool_or_approval_events(tmp_path: Path) 
 def test_raw_level_emits_raw_agent_event_summaries_without_secrets() -> None:
     from skills_runtime.core.contracts import AgentEvent
 
-    from agently_skills_runtime.ui_events.projector import RuntimeUIEventProjector, _AgentCtx
+    from capability_runtime.ui_events.projector import RuntimeUIEventProjector, _AgentCtx
 
     pj = RuntimeUIEventProjector(run_id="r1", level=StreamLevel.RAW)
     ctx = _AgentCtx(run_id="r1", capability_id="agent.x")

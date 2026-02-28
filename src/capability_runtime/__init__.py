@@ -1,4 +1,4 @@
-"""agently-skills-runtime：统一 Runtime 入口（能力协议 + 执行 + 报告）。"""
+"""capability-runtime：统一 Runtime 入口（能力协议 + 执行 + 报告）。"""
 from __future__ import annotations
 
 # === 统一入口 ===
@@ -31,7 +31,7 @@ from .protocol.workflow import (
 )
 
 # === 错误导出 ===
-from .errors import AdapterNotFoundError, AgentlySkillsRuntimeError, CapabilityNotFoundError
+from .errors import AdapterNotFoundError, CapabilityNotFoundError, RuntimeFrameworkError
 
 __all__ = [
     # Runtime
@@ -60,7 +60,7 @@ __all__ = [
     "InputMapping",
     "ExecutionContext",
     # Errors
-    "AgentlySkillsRuntimeError",
+    "RuntimeFrameworkError",
     "AdapterNotFoundError",
     "CapabilityNotFoundError",
 ]

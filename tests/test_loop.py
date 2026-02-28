@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.protocol.capability import CapabilityResult, CapabilityStatus
-from agently_skills_runtime.guards import ExecutionGuards, LoopBreakerError
+from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
+from capability_runtime.guards import ExecutionGuards, LoopBreakerError
 
 
 @pytest.fixture

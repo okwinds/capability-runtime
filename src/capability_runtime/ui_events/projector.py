@@ -29,7 +29,7 @@ from ..types import NodeReport
 from .v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
 
 
-_SCHEMA = "agently-skills-runtime.runtime_event.v1"
+_SCHEMA = "capability-runtime.runtime_event.v1"
 
 
 def _now_ms() -> int:

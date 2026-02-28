@@ -10,7 +10,7 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.protocol import ChatRequest
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentSpec,
     CapabilityKind,
     CapabilityRef,
@@ -21,7 +21,7 @@ from agently_skills_runtime import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.ui_events.v1 import StreamLevel
+from capability_runtime.ui_events.v1 import StreamLevel
 
 
 class _ApproveAll(ApprovalProvider):

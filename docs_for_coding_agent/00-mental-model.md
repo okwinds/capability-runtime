@@ -68,8 +68,8 @@ flowchart LR
 
 ## 4) 10 分钟读代码路径（可选）
 
-1. `src/agently_skills_runtime/__init__.py`：公共 API 面（框架承诺什么）
-2. `src/agently_skills_runtime/runtime.py`：统一执行入口与 run/run_stream 语义
-3. `src/agently_skills_runtime/protocol/*`：协议与默认值
-4. `src/agently_skills_runtime/adapters/*`：Agent/Workflow 的执行落点
-5. `src/agently_skills_runtime/reporting/node_report.py`：事件聚合为 NodeReport
+1. `src/capability_runtime/__init__.py`：公共 API 面（框架承诺什么）
+2. `src/capability_runtime/runtime.py`：统一执行入口与 run/run_stream 语义
+3. `src/capability_runtime/protocol/*`：协议与默认值
+4. `src/capability_runtime/adapters/*`：Agent/Workflow 的执行落点
+5. `src/capability_runtime/reporting/node_report.py`：事件聚合为 NodeReport

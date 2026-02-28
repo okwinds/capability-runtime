@@ -10,6 +10,6 @@
 离线运行（用于回归）：
 
 ```bash
-python docs_for_coding_agent/examples/recipes/05_invoke_capability_child_workflow/run.py --workspace-root /tmp/asr-recipe-05
+python docs_for_coding_agent/examples/recipes/05_invoke_capability_child_workflow/run.py --workspace-root /tmp/caprt-recipe-05
 ```
 

@@ -18,8 +18,8 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
-from agently_skills_runtime.upstream_compat import detect_skills_space_schema
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime.upstream_compat import detect_skills_space_schema
 
 
 class _ApproveAll(ApprovalProvider):

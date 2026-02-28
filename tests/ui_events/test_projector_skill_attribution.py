@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from skills_runtime.core.contracts import AgentEvent
 
-from agently_skills_runtime.ui_events.projector import RuntimeUIEventProjector, _AgentCtx
-from agently_skills_runtime.ui_events.v1 import StreamLevel
+from capability_runtime.ui_events.projector import RuntimeUIEventProjector, _AgentCtx
+from capability_runtime.ui_events.v1 import StreamLevel
 
 
 def _ev(t: str, payload: dict) -> AgentEvent:

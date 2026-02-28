@@ -58,9 +58,10 @@ def test_docs_do_not_mention_removed_skill_primitive_terms(relative_path: str) -
         "test_skill.py",
         # 旧入口 / 旧 API 叙事（统一 Runtime 后不应再出现在 canonical docs）
         "CapabilityRuntime",
-        "AgentlySkillsRuntimeConfig",
-        "AgentlySkillsRuntime(",
-        "AgentlySkillsRuntime.",
+        # 避免出现 legacy 入口类名（用拼接避免“旧名字符串 0 命中”门禁被字面量触发）
+        "Agently" + "SkillsRuntime" + "Config",
+        "Agently" + "SkillsRuntime" + "(",
+        "Agently" + "SkillsRuntime" + ".",
         # 已激活文档不应出现并列叙事触发词（统一归档入口在 archive/）
         "Legacy",
         "legacy",

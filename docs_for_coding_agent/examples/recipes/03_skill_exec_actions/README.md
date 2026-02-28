@@ -9,6 +9,6 @@
 离线运行（用于回归）：
 
 ```bash
-python docs_for_coding_agent/examples/recipes/03_skill_exec_actions/run.py --workspace-root /tmp/asr-recipe-03
+python docs_for_coding_agent/examples/recipes/03_skill_exec_actions/run.py --workspace-root /tmp/caprt-recipe-03
 ```
 

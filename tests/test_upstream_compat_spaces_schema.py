@@ -12,8 +12,8 @@ import pytest
 
 from skills_runtime.core.errors import FrameworkError
 
-from agently_skills_runtime.runtime import _normalize_skills_config_for_skills_runtime
-from agently_skills_runtime.upstream_compat import normalize_spaces_for_upstream
+from capability_runtime.runtime import _normalize_skills_config_for_skills_runtime
+from capability_runtime.upstream_compat import normalize_spaces_for_upstream
 
 
 def test_spaces_account_domain_to_namespace_ok():
@@ -46,7 +46,7 @@ def test_spaces_namespace_to_account_domain_fail_closed_when_multi_segment():
 def test_runtime_normalize_fail_closed_when_namespace_not_mappable(monkeypatch):
     # 模拟：当前上游仍为 legacy schema，但调用方传入多段 namespace（无法映射回 account/domain）。
     monkeypatch.setattr(
-        "agently_skills_runtime.upstream_compat.detect_skills_space_schema",
+        "capability_runtime.upstream_compat.detect_skills_space_schema",
         lambda: "account_domain",
     )
     with pytest.raises(FrameworkError) as ei:
@@ -61,7 +61,7 @@ def test_runtime_normalize_fail_closed_when_namespace_not_mappable(monkeypatch):
 
 def test_runtime_normalize_converts_when_target_namespace(monkeypatch):
     monkeypatch.setattr(
-        "agently_skills_runtime.upstream_compat.detect_skills_space_schema",
+        "capability_runtime.upstream_compat.detect_skills_space_schema",
         lambda: "namespace",
     )
     out = _normalize_skills_config_for_skills_runtime(

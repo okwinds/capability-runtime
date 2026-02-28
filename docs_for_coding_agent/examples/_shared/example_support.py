@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime import Runtime, RuntimeConfig
+from capability_runtime import Runtime, RuntimeConfig
 
 
 def _detect_skills_space_schema() -> str:

@@ -162,12 +162,17 @@ class Runtime:
         context: Optional[ExecutionContext] = None,
     ) -> AsyncIterator[Union[AgentEvent, WorkflowStreamEvent, CapabilityResult]]:
         """
-        流式执行：先转发事件（如有），最后产出 CapabilityResult。
+        流式执行（执行层混合流）：过程中可能产出事件，最后产出终态 CapabilityResult。
+
+        事实定义（本方法可能产出三类 item；消费端需自行分流处理）：
+        - `AgentEvent`：仅在执行 Agent 且为 bridge/sdk_native 时出现；来自上游 `skills_runtime` 的事实事件流。
+        - `dict`（workflow.* 轻量事件）：仅在执行 Workflow 时出现；只表达编排进度（started/step.* /finished），不承诺深审计细节。
+        - `CapabilityResult`：终态结果（最后一条）。其中 `node_report/events_path` 为证据指针（真相源仍为 WAL/events + NodeReport）。
 
         约束：
-        - mock 模式可仅产出 CapabilityResult（无中间事件）；
-        - bridge/sdk_native 模式 MUST 转发上游 SDK AgentEvent。
-        - workflow 路径默认输出轻量 workflow 事件（字典）；深审计仍依赖 WAL/events。
+        - mock 模式可能只产出终态 `CapabilityResult`（无中间事件）；
+        - bridge/sdk_native 模式 MUST 转发上游 `AgentEvent`（如执行路径确实进入上游引擎）；
+        - 如果你需要“单一稳定事件协议 + 续传游标 + 最小披露”，请使用 `run_ui_events()` / `start_ui_events_session()`。
         """
 
         spec = self._registry.get(capability_id)
@@ -401,6 +406,9 @@ class Runtime:
         - 不改变现有 `run_stream()` 对外行为；这是新增的投影层输出；
         - UI events 不是审计真相源；证据链仍以 NodeReport/WAL 为准；
         - `rid` 默认等于 `seq` 的字符串，支持 after_id exclusive 的最小实现。
+        - 投影输入来源（事实）：
+          - workflow 轻量事件与终态 `CapabilityResult`：通过消费 `run_stream()` 获取；
+          - 上游 `AgentEvent`：通过内部 tap 旁路收集（避免重复投影，并支持 workflow 内部 Agent 的 deep stream）。
 
         参数：
         - capability_id：目标能力 ID
@@ -511,6 +519,7 @@ class Runtime:
         - 会话负责“执行 + 投影 + 存储”，订阅侧可随时重连；
         - 不绑定任何传输协议；JSONL/SSE framing 由 `ui_events.transport` 提供；
         - UI events 不是审计真相源；证据链仍以 NodeReport/WAL 为准。
+        - 投影输入来源与 `run_ui_events()` 一致（workflow/terminal 来自 `run_stream()`，AgentEvent 来自 tap 旁路）。
 
         参数补充：
         - store：可选自定义 store（用于注入持久化/分布式实现，保持中立）
@@ -601,8 +610,8 @@ class Runtime:
                 "version": _get_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
             },
             bridge={
-                "name": "agently-skills-runtime",
-                "version": _get_version(["agently-skills-runtime"]),
+                "name": "capability-runtime",
+                "version": _get_version(["capability-runtime"]),
             },
             run_id=run_id,
             turn_id=None,

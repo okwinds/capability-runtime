@@ -6,16 +6,16 @@ from typing import Any, Dict
 
 import pytest
 
-from agently_skills_runtime.config import RuntimeConfig
-from agently_skills_runtime.protocol.agent import AgentIOSchema, AgentSpec
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.config import RuntimeConfig
+from capability_runtime.protocol.agent import AgentIOSchema, AgentSpec
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.runtime import Runtime
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.runtime import Runtime
 
 
 def _mk_runtime(*, cfg: RuntimeConfig) -> Runtime:

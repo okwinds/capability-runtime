@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.ui_events.store import AfterIdExpiredError, InMemoryRuntimeEventStore
-from agently_skills_runtime.ui_events.v1 import RuntimeEvent, StreamLevel
+from capability_runtime.ui_events.store import AfterIdExpiredError, InMemoryRuntimeEventStore
+from capability_runtime.ui_events.v1 import RuntimeEvent, StreamLevel
 
 
 def _mk(seq: int) -> RuntimeEvent:
     return RuntimeEvent(
-        schema="agently-skills-runtime.runtime_event.v1",
+        schema="capability-runtime.runtime_event.v1",
         type="heartbeat",
         run_id="r1",
         seq=seq,

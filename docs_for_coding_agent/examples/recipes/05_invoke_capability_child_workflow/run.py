@@ -9,7 +9,7 @@ Recipe 示例：05_invoke_capability_child_workflow
 - 子 Workflow 在 mock 模式下运行（确定性输出，便于离线回归）
 
 离线运行：
-  python docs_for_coding_agent/examples/recipes/05_invoke_capability_child_workflow/run.py --workspace-root /tmp/asr-recipe-05
+  python docs_for_coding_agent/examples/recipes/05_invoke_capability_child_workflow/run.py --workspace-root /tmp/caprt-recipe-05
 """
 
 import argparse
@@ -28,7 +28,7 @@ for p in (str(_REPO_ROOT), str(_SRC_ROOT)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from agently_skills_runtime import (  # noqa: E402
+from capability_runtime import (  # noqa: E402
     AgentSpec,
     CapabilityKind,
     CapabilityRef,
@@ -39,7 +39,7 @@ from agently_skills_runtime import (  # noqa: E402
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime import InvokeCapabilityAllowlist, make_invoke_capability_tool  # noqa: E402
+from capability_runtime import InvokeCapabilityAllowlist, make_invoke_capability_tool  # noqa: E402
 
 from docs_for_coding_agent.examples._shared.example_support import (  # noqa: E402
     build_offline_runtime,
@@ -175,7 +175,7 @@ def main() -> int:
     artifact_path = Path(str(inv.data.get("artifact_path") or ""))
     assert artifact_path.exists()
     obj = json.loads(artifact_path.read_text(encoding="utf-8"))
-    assert obj.get("schema") == "agently-skills-runtime.invoke_capability.v1"
+    assert obj.get("schema") == "capability-runtime.invoke_capability.v1"
 
     print("EXAMPLE_OK: recipes/05_invoke_capability_child_workflow")
     print(f"wal_locator={result.node_report.events_path}")

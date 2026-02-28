@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentSpec,
     CapabilityRef,
     CapabilityKind,

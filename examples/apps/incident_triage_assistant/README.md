@@ -9,7 +9,7 @@
 ## 1) 离线运行（默认）
 
 ```bash
-python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/asr-app-incident --mode offline
+python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/caprt-app-incident --mode offline
 ```
 
 预期：
@@ -20,7 +20,7 @@ python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/asr-
 
 ```bash
 cp examples/apps/incident_triage_assistant/.env.example examples/apps/incident_triage_assistant/.env
-python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/asr-app-incident --mode real
+python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/caprt-app-incident --mode real
 ```
 
 说明：
@@ -29,7 +29,7 @@ python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/asr-
 ## 3) 非交互 smoke（用于集成回归/CI）
 
 ```bash
-python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/asr-app-incident --mode real --non-interactive
+python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/caprt-app-incident --mode real --non-interactive
 ```
 
 说明：
@@ -41,7 +41,7 @@ python examples/apps/incident_triage_assistant/run.py --workspace-root /tmp/asr-
 
 ```bash
 python examples/apps/incident_triage_assistant/run.py \
-  --workspace-root /tmp/asr-app-incident \
+  --workspace-root /tmp/caprt-app-incident \
   --mode real \
   --non-interactive \
   --evidence-strict

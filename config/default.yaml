@@ -1,4 +1,4 @@
-# agently-skills-runtime 示例配置（RuntimeConfig）
+# capability-runtime 示例配置（RuntimeConfig）
 #
 # 说明：
 # - 本仓对外只承诺单一入口：Runtime + RuntimeConfig；

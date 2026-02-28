@@ -8,7 +8,7 @@
 ## 1) 离线运行（默认）
 
 ```bash
-python examples/apps/sse_gateway_minimal/run.py --host 127.0.0.1 --port 8787 --mode offline --workspace-root /tmp/asr-sse
+python examples/apps/sse_gateway_minimal/run.py --host 127.0.0.1 --port 8787 --mode offline --workspace-root /tmp/caprt-sse
 ```
 
 启动后：
@@ -27,7 +27,7 @@ cp examples/apps/sse_gateway_minimal/.env.example examples/apps/sse_gateway_mini
 运行：
 
 ```bash
-python examples/apps/sse_gateway_minimal/run.py --host 127.0.0.1 --port 8787 --mode real --workspace-root /tmp/asr-sse
+python examples/apps/sse_gateway_minimal/run.py --host 127.0.0.1 --port 8787 --mode real --workspace-root /tmp/caprt-sse
 ```
 
 说明：

@@ -4,8 +4,8 @@ from __future__ import annotations
 回归护栏：用户侧文档/示例仅使用包根公共入口。
 
 约束：
-- 允许：`from agently_skills_runtime import Runtime, ...`
-- 禁止：`from agently_skills_runtime.<submodule> import ...`（深路径不作为对外契约面）
+- 允许：`from capability_runtime import Runtime, ...`
+- 禁止：`from capability_runtime.<submodule> import ...`（深路径不作为对外契约面）
 
 说明：
 - 本测试只覆盖“用户可见/可复制粘贴”的入口：README、config/README、examples/、docs_for_coding_agent/。
@@ -69,5 +69,5 @@ def _iter_user_facing_files(repo_root: Path) -> list[Path]:
 def test_user_facing_docs_do_not_use_deep_import_paths(path: Path) -> None:
     content = path.read_text(encoding="utf-8")
     for sub in _FORBIDDEN_SUBMODULES:
-        needle = f"agently_skills_runtime.{sub}"
+        needle = f"capability_runtime.{sub}"
         assert needle not in content, f"forbidden deep path reference {needle!r} in {path}"

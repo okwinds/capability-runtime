@@ -18,7 +18,7 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext, Runtime, RuntimeConfig
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext, Runtime, RuntimeConfig
 
 
 class _ApproveAll(ApprovalProvider):
@@ -68,7 +68,7 @@ def test_invoke_capability_tool_returns_artifact_digest(tmp_path: Path) -> None:
     )
 
     # 目标：在未实现 invoke_capability 前，该 import/调用会失败，作为 TDD RED。
-    from agently_skills_runtime.host_toolkit.invoke_capability import (  # type: ignore
+    from capability_runtime.host_toolkit.invoke_capability import (  # type: ignore
         InvokeCapabilityAllowlist,
         make_invoke_capability_tool,
     )
@@ -119,7 +119,7 @@ def test_invoke_capability_tool_returns_artifact_digest(tmp_path: Path) -> None:
     p = Path(artifact_path)
     assert p.exists()
     obj = json.loads(p.read_text(encoding="utf-8"))
-    assert obj.get("schema") == "agently-skills-runtime.invoke_capability.v1"
+    assert obj.get("schema") == "capability-runtime.invoke_capability.v1"
     assert "child_output_sha256" in obj
 
 
@@ -161,7 +161,7 @@ def test_invoke_capability_tool_timeout_sets_error_kind(tmp_path: Path) -> None:
         time.sleep(0.05)
         return "child"
 
-    from agently_skills_runtime.host_toolkit.invoke_capability import InvokeCapabilityAllowlist, make_invoke_capability_tool
+    from capability_runtime.host_toolkit.invoke_capability import InvokeCapabilityAllowlist, make_invoke_capability_tool
 
     tool = make_invoke_capability_tool(
         allowlist=InvokeCapabilityAllowlist(allowed_ids=["child.slow"]),

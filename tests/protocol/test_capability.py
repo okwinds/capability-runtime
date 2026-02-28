@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """CapabilitySpec / CapabilityResult 单元测试。"""
 
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilityResult,

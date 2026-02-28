@@ -98,6 +98,7 @@ class TriggerFlowWorkflowEngine:
         事件策略：
         - 仅输出轻量 workflow 事件（workflow started/finished + step started/finished）；
         - 不透传上游全量 AgentEvent，避免把深审计负担带到默认流里。
+        - 深审计与编排分支依据应读取 WAL/events + NodeReport（真相源），而非依赖轻量事件的 payload 细节。
         """
 
         context.bag.update(input)

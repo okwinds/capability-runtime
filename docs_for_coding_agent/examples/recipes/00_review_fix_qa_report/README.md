@@ -11,6 +11,6 @@
 离线运行（用于回归）：
 
 ```bash
-python docs_for_coding_agent/examples/recipes/00_review_fix_qa_report/run.py --workspace-root /tmp/asr-recipe-00
+python docs_for_coding_agent/examples/recipes/00_review_fix_qa_report/run.py --workspace-root /tmp/caprt-recipe-00
 ```
 

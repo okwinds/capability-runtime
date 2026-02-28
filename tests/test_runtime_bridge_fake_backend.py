@@ -10,10 +10,10 @@ import pytest
 from skills_runtime.llm.chat_sse import ChatStreamEvent
 from skills_runtime.llm.protocol import ChatRequest
 
-from agently_skills_runtime.config import RuntimeConfig
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilityResult, CapabilitySpec
-from agently_skills_runtime.runtime import Runtime
+from capability_runtime.config import RuntimeConfig
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import CapabilityKind, CapabilityResult, CapabilitySpec
+from capability_runtime.runtime import Runtime
 
 
 class FakeChatBackend:

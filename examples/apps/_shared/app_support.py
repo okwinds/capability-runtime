@@ -21,7 +21,7 @@ from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 from skills_runtime.tools.protocol import HumanIOProvider
 
-from agently_skills_runtime import Runtime, RuntimeConfig
+from capability_runtime import Runtime, RuntimeConfig
 
 
 def detect_skills_space_schema() -> str:

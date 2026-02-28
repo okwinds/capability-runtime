@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.ui_events.v1 import PathSegment, RuntimeEvent, StreamLevel
+from capability_runtime.ui_events.v1 import PathSegment, RuntimeEvent, StreamLevel
 
 
 def test_path_segment_supports_optional_instance_fields_and_forbids_extra() -> None:
@@ -18,7 +18,7 @@ def test_path_segment_supports_optional_instance_fields_and_forbids_extra() -> N
 
 def test_runtime_event_v1_accepts_repeated_kind_in_path_and_old_payload_shape() -> None:
     ev = RuntimeEvent(
-        schema="agently-skills-runtime.runtime_event.v1",
+        schema="capability-runtime.runtime_event.v1",
         type="node.started",
         run_id="r1",
         seq=1,

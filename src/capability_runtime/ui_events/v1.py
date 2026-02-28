@@ -6,6 +6,7 @@ Runtime UI Events v1（协议模型）。
 定位：
 - UI events 是“可观测/产品化投影层”，不是审计真相源；
 - 真相源仍为 WAL/events/tool evidence → NodeReport；
+- UI events 将（上游 `AgentEvent`、workflow 轻量事件、终态 `CapabilityResult`）投影为统一的 RuntimeEvent 信封；
 - 本模块仅定义 v1 的稳定信封字段与最小结构约束。
 """
 
@@ -53,7 +54,7 @@ class RuntimeEvent(BaseModel):
     RuntimeEvent v1：统一事件信封（Envelope）。
 
     约束：
-    - `schema` 固定为 `agently-skills-runtime.runtime_event.v1`
+    - `schema` 固定为 `capability-runtime.runtime_event.v1`
     - `seq` 在单 run 内单调递增
     - `rid` 为传输层游标（续传用），可与 `seq` 等价但语义不同
     """

@@ -29,7 +29,7 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext, Runtime
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, ExecutionContext, Runtime
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
@@ -224,7 +224,7 @@ class _AppState:
 class Handler(BaseHTTPRequestHandler):
     """HTTP handler：start + SSE events。"""
 
-    server_version = "asr-sse/0.1"
+    server_version = "caprt-sse/0.1"
 
     def _json(self, status: int, obj: Dict[str, Any]) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")

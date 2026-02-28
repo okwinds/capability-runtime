@@ -46,7 +46,11 @@ class AgentAdapter:
         - 不产出中间事件（只产出最终 CapabilityResult）
 
         bridge/sdk_native 模式：
-        - 转发 SDK AgentEvent，并聚合 NodeReport 写入 CapabilityResult.node_report
+        - 转发上游 `skills_runtime` 的 `AgentEvent`（事实事件流）；
+        - 基于事件流聚合 `NodeReport` 并写入 `CapabilityResult.node_report`（其中 `events_path` 等字段为证据指针，真相源仍为 WAL/events）。
+
+        备注：
+        - 每条 `AgentEvent` 也会通过 Runtime 的内部 tap 旁路分发（用于 UI events 投影；不改变对外 `AgentEvent` 转发语义）。
         """
 
         mode = str(getattr(self._runtime.config, "mode", "mock"))

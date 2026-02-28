@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from agently_skills_runtime.host_toolkit.evidence_hooks import SystemPromptEvidence, SystemPromptEvidenceHook
-from agently_skills_runtime.host_toolkit.system_prompt import SystemPrompt, compute_system_prompt_digest
-from agently_skills_runtime.types import NodeReport, NodeResult
+from capability_runtime.host_toolkit.evidence_hooks import SystemPromptEvidence, SystemPromptEvidenceHook
+from capability_runtime.host_toolkit.system_prompt import SystemPrompt, compute_system_prompt_digest
+from capability_runtime.types import NodeReport, NodeResult
 
 
 def test_system_prompt_digest_is_minimal_and_does_not_contain_plaintext():
@@ -37,7 +37,7 @@ def test_system_prompt_evidence_hook_writes_meta_without_plaintext():
         reason=None,
         completion_reason="run_completed",
         engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime", "version": "0"},
-        bridge={"name": "agently-skills-runtime", "version": "0"},
+        bridge={"name": "capability-runtime", "version": "0"},
         run_id="r1",
         turn_id="t1",
         events_path="wal.jsonl",

@@ -10,6 +10,6 @@
 离线运行（用于回归）：
 
 ```bash
-python docs_for_coding_agent/examples/recipes/01_map_reduce_parallel/run.py --workspace-root /tmp/asr-recipe-01
+python docs_for_coding_agent/examples/recipes/01_map_reduce_parallel/run.py --workspace-root /tmp/caprt-recipe-01
 ```
 

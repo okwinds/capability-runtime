@@ -10,7 +10,7 @@
 ## 1) 离线运行（默认）
 
 ```bash
-python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/asr-app-ci --mode offline
+python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/caprt-app-ci --mode offline
 ```
 
 预期：
@@ -21,7 +21,7 @@ python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/asr-
 
 ```bash
 cp examples/apps/ci_failure_triage_and_fix/.env.example examples/apps/ci_failure_triage_and_fix/.env
-python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/asr-app-ci --mode real
+python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/caprt-app-ci --mode real
 ```
 
 说明：
@@ -31,7 +31,7 @@ python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/asr-
 ## 3) 非交互 smoke（用于集成回归/CI）
 
 ```bash
-python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/asr-app-ci --mode real --non-interactive
+python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/caprt-app-ci --mode real --non-interactive
 ```
 
 说明：
@@ -43,7 +43,7 @@ python examples/apps/ci_failure_triage_and_fix/run.py --workspace-root /tmp/asr-
 
 ```bash
 python examples/apps/ci_failure_triage_and_fix/run.py \
-  --workspace-root /tmp/asr-app-ci \
+  --workspace-root /tmp/caprt-app-ci \
   --mode real \
   --non-interactive \
   --evidence-strict

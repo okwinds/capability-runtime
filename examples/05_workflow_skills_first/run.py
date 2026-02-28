@@ -4,7 +4,7 @@ from __future__ import annotations
 05_workflow_skills_first：Workflow 编排 skills-first Agent（离线可回归）。
 
 运行：
-  python examples/05_workflow_skills_first/run.py --workspace-root /tmp/asr-ex-05
+  python examples/05_workflow_skills_first/run.py --workspace-root /tmp/caprt-ex-05
 """
 
 import argparse
@@ -19,10 +19,13 @@ from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = REPO_ROOT / "src"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
-from agently_skills_runtime import (  # noqa: E402
+from capability_runtime import (  # noqa: E402
     AgentSpec,
     CapabilityKind,
     CapabilityRef,

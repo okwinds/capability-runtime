@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
 
 
 def handler(spec: AgentSpec, input: dict, context=None):

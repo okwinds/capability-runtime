@@ -8,7 +8,7 @@
 ## 1) 离线运行（默认，用于回归）
 
 ```bash
-python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/asr-app-rules --mode offline
+python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/caprt-app-rules --mode offline
 ```
 
 预期：
@@ -32,7 +32,7 @@ cp examples/apps/rules_parser_pro/.env.example examples/apps/rules_parser_pro/.e
 运行：
 
 ```bash
-python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/asr-app-rules --mode real
+python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/caprt-app-rules --mode real
 ```
 
 说明：
@@ -42,7 +42,7 @@ python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/asr-app-rules
 ## 3) 非交互 smoke（用于集成回归/CI）
 
 ```bash
-python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/asr-app-rules --mode real --non-interactive
+python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/caprt-app-rules --mode real --non-interactive
 ```
 
 说明：
@@ -54,7 +54,7 @@ python examples/apps/rules_parser_pro/run.py --workspace-root /tmp/asr-app-rules
 
 ```bash
 python examples/apps/rules_parser_pro/run.py \
-  --workspace-root /tmp/asr-app-rules \
+  --workspace-root /tmp/caprt-app-rules \
   --mode real \
   --non-interactive \
   --evidence-strict

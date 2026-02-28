@@ -7,11 +7,11 @@ from typing import Any, Dict
 
 import pytest
 
-from agently_skills_runtime.config import RuntimeConfig
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilitySpec, CapabilityStatus
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.runtime import Runtime
+from capability_runtime.config import RuntimeConfig
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import CapabilityKind, CapabilitySpec, CapabilityStatus
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.runtime import Runtime
 
 
 @pytest.mark.asyncio

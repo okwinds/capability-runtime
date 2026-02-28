@@ -1,4 +1,4 @@
-# 编码任务契约：使用 agently-skills-runtime 的标准流程（统一 Runtime）
+# 编码任务契约：使用 capability-runtime 的标准流程（统一 Runtime）
 
 本文是编码智能体在本仓执行任务时的默认行为约束，目标是：
 

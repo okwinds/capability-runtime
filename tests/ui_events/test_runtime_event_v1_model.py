@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agently_skills_runtime.ui_events.v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
+from capability_runtime.ui_events.v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
 
 
 def test_runtime_event_v1_model_forbids_extra_and_dumps_schema_alias() -> None:
     ev = RuntimeEvent(
-        schema="agently-skills-runtime.runtime_event.v1",
+        schema="capability-runtime.runtime_event.v1",
         type="run.status",
         run_id="r1",
         seq=1,
@@ -21,12 +21,12 @@ def test_runtime_event_v1_model_forbids_extra_and_dumps_schema_alias() -> None:
     )
 
     dumped = ev.model_dump(by_alias=True)
-    assert dumped["schema"] == "agently-skills-runtime.runtime_event.v1"
+    assert dumped["schema"] == "capability-runtime.runtime_event.v1"
     assert "schema_id" not in dumped
 
     with pytest.raises(ValidationError):
         RuntimeEvent(
-            schema="agently-skills-runtime.runtime_event.v1",
+            schema="capability-runtime.runtime_event.v1",
             type="run.status",
             run_id="r1",
             seq=1,

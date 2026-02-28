@@ -1,6 +1,6 @@
 # 配置示例（config/）
 
-本目录提供 `agently-skills-runtime` 的**示例配置**，用于帮助你复刻运行环境与集成形态。
+本目录提供 `capability-runtime` 的**示例配置**，用于帮助你复刻运行环境与集成形态。
 
 重要说明：
 - 本仓对外只承诺**单一入口**：`Runtime` + `RuntimeConfig`（从包根导入）。
@@ -9,7 +9,7 @@
 ## 文件说明
 
 - `config/default.yaml`
-  - `RuntimeConfig` 的 YAML 形态示例（字段以 `src/agently_skills_runtime/config.py` 为准）。
+  - `RuntimeConfig` 的 YAML 形态示例（字段以 `src/capability_runtime/config.py` 为准）。
   - 本仓不强制提供“YAML → RuntimeConfig”的内置装载器；建议由宿主按自己的配置系统解析后再构造 `RuntimeConfig`。
 - `config/sdk.example.yaml`
   - 上游 `skills-runtime-sdk` overlays 示例（Strict Catalog：spaces + sources + scan/mention）。
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import yaml
 
-from agently_skills_runtime import Runtime, RuntimeConfig
+from capability_runtime import Runtime, RuntimeConfig
 
 # 1) 读取 YAML（示例）
 raw = yaml.safe_load(Path("config/default.yaml").read_text(encoding="utf-8")) or {}

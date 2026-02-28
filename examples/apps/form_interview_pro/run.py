@@ -15,14 +15,17 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+SRC_ROOT = REPO_ROOT / "src"
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
 from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime
 
 from examples.apps._shared.app_support import (
     AutoApprovalProvider,

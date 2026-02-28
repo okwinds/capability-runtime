@@ -12,7 +12,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/scripts/integration/docker-compose.skills-sources.yml"
-PROJECT_NAME="${ASR_INTEGRATION_PROJECT_NAME:-asr-skills-sources}"
+PROJECT_NAME="${CAPRT_INTEGRATION_PROJECT_NAME:-caprt-skills-sources}"
 
 cmd="${1:-up}"
 
@@ -52,8 +52,8 @@ fi
 
 cat "$MIGRATION_PATH" | docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" exec -T pg psql -U postgres -d postgres -v ON_ERROR_STOP=1 >/dev/null
 
-export AGENTLY_SKILLS_RUNTIME_TEST_REDIS_URL="redis://localhost:6379/0"
-export AGENTLY_SKILLS_RUNTIME_TEST_PG_DSN="postgresql://postgres:postgres@localhost:5432/postgres"
+export CAPRT_TEST_REDIS_URL="redis://localhost:6379/0"
+export CAPRT_TEST_PG_DSN="postgresql://postgres:postgres@localhost:5432/postgres"
 
 echo "[integration] running pytest -m integration for redis/pgsql sources smoke..."
 cd "$ROOT_DIR"

@@ -10,7 +10,7 @@
 ## 1) 离线运行（默认，用于回归）
 
 ```bash
-python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-form --mode offline
+python examples/apps/form_interview_pro/run.py --workspace-root /tmp/caprt-app-form --mode offline
 ```
 
 预期：
@@ -36,7 +36,7 @@ cp examples/apps/form_interview_pro/.env.example examples/apps/form_interview_pr
 编辑 `.env` 填入真实配置后运行：
 
 ```bash
-python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-form --mode real
+python examples/apps/form_interview_pro/run.py --workspace-root /tmp/caprt-app-form --mode real
 ```
 
 说明：
@@ -47,7 +47,7 @@ python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-for
 ## 3) 非交互 smoke（用于集成回归/CI）
 
 ```bash
-python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-form --mode real --non-interactive
+python examples/apps/form_interview_pro/run.py --workspace-root /tmp/caprt-app-form --mode real --non-interactive
 ```
 
 说明：
@@ -59,7 +59,7 @@ python examples/apps/form_interview_pro/run.py --workspace-root /tmp/asr-app-for
 
 ```bash
 python examples/apps/form_interview_pro/run.py \
-  --workspace-root /tmp/asr-app-form \
+  --workspace-root /tmp/caprt-app-form \
   --mode real \
   --non-interactive \
   --evidence-strict

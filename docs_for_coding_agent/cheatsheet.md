@@ -14,7 +14,7 @@
 
 ```python
 import asyncio
-from agently_skills_runtime import Runtime, RuntimeConfig, CapabilitySpec, CapabilityKind, AgentSpec
+from capability_runtime import Runtime, RuntimeConfig, CapabilitySpec, CapabilityKind, AgentSpec
 def handler(spec, input, context=None): return {"echo": input}
 rt = Runtime(RuntimeConfig(mode="mock", mock_handler=handler))
 rt.register(AgentSpec(base=CapabilitySpec(id="echo", kind=CapabilityKind.AGENT, name="Echo")))
@@ -29,10 +29,10 @@ print(res.node_report)
 
 ```python
 # === 唯一入口 ===
-from agently_skills_runtime import Runtime, RuntimeConfig, CustomTool
+from capability_runtime import Runtime, RuntimeConfig, CustomTool
 
 # === 协议（声明能力用）===
-from agently_skills_runtime import (
+from capability_runtime import (
     CapabilitySpec, CapabilityKind, CapabilityRef,
     CapabilityResult, CapabilityStatus,
     AgentSpec, AgentIOSchema,
@@ -41,11 +41,11 @@ from agently_skills_runtime import (
 )
 
 # === 报告（消费结果用）===
-from agently_skills_runtime import NodeReport, NodeResult
+from capability_runtime import NodeReport, NodeResult
 
 # === 错误 ===
-from agently_skills_runtime import (
-    AgentlySkillsRuntimeError,
+from capability_runtime import (
+    RuntimeFrameworkError,
     CapabilityNotFoundError,
     AdapterNotFoundError,
 )
@@ -77,4 +77,4 @@ from agently_skills_runtime import (
 - 不要在运行中的 event loop 中直接调用 `asyncio.run()`
 - 推荐使用“后台线程 + 独立 event loop”执行 `await Runtime.run(...)` 并等待返回
 
-公共 API 入口（推荐）：`agently_skills_runtime.make_invoke_capability_tool`。
+公共 API 入口（推荐）：`capability_runtime.make_invoke_capability_tool`。

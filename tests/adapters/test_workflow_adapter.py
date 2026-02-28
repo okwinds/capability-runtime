@@ -6,15 +6,15 @@ from typing import Any, Dict
 
 import pytest
 
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.protocol.workflow import (
     ConditionalStep,
     InputMapping,
     LoopStep,
@@ -22,9 +22,9 @@ from agently_skills_runtime.protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.types import NodeReport
-from agently_skills_runtime.runtime import Runtime
-from agently_skills_runtime.config import RuntimeConfig
+from capability_runtime.types import NodeReport
+from capability_runtime.runtime import Runtime
+from capability_runtime.config import RuntimeConfig
 
 
 def _make_agent(id: str) -> AgentSpec:
@@ -285,7 +285,7 @@ async def test_conditional_step_can_route_by_step_report_status():
                 reason="approval_pending",
                 completion_reason="run_cancelled",
                 engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
-                bridge={"name": "agently-skills-runtime"},
+                bridge={"name": "capability-runtime"},
                 run_id="r1",
                 events_path="wal.jsonl",
                 activated_skills=[],
@@ -395,7 +395,7 @@ async def test_step_pending_aborts_workflow() -> None:
                     reason="approval_pending",
                     completion_reason="run_cancelled",
                     engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
-                    bridge={"name": "agently-skills-runtime"},
+                    bridge={"name": "capability-runtime"},
                     run_id="r1",
                     events_path="wal.jsonl",
                     activated_skills=[],
@@ -515,7 +515,7 @@ async def test_workflow_run_stream_pending_propagates_and_stops_next_steps() -> 
                     reason="approval_pending",
                     completion_reason="run_cancelled",
                     engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
-                    bridge={"name": "agently-skills-runtime"},
+                    bridge={"name": "capability-runtime"},
                     run_id="r1",
                     events_path="wal.jsonl",
                     activated_skills=[],

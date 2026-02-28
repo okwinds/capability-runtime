@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from agently_skills_runtime.config import RuntimeConfig, normalize_workspace_root
+from capability_runtime.config import RuntimeConfig, normalize_workspace_root
 
 
 def test_runtime_config_defaults():

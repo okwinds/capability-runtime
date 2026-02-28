@@ -18,16 +18,16 @@ import pytest
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 from skills_runtime.tools.protocol import ToolCall, ToolSpec
 
-from agently_skills_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
-from agently_skills_runtime.config import CustomTool
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime.config import CustomTool
 
 
 pytestmark = pytest.mark.integration
 
-ENABLE = os.getenv("AGENTLY_SKILLS_RUNTIME_TEST_E2E_BRIDGE") == "1"
+ENABLE = os.getenv("CAPRT_TEST_E2E_BRIDGE") == "1"
 if not ENABLE:
     pytest.skip(
-        "未启用真实 bridge e2e（默认跳过）。如需运行请设置：AGENTLY_SKILLS_RUNTIME_TEST_E2E_BRIDGE=1",
+        "未启用真实 bridge e2e（默认跳过）。如需运行请设置：CAPRT_TEST_E2E_BRIDGE=1",
         allow_module_level=True,
     )
 
