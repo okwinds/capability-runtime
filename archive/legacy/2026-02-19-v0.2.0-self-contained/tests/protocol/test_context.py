@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.protocol.context import ExecutionContext, RecursionLimitError
+from capability_runtime.protocol.context import ExecutionContext, RecursionLimitError
 
 
 class Obj:

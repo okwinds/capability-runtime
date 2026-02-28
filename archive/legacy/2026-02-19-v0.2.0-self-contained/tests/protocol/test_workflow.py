@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
+from capability_runtime.protocol.workflow import (
     ConditionalStep,
     InputMapping,
     LoopStep,

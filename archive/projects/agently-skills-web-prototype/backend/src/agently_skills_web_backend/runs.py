@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from agent_sdk.core.contracts import AgentEvent
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 from .approvals import ApprovalBroker, WebHumanIOProvider
 from .demo import InProcessFlowRunner, build_demo_agent
@@ -221,13 +221,13 @@ class RunService:
                 except ModuleNotFoundError as exc:
                     raise RuntimeError("agently is not installed; cannot run in real mode") from exc
 
-                from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+                from capability_runtime.runtime import Runtime, RuntimeConfig
 
                 agently_agent = agently_mod.Agently.create_agent("agently-skills-web-prototype")
-                rt = AgentlySkillsRuntime(
+                rt = Runtime(
                     agently_agent=agently_agent,
                     triggerflow_runner=InProcessFlowRunner(),
-                    config=AgentlySkillsRuntimeConfig(
+                    config=RuntimeConfig(
                         workspace_root=self._settings.workspace_root,
                         config_paths=list(self._settings.sdk_config_paths),
                         preflight_mode="error",

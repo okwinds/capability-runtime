@@ -21,12 +21,12 @@ def test_integration_skills_sources_redis_pgsql_scan_smoke(tmp_path: Path, monke
     - 当服务与依赖齐全时，应能 scan 成功（允许结果为空）。
     """
 
-    redis_url = os.getenv("AGENTLY_SKILLS_RUNTIME_TEST_REDIS_URL", "").strip()
-    pg_dsn = os.getenv("AGENTLY_SKILLS_RUNTIME_TEST_PG_DSN", "").strip()
+    redis_url = os.getenv("CAPRT_TEST_REDIS_URL", "").strip()
+    pg_dsn = os.getenv("CAPRT_TEST_PG_DSN", "").strip()
     if not redis_url or not pg_dsn:
         pytest.skip(
             "未配置 integration DSN。请设置："
-            "`AGENTLY_SKILLS_RUNTIME_TEST_REDIS_URL` 与 `AGENTLY_SKILLS_RUNTIME_TEST_PG_DSN`。"
+            "`CAPRT_TEST_REDIS_URL` 与 `CAPRT_TEST_PG_DSN`。"
             "推荐：先运行 `../skills-runtime-sdk/scripts/integration/skills_sources_docker.sh` 启动服务。"
         )
 
@@ -37,8 +37,8 @@ def test_integration_skills_sources_redis_pgsql_scan_smoke(tmp_path: Path, monke
         pytest.skip(f"缺少可选依赖：{e}. 请在 SDK fork 环境安装 redis/psycopg extras。")
 
     # SDK skills sources 读取 DSN 的方式：通过 dsn_env 指定环境变量名
-    monkeypatch.setenv("ASR_TEST_REDIS_DSN", redis_url)
-    monkeypatch.setenv("ASR_TEST_PG_DSN", pg_dsn)
+    monkeypatch.setenv("CAPRT_TEST_REDIS_DSN", redis_url)
+    monkeypatch.setenv("CAPRT_TEST_PG_DSN", pg_dsn)
 
     overlay = {
         "skills": {
@@ -52,11 +52,11 @@ def test_integration_skills_sources_redis_pgsql_scan_smoke(tmp_path: Path, monke
                 }
             ],
             "sources": [
-                {"id": "src_redis", "type": "redis", "options": {"dsn_env": "ASR_TEST_REDIS_DSN", "key_prefix": "skills:"}},
+                {"id": "src_redis", "type": "redis", "options": {"dsn_env": "CAPRT_TEST_REDIS_DSN", "key_prefix": "skills:"}},
                 {
                     "id": "src_pgsql",
                     "type": "pgsql",
-                    "options": {"dsn_env": "ASR_TEST_PG_DSN", "schema": "agent", "table": "skills_catalog"},
+                    "options": {"dsn_env": "CAPRT_TEST_PG_DSN", "schema": "agent", "table": "skills_catalog"},
                 },
             ],
         }

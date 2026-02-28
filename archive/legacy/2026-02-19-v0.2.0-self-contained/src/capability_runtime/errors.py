@@ -11,7 +11,7 @@ errors.py
 from __future__ import annotations
 
 
-class AgentlySkillsRuntimeError(Exception):
+class RuntimeFrameworkError(Exception):
     """
     本仓库统一错误基类。
 
@@ -21,26 +21,26 @@ class AgentlySkillsRuntimeError(Exception):
     """
 
 
-class ConfigurationError(AgentlySkillsRuntimeError):
+class ConfigurationError(RuntimeFrameworkError):
     """配置错误（缺字段、字段类型不匹配、配置文件无法解析等）。"""
 
 
-class DependencyValidationError(AgentlySkillsRuntimeError):
+class DependencyValidationError(RuntimeFrameworkError):
     """依赖校验失败（注册表中存在缺失能力引用）。"""
 
 
-class CapabilityNotFoundError(AgentlySkillsRuntimeError):
+class CapabilityNotFoundError(RuntimeFrameworkError):
     """执行或引用了未注册/不存在的能力。"""
 
 
-class AdapterNotConfiguredError(AgentlySkillsRuntimeError):
+class AdapterNotConfiguredError(RuntimeFrameworkError):
     """能力种类对应的 Adapter 未配置（例如 SkillAdapter 为空）。"""
 
 
-class CapabilityExecutionError(AgentlySkillsRuntimeError):
+class CapabilityExecutionError(RuntimeFrameworkError):
     """能力执行失败（内部异常、循环熔断、协议不满足等）。"""
 
 
-class UpstreamVerificationError(AgentlySkillsRuntimeError):
+class UpstreamVerificationError(RuntimeFrameworkError):
     """上游来源/版本校验失败（例如导入路径不在期望的 fork 根目录）。"""
 

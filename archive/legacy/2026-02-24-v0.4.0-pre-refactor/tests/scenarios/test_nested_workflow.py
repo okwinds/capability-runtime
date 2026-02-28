@@ -3,17 +3,17 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.adapters.workflow_adapter import WorkflowAdapter
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.workflow import Step, WorkflowSpec
-from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.workflow import Step, WorkflowSpec
+from capability_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
 
 
 class SimpleAdapter:

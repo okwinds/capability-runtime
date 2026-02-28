@@ -13,7 +13,7 @@
 
 1. 在 SDK 配置（YAML overlays）里声明 Strict Catalog + sources
 2. 在 task/prompt 中使用 strict mention 引用 skills
-3. 用本仓 `AgentlySkillsRuntime.preflight()` / `preflight_or_raise()` 做开发机 gate
+3. 用本仓 `Runtime.preflight()` / `preflight_or_raise()` 做开发机 gate
 
 参考文档：
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.host_toolkit.approvals_profiles import ApprovalsProfile, validate_approvals_profile
+from capability_runtime.host_toolkit.approvals_profiles import ApprovalsProfile, validate_approvals_profile
 
 
 def test_validate_approvals_profile_accepts_valid_values():

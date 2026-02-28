@@ -10,7 +10,7 @@ from agent_sdk.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from agent_sdk.llm.fake import FakeChatBackend, FakeChatCall
 from agent_sdk.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
 class _DenyApprovalProvider(ApprovalProvider):

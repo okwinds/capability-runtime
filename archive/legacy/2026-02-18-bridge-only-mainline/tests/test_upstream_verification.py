@@ -9,7 +9,7 @@ import pytest
 from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.core.errors import FrameworkError, FrameworkIssue
 
-from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from capability_runtime.runtime import Runtime, RuntimeConfig
 
 
 class _FakeRequester:
@@ -34,7 +34,7 @@ class _FakeAgent:
 
 
 def _patch_requester_factory(monkeypatch):
-    import agently_skills_runtime.runtime as runtime_mod
+    import capability_runtime.runtime as runtime_mod
 
     def _fake_factory(*, agently_agent):
         return lambda: _FakeRequester()
@@ -42,20 +42,20 @@ def _patch_requester_factory(monkeypatch):
     monkeypatch.setattr(runtime_mod, "build_openai_compatible_requester_factory", _fake_factory)
 
 
-def _mk_runtime(monkeypatch, *, cfg: AgentlySkillsRuntimeConfig) -> AgentlySkillsRuntime:
+def _mk_runtime(monkeypatch, *, cfg: RuntimeConfig) -> Runtime:
     _patch_requester_factory(monkeypatch)
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    return Runtime(agently_agent=object(), config=cfg)
 
 
 def test_runtime_config_has_upstream_verification_defaults():
-    cfg = AgentlySkillsRuntimeConfig(workspace_root=Path("."), config_paths=[])
+    cfg = RuntimeConfig(workspace_root=Path("."), config_paths=[])
     assert cfg.upstream_verification_mode == "warn"
     assert cfg.agently_fork_root is None
     assert cfg.skills_runtime_sdk_fork_root is None
 
 
 def test_verify_upstreams_off_returns_empty(monkeypatch, tmp_path):
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         upstream_verification_mode="off",
@@ -67,7 +67,7 @@ def test_verify_upstreams_off_returns_empty(monkeypatch, tmp_path):
 
 
 def test_verify_upstreams_strict_reports_missing_roots(monkeypatch, tmp_path):
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         upstream_verification_mode="strict",
@@ -79,7 +79,7 @@ def test_verify_upstreams_strict_reports_missing_roots(monkeypatch, tmp_path):
 
 
 def test_verify_upstreams_warn_with_matching_roots_has_no_issues(monkeypatch, tmp_path):
-    import agently_skills_runtime.runtime as runtime_mod
+    import capability_runtime.runtime as runtime_mod
 
     agently_root = (tmp_path / "agently").resolve()
     sdk_root = (tmp_path / "skills-runtime-sdk").resolve()
@@ -93,7 +93,7 @@ def test_verify_upstreams_warn_with_matching_roots_has_no_issues(monkeypatch, tm
 
     monkeypatch.setattr(runtime_mod.importlib, "import_module", _fake_import)
 
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         upstream_verification_mode="warn",
@@ -105,7 +105,7 @@ def test_verify_upstreams_warn_with_matching_roots_has_no_issues(monkeypatch, tm
 
 
 def test_verify_upstreams_warn_reports_mismatch(monkeypatch, tmp_path):
-    import agently_skills_runtime.runtime as runtime_mod
+    import capability_runtime.runtime as runtime_mod
 
     def _fake_import(name: str):
         if name == "agently":
@@ -116,7 +116,7 @@ def test_verify_upstreams_warn_reports_mismatch(monkeypatch, tmp_path):
 
     monkeypatch.setattr(runtime_mod.importlib, "import_module", _fake_import)
 
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         upstream_verification_mode="warn",
@@ -130,14 +130,14 @@ def test_verify_upstreams_warn_reports_mismatch(monkeypatch, tmp_path):
 
 
 def test_verify_upstreams_warn_reports_import_error(monkeypatch, tmp_path):
-    import agently_skills_runtime.runtime as runtime_mod
+    import capability_runtime.runtime as runtime_mod
 
     def _fake_import(name: str):
         raise ImportError(name)
 
     monkeypatch.setattr(runtime_mod.importlib, "import_module", _fake_import)
 
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         upstream_verification_mode="warn",
@@ -150,7 +150,7 @@ def test_verify_upstreams_warn_reports_import_error(monkeypatch, tmp_path):
 
 
 def test_verify_upstreams_or_raise_raises_framework_error(monkeypatch, tmp_path):
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         upstream_verification_mode="strict",
@@ -163,7 +163,7 @@ def test_verify_upstreams_or_raise_raises_framework_error(monkeypatch, tmp_path)
 
 @pytest.mark.asyncio
 async def test_run_async_strict_upstream_issues_fail_closed(monkeypatch, tmp_path):
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         preflight_mode="off",
@@ -184,7 +184,7 @@ async def test_run_async_strict_upstream_issues_fail_closed(monkeypatch, tmp_pat
 
 @pytest.mark.asyncio
 async def test_run_async_warn_upstream_issues_are_observable(monkeypatch, tmp_path):
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         preflight_mode="off",
@@ -211,7 +211,7 @@ async def test_run_async_warn_upstream_issues_are_observable(monkeypatch, tmp_pa
 
 @pytest.mark.asyncio
 async def test_run_async_no_upstream_issues_does_not_add_meta(monkeypatch, tmp_path):
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         preflight_mode="off",

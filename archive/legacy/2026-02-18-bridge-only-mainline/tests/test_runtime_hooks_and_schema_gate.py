@@ -4,8 +4,8 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-import agently_skills_runtime.runtime as runtime_mod
-from agently_skills_runtime.runtime import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+import capability_runtime.runtime as runtime_mod
+from capability_runtime.runtime import Runtime, RuntimeConfig
 
 
 class _FakeRequester:
@@ -63,12 +63,12 @@ class _FailingSchemaGate:
 
 def _mk_runtime(monkeypatch, *, hooks=None, schema_gate=None, schema_gate_mode="off"):
     _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=Path("."),
         config_paths=[],
         preflight_mode="off",
     )
-    return AgentlySkillsRuntime(
+    return Runtime(
         agently_agent=object(),
         config=cfg,
         hooks=hooks,

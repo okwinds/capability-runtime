@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from agently_skills_runtime.protocol.capability import CapabilityResult, CapabilityStatus
+from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
 
 
 class PrototypeMockAdapter:

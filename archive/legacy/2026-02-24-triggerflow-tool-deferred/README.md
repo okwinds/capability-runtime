@@ -11,8 +11,8 @@
 
 ## 归档映射（原路径 → 现路径）
 
-- `src/agently_skills_runtime/adapters/triggerflow_tool.py`
-  → `archive/legacy/2026-02-24-triggerflow-tool-deferred/src/agently_skills_runtime/adapters/triggerflow_tool.py`
+- `src/capability_runtime/adapters/triggerflow_tool.py`
+  → `archive/legacy/2026-02-24-triggerflow-tool-deferred/src/capability_runtime/adapters/triggerflow_tool.py`
 - `tests/test_triggerflow_tool.py`
   → `archive/legacy/2026-02-24-triggerflow-tool-deferred/tests/test_triggerflow_tool.py`
 

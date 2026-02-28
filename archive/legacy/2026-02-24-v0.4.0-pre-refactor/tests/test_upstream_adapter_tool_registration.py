@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.adapters.upstream import register_agent_tool
+from capability_runtime.adapters.upstream import register_agent_tool
 
 
 def test_register_agent_tool_prefers_public_api_when_available() -> None:

@@ -2,7 +2,7 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
 def _ev(t, *, run_id="r1", turn_id="t1", payload=None):

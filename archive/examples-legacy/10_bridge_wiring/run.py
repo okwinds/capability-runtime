@@ -1,5 +1,5 @@
 """
-Bridge 接线示例：通过 agently-skills-runtime 调用真实 LLM。
+Bridge 接线示例：通过 capability-runtime 调用真实 LLM。
 
 前置条件：
   1. pip install -e ".[dev]"
@@ -16,12 +16,12 @@ import asyncio
 import os
 from pathlib import Path
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentIOSchema,
     AgentAdapter,
     AgentSpec,
-    AgentlySkillsRuntime,
-    AgentlySkillsRuntimeConfig,
+    Runtime,
+    RuntimeConfig,
     CapabilityKind,
     CapabilityRuntime,
     CapabilitySpec,
@@ -81,9 +81,9 @@ async def main() -> None:
             "auth": os.environ["OPENAI_API_KEY"],
         },
     )
-    bridge = AgentlySkillsRuntime(
+    bridge = Runtime(
         agently_agent=Agently.create_agent(),
-        config=AgentlySkillsRuntimeConfig(
+        config=RuntimeConfig(
             workspace_root=Path.cwd(),
             config_paths=[],
             preflight_mode="off",

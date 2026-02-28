@@ -8,7 +8,7 @@
 # 最小建议：
 # - agently: "x.y.z"
 # - skills-runtime-sdk-python: "x.y.z"
-# - agently-skills-runtime: "0.1.0"（或 git commit）
+# - capability-runtime: "0.1.0"（或 git commit）
 
 python: ">=3.10"
 
@@ -19,7 +19,7 @@ packages:
   skills-runtime-sdk-python:
     source: "pypi"
     version: "0.1.2"
-  agently-skills-runtime:
+  capability-runtime:
     source: "local"
     version: "0.1.0"
     path: "../../"  # 相对本文件：指向仓库根（本仓包）

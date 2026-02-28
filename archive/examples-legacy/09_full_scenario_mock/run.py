@@ -5,7 +5,7 @@ import asyncio
 import json
 from typing import Any
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentSpec,
     CapabilityKind,
     CapabilityRef,

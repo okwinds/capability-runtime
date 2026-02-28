@@ -1,7 +1,7 @@
 """内容创作 Workflow 声明。"""
 from __future__ import annotations
 
-from agently_skills_runtime import (
+from capability_runtime import (
     CapabilityKind,
     CapabilityRef,
     CapabilitySpec,

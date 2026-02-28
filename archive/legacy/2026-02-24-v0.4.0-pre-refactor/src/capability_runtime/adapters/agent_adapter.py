@@ -16,7 +16,7 @@ class AgentAdapter:
     参数：
     - runner: 异步执行函数。签名：
         async def runner(task: str, *, initial_history: Optional[List] = None) -> Any
-      通常传入 AgentlySkillsRuntime.run_async。
+      通常传入 Runtime.run_async。
       也可以传入任何兼容签名的 async callable（方便测试）。
     """
 
@@ -53,7 +53,7 @@ class AgentAdapter:
                 status=CapabilityStatus.FAILED,
                 error=(
                     "AgentAdapter: no runner injected. "
-                    "Inject AgentlySkillsRuntime.run_async or a compatible async callable."
+                    "Inject Runtime.run_async or a compatible async callable."
                 ),
             )
 

@@ -8,7 +8,7 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 - 解析阶段复用 SDK `ChatCompletionsSseParser`，确保 tool_calls delta 拼接口径不分叉。
 
 对齐规格：
-- `docs/internal/specs/engineering-spec/02_Technical_Design/INTEGRATION_AGENTLY.md`
+- `docs/specs/engineering-spec/02_Technical_Design/INTEGRATION_AGENTLY.md`
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def build_openai_compatible_requester_factory(*, agently_agent: Any) -> AgentlyR
 
         # Prompt 仅用于让 OpenAICompatible 读取 settings/plugin 配置并生成 request_data；
         # 真实 wire messages 将在 backend 层覆盖到 request_data.data["messages"]。
-        prompt = Prompt(plugin_manager=plugin_manager, parent_settings=settings, name="agently-skills-runtime-backend")
+        prompt = Prompt(plugin_manager=plugin_manager, parent_settings=settings, name="capability-runtime-backend")
         prompt.set("input", "bridge")  # 避免 prompt 全空触发校验
         return OpenAICompatible(prompt, settings)
 

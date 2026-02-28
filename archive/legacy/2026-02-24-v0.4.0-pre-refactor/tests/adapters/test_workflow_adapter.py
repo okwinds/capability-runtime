@@ -4,16 +4,16 @@ from __future__ import annotations
 import pytest
 import asyncio
 
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.adapters.workflow_adapter import WorkflowAdapter
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.protocol.workflow import (
     ConditionalStep,
     InputMapping,
     LoopStep,
@@ -21,8 +21,8 @@ from agently_skills_runtime.protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
-from agently_skills_runtime.types import NodeReportV2
+from capability_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
+from capability_runtime.types import NodeReportV2
 
 
 class EchoAdapter:
@@ -249,7 +249,7 @@ async def test_conditional_step_can_route_by_step_report_status():
                     reason="approval_pending",
                     completion_reason="run_cancelled",
                     engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                    bridge={"name": "agently-skills-runtime"},
+                    bridge={"name": "capability-runtime"},
                     run_id="r1",
                     events_path="wal.jsonl",
                     activated_skills=[],
@@ -366,7 +366,7 @@ async def test_step_pending_aborts_workflow() -> None:
                         reason="approval_pending",
                         completion_reason="run_cancelled",
                         engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                        bridge={"name": "agently-skills-runtime"},
+                        bridge={"name": "capability-runtime"},
                         run_id="r1",
                         events_path="wal.jsonl",
                         activated_skills=[],

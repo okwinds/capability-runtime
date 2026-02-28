@@ -24,7 +24,7 @@ def _read_text(path: Path) -> str:
         "docs/internal/testing/test-cases/phase2-runtime-layer-test-cases.md",
         "docs/internal/testing/test-cases/phase3-adapters-scenarios-test-cases.md",
         "docs/internal/specs/examples/prototype-validation.md",
-        "docs/prd/agently-skills-runtime-capability-runtime.prd.md",
+        "docs/prd/capability-runtime-capability-runtime.prd.md",
     ],
 )
 def test_docs_do_not_mention_removed_skill_primitive_terms(relative_path: str) -> None:

@@ -2,20 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
-from agently_skills_runtime.protocol.capability import CapabilityResult, CapabilityStatus
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.adapters.workflow_adapter import WorkflowAdapter
+from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.protocol.workflow import (
     ConditionalStep,
     InputMapping,
     LoopStep,
     ParallelStep,
     Step,
 )
-from agently_skills_runtime.protocol.capability import CapabilityRef, CapabilityKind, CapabilitySpec
-from agently_skills_runtime.protocol.workflow import WorkflowSpec
-from agently_skills_runtime.runtime.guards import ExecutionGuards
-from agently_skills_runtime.runtime.loop import LoopController
+from capability_runtime.protocol.capability import CapabilityRef, CapabilityKind, CapabilitySpec
+from capability_runtime.protocol.workflow import WorkflowSpec
+from capability_runtime.runtime.guards import ExecutionGuards
+from capability_runtime.runtime.loop import LoopController
 
 
 class FakeRuntime:

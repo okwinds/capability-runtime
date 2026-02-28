@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agently_skills_runtime.reporting import ReportBuilder
+from capability_runtime.reporting import ReportBuilder
 
 
 def test_report_builder_builds_report() -> None:

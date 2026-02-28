@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.protocol.capability import CapabilityResult, CapabilityStatus
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.protocol.capability import CapabilityRef
-from agently_skills_runtime.protocol.workflow import InputMapping, LoopStep
-from agently_skills_runtime.runtime.guards import ExecutionGuards
-from agently_skills_runtime.runtime.loop import LoopController
+from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.protocol.capability import CapabilityRef
+from capability_runtime.protocol.workflow import InputMapping, LoopStep
+from capability_runtime.runtime.guards import ExecutionGuards
+from capability_runtime.runtime.loop import LoopController
 
 
 @pytest.mark.asyncio

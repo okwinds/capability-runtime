@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agently_skills_runtime.config import BridgeConfigModel, resolve_paths
+from capability_runtime.config import BridgeConfigModel, resolve_paths
 
 
 def test_bridge_config_rejects_extra_fields():

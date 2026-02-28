@@ -1,7 +1,7 @@
 """编辑整合 Agent 声明。"""
 from __future__ import annotations
 
-from agently_skills_runtime import AgentIOSchema, AgentSpec, CapabilityKind, CapabilitySpec
+from capability_runtime import AgentIOSchema, AgentSpec, CapabilityKind, CapabilitySpec
 
 spec = AgentSpec(
     base=CapabilitySpec(

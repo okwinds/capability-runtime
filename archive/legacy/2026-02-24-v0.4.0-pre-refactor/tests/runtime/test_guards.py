@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.runtime.guards import ExecutionGuards, LoopBreakerError
+from capability_runtime.runtime.guards import ExecutionGuards, LoopBreakerError
 
 
 def test_tick_increments_counter():

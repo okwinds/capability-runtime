@@ -4,7 +4,7 @@
 
 - **Feature**：Capability-oriented Runtime v0.2.0（Skill / Agent / Workflow 三元能力的声明、注册、执行与组合）
 - **Requirements Source**：
-  - PRD：`docs/prd/agently-skills-runtime-capability-runtime.prd.md`
+  - PRD：`docs/prd/capability-runtime-capability-runtime.prd.md`
   - 真相源：`instructcontext/1-true-CODEX_PROMPT.md`
   - Engineering Spec v2：`docs/specs/engineering-spec-v2/SPEC_INDEX.md`
 - **Last Updated**：2026-02-18

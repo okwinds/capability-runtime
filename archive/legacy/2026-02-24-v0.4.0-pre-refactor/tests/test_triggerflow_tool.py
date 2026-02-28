@@ -10,7 +10,7 @@ from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.tools.protocol import HumanIOProvider, ToolCall
 from agent_sdk.tools.registry import ToolExecutionContext, ToolRegistry
 
-from agently_skills_runtime.adapters.triggerflow_tool import TriggerFlowRunner, TriggerFlowToolDeps, build_triggerflow_run_flow_tool
+from capability_runtime.adapters.triggerflow_tool import TriggerFlowRunner, TriggerFlowToolDeps, build_triggerflow_run_flow_tool
 
 
 @dataclass

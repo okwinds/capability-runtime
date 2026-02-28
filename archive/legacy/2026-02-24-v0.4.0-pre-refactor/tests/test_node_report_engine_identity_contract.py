@@ -6,8 +6,8 @@ import pytest
 
 from agent_sdk.core.errors import FrameworkIssue
 
-import agently_skills_runtime.bridge as runtime_mod
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+import capability_runtime.bridge as runtime_mod
+from capability_runtime.bridge import Runtime, RuntimeConfig
 
 
 class _FakeRequester:
@@ -44,17 +44,17 @@ def _mk_runtime(
     *,
     preflight_mode: str = "off",
     upstream_verification_mode: str = "off",
-) -> AgentlySkillsRuntime:
+) -> Runtime:
     """构造一个离线可跑的桥接 runtime（必要依赖均通过 monkeypatch 断开）。"""
 
     _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=Path("."),
         config_paths=[],
         preflight_mode=preflight_mode,  # type: ignore[arg-type]
         upstream_verification_mode=upstream_verification_mode,  # type: ignore[arg-type]
     )
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    return Runtime(agently_agent=object(), config=cfg)
 
 
 @pytest.mark.asyncio

@@ -5,20 +5,20 @@ from __future__ import annotations
 from .protocol.context import RecursionLimitError
 
 
-class AgentlySkillsRuntimeError(Exception):
+class RuntimeFrameworkError(Exception):
     """框架基础错误。"""
 
 
-class AdapterNotFoundError(AgentlySkillsRuntimeError):
+class AdapterNotFoundError(RuntimeFrameworkError):
     """指定类型没有注册 Adapter。"""
 
 
-class CapabilityNotFoundError(AgentlySkillsRuntimeError):
+class CapabilityNotFoundError(RuntimeFrameworkError):
     """指定 ID 的能力未注册。"""
 
 
 __all__ = [
-    "AgentlySkillsRuntimeError",
+    "RuntimeFrameworkError",
     "AdapterNotFoundError",
     "CapabilityNotFoundError",
     "RecursionLimitError",

@@ -4,7 +4,7 @@
 
 ## 运行
 
-从仓库根目录开始（确保能 import `agently_skills_runtime`）：
+从仓库根目录开始（确保能 import `capability_runtime`）：
 
 ```bash
 python -m pip install -e .

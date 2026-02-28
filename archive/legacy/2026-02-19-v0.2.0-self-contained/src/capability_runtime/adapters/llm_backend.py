@@ -6,15 +6,12 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 - 因此桥接层不能使用 Agently 的 PromptGenerator（Prompt.to_messages）做映射，否则会丢字段导致 tool 闭环失败。
 - 本模块复用 Agently builtins 的 OpenAICompatible ModelRequester 作为“网络/SSE 传输层”，直接发送 wire payload。
 - 解析阶段复用 SDK `ChatCompletionsSseParser`，确保 tool_calls delta 拼接口径不分叉。
-
-对齐规格：
-- `docs/specs/engineering-spec/02_Technical_Design/INTEGRATION_AGENTLY.md`
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 
 from agent_sdk.core.agent import ChatBackend
 from agent_sdk.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
@@ -109,7 +106,6 @@ class AgentlyChatBackend(ChatBackend):
             request_data.request_options["tools"] = tools_wire
             request_data.request_options.setdefault("tool_choice", "auto")
         else:
-            # 某些 provider 对 tools=[] 敏感；无工具时直接移除该字段。
             request_data.request_options.pop("tools", None)
 
         parser = ChatCompletionsSseParser()
@@ -121,7 +117,6 @@ class AgentlyChatBackend(ChatBackend):
                     raise data
                 raise RuntimeError(f"Agently requester error: {data!r}")
 
-            # OpenAICompatible requester 通常 yield ("message", <sse.data>)
             if not isinstance(data, str):
                 continue
 
@@ -161,10 +156,9 @@ def build_openai_compatible_requester_factory(*, agently_agent: Any) -> AgentlyR
     def _factory() -> AgentlyRequester:
         """按当前 agently settings 构建一次 requester。"""
 
-        # Prompt 仅用于让 OpenAICompatible 读取 settings/plugin 配置并生成 request_data；
-        # 真实 wire messages 将在 backend 层覆盖到 request_data.data["messages"]。
-        prompt = Prompt(plugin_manager=plugin_manager, parent_settings=settings, name="agently-skills-runtime-backend")
-        prompt.set("input", "bridge")  # 避免 prompt 全空触发校验
+        prompt = Prompt(plugin_manager=plugin_manager, parent_settings=settings, name="capability-runtime-backend")
+        prompt.set("input", "bridge")
         return OpenAICompatible(prompt, settings)
 
     return _factory
+

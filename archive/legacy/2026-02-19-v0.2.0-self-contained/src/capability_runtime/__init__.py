@@ -1,5 +1,5 @@
 """
-agently-skills-runtime（v0.2.0 主线）
+capability-runtime（v0.2.0 主线）
 
 本包提供一个“面向能力（Capability-oriented）”的运行时框架：
 - 协议层（protocol/）：纯 dataclass/Enum 的能力声明与执行上下文；不依赖上游。

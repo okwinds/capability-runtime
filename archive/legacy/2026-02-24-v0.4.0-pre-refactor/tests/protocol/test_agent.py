@@ -2,8 +2,8 @@ from __future__ import annotations
 
 """AgentSpec 单元测试。"""
 
-from agently_skills_runtime.protocol.agent import AgentIOSchema, AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
+from capability_runtime.protocol.agent import AgentIOSchema, AgentSpec
+from capability_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
 
 
 def test_agent_spec_minimal():

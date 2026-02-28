@@ -1,5 +1,5 @@
 """
-agently-skills-runtime
+capability-runtime
 
 本包提供一个“桥接适配层”，把：
 - 上游 Agently（TriggerFlow + provider 配置/网络传输层）
@@ -11,7 +11,7 @@ agently-skills-runtime
 - `docs/specs/engineering-spec/SPEC_INDEX.md`
 """
 
-from .runtime import AgentlySkillsRuntime
+from .runtime import Runtime
 from .types import NodeReportV2, NodeResultV2
 
-__all__ = ["AgentlySkillsRuntime", "NodeReportV2", "NodeResultV2"]
+__all__ = ["Runtime", "NodeReportV2", "NodeResultV2"]

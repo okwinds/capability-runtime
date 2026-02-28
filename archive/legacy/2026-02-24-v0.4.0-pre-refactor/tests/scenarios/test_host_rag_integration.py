@@ -12,9 +12,9 @@ from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.tools.protocol import ToolCall
 from agent_sdk.tools.registry import ToolExecutionContext, ToolRegistry
 
-import agently_skills_runtime.bridge as runtime_mod
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+import capability_runtime.bridge as runtime_mod
+from capability_runtime.bridge import Runtime, RuntimeConfig
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
 def _add_archive_backend_src_to_path() -> None:
@@ -85,16 +85,16 @@ class _FakeAgent:
             yield ev
 
 
-def _mk_runtime(monkeypatch: pytest.MonkeyPatch) -> AgentlySkillsRuntime:
+def _mk_runtime(monkeypatch: pytest.MonkeyPatch) -> Runtime:
     """构造用于离线场景回归的 runtime。"""
 
     _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=Path("."),
         config_paths=[],
         preflight_mode="off",
     )
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    return Runtime(agently_agent=object(), config=cfg)
 
 
 def _collecting_ctx(*, events: List[AgentEvent]) -> ToolExecutionContext:

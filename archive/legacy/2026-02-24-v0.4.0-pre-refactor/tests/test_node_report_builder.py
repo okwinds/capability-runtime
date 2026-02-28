@@ -2,7 +2,7 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
 def _ev(t, *, run_id="r1", turn_id="t1", payload=None):
@@ -216,7 +216,7 @@ def test_report_engine_version_uses_skills_runtime_sdk_dist_name_first(monkeypat
     bridge 层应优先尝试前者并兼容回退。
     """
 
-    import agently_skills_runtime.reporting.node_report as node_report_mod
+    import capability_runtime.reporting.node_report as node_report_mod
 
     calls: list[str] = []
 
@@ -224,7 +224,7 @@ def test_report_engine_version_uses_skills_runtime_sdk_dist_name_first(monkeypat
         calls.append(dist_name)
         if dist_name == "skills-runtime-sdk":
             return "9.9.9"
-        if dist_name == "agently-skills-runtime":
+        if dist_name == "capability-runtime":
             return "0.3.0"
         raise Exception("not found")
 

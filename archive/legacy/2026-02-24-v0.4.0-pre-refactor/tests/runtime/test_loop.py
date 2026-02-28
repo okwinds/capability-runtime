@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.protocol.capability import CapabilityResult, CapabilityStatus
-from agently_skills_runtime.runtime.guards import ExecutionGuards, LoopBreakerError
-from agently_skills_runtime.runtime.loop import LoopController
+from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
+from capability_runtime.runtime.guards import ExecutionGuards, LoopBreakerError
+from capability_runtime.runtime.loop import LoopController
 
 
 @pytest.fixture

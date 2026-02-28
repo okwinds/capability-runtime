@@ -2,7 +2,7 @@
 测试辅助：把 `src/` 加到 sys.path。
 
 背景：
-- 绝大多数测试文件会 `import _path` 来确保可直接 import `agently_skill_runtime.*`；
+- 绝大多数测试文件会 `import _path` 来确保可直接 import `capability_runtime.*`；
 - 当用 `python -m unittest discover -s tests -v` 运行时，`tests/_path.py` 可被正确导入；
 - 但当直接用 `python -m unittest`（不带 discover 参数）运行时，`tests/` 目录不一定在 sys.path，
   这会导致 `import _path` 失败。

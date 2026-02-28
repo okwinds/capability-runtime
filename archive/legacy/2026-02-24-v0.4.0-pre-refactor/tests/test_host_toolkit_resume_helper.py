@@ -10,7 +10,7 @@ from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from agent_sdk.llm.fake import FakeChatBackend, FakeChatCall
 
-from agently_skills_runtime.host_toolkit.resume import build_resume_replay_summary, load_agent_events_from_jsonl
+from capability_runtime.host_toolkit.resume import build_resume_replay_summary, load_agent_events_from_jsonl
 
 
 def _ev(t: str, *, payload=None) -> AgentEvent:

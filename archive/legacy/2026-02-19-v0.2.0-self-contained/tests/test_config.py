@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.config import load_runtime_config, load_runtime_config_from_dict
-from agently_skills_runtime.errors import ConfigurationError
+from capability_runtime.config import load_runtime_config, load_runtime_config_from_dict
+from capability_runtime.errors import ConfigurationError
 
 
 def test_load_runtime_config_from_dict_defaults() -> None:

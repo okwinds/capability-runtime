@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentSpec,
     CapabilityResult,
     CapabilityRuntime,

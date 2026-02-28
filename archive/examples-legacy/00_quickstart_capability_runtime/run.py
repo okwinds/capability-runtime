@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentAdapter,
     AgentSpec,
     CapabilityKind,
@@ -51,7 +51,7 @@ async def main() -> None:
         )
     )
 
-    result = await rt.run("agent.hello", input={"topic": "agently-skills-runtime 的定位"})
+    result = await rt.run("agent.hello", input={"topic": "capability-runtime 的定位"})
     print(result.status.value)
     print(result.output)
 

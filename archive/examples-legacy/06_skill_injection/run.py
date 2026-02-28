@@ -13,7 +13,7 @@ def main() -> None:
     迁移建议（最小思路）：
     1) 在 SDK 配置（YAML overlays）中声明 Strict Catalog + sources；
     2) 在 task/prompt 中使用 strict mention 直接引用 skills；
-    3) 通过本仓 `AgentlySkillsRuntime.preflight()` / `preflight_or_raise()` 做 gate；
+    3) 通过本仓 `Runtime.preflight()` / `preflight_or_raise()` 做 gate；
     4) 通过 NodeReport/WAL 证据链做编排与审计。
     """
 

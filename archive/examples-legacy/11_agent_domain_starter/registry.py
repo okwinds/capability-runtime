@@ -1,7 +1,7 @@
 """业务域能力注册入口。"""
 from __future__ import annotations
 
-from agently_skills_runtime import CapabilityRuntime
+from capability_runtime import CapabilityRuntime
 
 from agents import angle_writer, editor, topic_analyst
 from workflows import content_creation

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityResult,
     CapabilitySpec,

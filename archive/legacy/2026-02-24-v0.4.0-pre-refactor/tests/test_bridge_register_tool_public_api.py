@@ -7,8 +7,8 @@ import pytest
 from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.tools.protocol import ToolSpec
 
-import agently_skills_runtime.bridge as bridge_mod
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+import capability_runtime.bridge as bridge_mod
+from capability_runtime.bridge import Runtime, RuntimeConfig
 
 
 class _FakeRequester:
@@ -77,13 +77,13 @@ async def test_register_tool_is_lazy_and_injected_on_first_run(monkeypatch: pyte
     _patch_requester_factory(monkeypatch)
     monkeypatch.setattr(bridge_mod, "Agent", _FakeAgent)
 
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=Path("."),
         config_paths=[],
         preflight_mode="off",
         upstream_verification_mode="off",
     )
-    rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    rt = Runtime(agently_agent=object(), config=cfg)
 
     assert rt._agent is None
 

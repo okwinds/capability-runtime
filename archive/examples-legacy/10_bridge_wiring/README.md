@@ -1,8 +1,8 @@
 # 示例 10：Bridge 接线（真实 LLM + 降级）
 
 本示例演示：
-- `AgentAdapter` 通过 `runner=bridge.run_async` 接入 `AgentlySkillsRuntime`
-- `AgentlySkillsRuntime` 复用 Agently OpenAICompatible requester 访问真实 LLM
+- `AgentAdapter` 通过 `runner=bridge.run_async` 接入 `Runtime`
+- `Runtime` 复用 Agently OpenAICompatible requester 访问真实 LLM
 
 ## 文件说明
 
@@ -59,5 +59,5 @@ python examples/10_bridge_wiring/run_mock_fallback.py
 
 - 使用 `Agently.set_settings(...)` 配置上游模型参数
 - 使用 `Agently.create_agent()` 构造宿主 agent
-- 使用 `AgentlySkillsRuntime(preflight_mode=off, upstream_verification_mode=off)`
+- 使用 `Runtime(preflight_mode=off, upstream_verification_mode=off)`
 - 通过 `CapabilityRuntime + AgentAdapter(runner=bridge.run_async)` 执行 `AgentSpec`

@@ -13,7 +13,7 @@ def _add_src_to_path() -> None:
         sys.path.insert(0, str(src))
 
     for parent in Path(__file__).resolve().parents:
-        bridge_src = parent / "src" / "agently_skills_runtime"
+        bridge_src = parent / "src" / "capability_runtime"
         if bridge_src.exists():
             repo_src = parent / "src"
             if str(repo_src) not in sys.path:

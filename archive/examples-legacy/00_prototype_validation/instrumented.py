@@ -7,9 +7,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
-from agently_skills_runtime.protocol.capability import CapabilityResult, CapabilityStatus
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.protocol.workflow import (
     ConditionalStep,
     InputMapping,
     LoopStep,
@@ -17,7 +17,7 @@ from agently_skills_runtime.protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.adapters.workflow_adapter import WorkflowAdapter
+from capability_runtime.adapters.workflow_adapter import WorkflowAdapter
 
 
 _SENSITIVE_KEYS = {"api_key", "authorization", "token", "secret", "password"}

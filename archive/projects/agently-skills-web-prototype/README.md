@@ -16,7 +16,7 @@
 
 - `agently`：来自 PyPI（版本号冻结）
 - `skills-runtime-sdk-python`：来自 PyPI（版本号冻结）
-- 本仓 `agently-skills-runtime`：停止开发即冻结（本原型默认通过“本地路径/同仓安装”方式引用）
+- 本仓 `capability-runtime`：停止开发即冻结（本原型默认通过“本地路径/同仓安装”方式引用）
 
 冻结清单（Source of Truth）：
 - `freeze-manifest.yml`
@@ -26,10 +26,10 @@
 在仓库根目录创建虚拟环境并安装依赖（示例，二选一即可）：
 
 ```bash
-# 方式 A：在仓库根目录安装本包（让原型能 import agently_skills_runtime）
+# 方式 A：在仓库根目录安装本包（让原型能 import capability_runtime）
 python -m pip install -e .
 
-# 方式 B：只为原型单独装后端依赖（仍需要能 import agently_skills_runtime）
+# 方式 B：只为原型单独装后端依赖（仍需要能 import capability_runtime）
 python -m pip install -e projects/agently-skills-web-prototype/backend
 ```
 

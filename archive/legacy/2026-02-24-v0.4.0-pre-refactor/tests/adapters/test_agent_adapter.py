@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.adapters.agent_adapter import AgentAdapter
-from agently_skills_runtime.protocol.agent import AgentIOSchema, AgentSpec
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.adapters.agent_adapter import AgentAdapter
+from capability_runtime.protocol.agent import AgentIOSchema, AgentSpec
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.runtime.registry import CapabilityRegistry
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.runtime.registry import CapabilityRegistry
 
 
 class FakeRuntime:

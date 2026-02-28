@@ -7,7 +7,7 @@ import pytest
 
 from agent_sdk.core.contracts import AgentEvent
 
-from agently_skills_runtime.bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from capability_runtime.bridge import Runtime, RuntimeConfig
 
 
 class _FakeAgent:
@@ -32,7 +32,7 @@ async def test_run_async_passes_report_artifacts_to_node_result(monkeypatch, tmp
     回归护栏：NodeResult.artifacts 必须透传 NodeReport.artifacts（证据链对齐）。
     """
 
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=tmp_path,
         config_paths=[],
         backend_mode="sdk_openai_chat_completions",
@@ -40,11 +40,11 @@ async def test_run_async_passes_report_artifacts_to_node_result(monkeypatch, tmp
         upstream_verification_mode="off",
     )
 
-    import agently_skills_runtime.bridge as rt_mod
+    import capability_runtime.bridge as rt_mod
 
     monkeypatch.setattr(rt_mod, "Agent", _FakeAgent)
 
-    rt = AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    rt = Runtime(agently_agent=object(), config=cfg)
     out = await rt.run_async("hello", run_id="r1")
 
     assert out.node_report.artifacts == ["handoff-1.md"]

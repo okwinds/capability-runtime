@@ -60,7 +60,7 @@ def api_meta() -> Dict[str, Any]:
         "packages": {
             "agently": _pkg_version("agently"),
             "skills-runtime-sdk-python": _pkg_version("skills-runtime-sdk-python"),
-            "agently-skills-runtime": _pkg_version("agently-skills-runtime"),
+            "capability-runtime": _pkg_version("capability-runtime"),
         },
         "settings": {
             "workspace_root": str(settings.workspace_root),

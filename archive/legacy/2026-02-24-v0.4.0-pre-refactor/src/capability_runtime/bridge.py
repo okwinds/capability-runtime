@@ -1,5 +1,5 @@
 """
-AgentlySkillsRuntime：桥接层主入口。
+Runtime：桥接层主入口。
 
 职责：
 - 构造 SDK Agent（核心引擎），注入 AgentlyChatBackend（LLM 传输适配）
@@ -94,7 +94,7 @@ class BridgeHook(Protocol):
 
 
 @dataclass(frozen=True)
-class AgentlySkillsRuntimeConfig:
+class RuntimeConfig:
     """
     桥接层运行配置（最小集合）。
 
@@ -117,7 +117,7 @@ class AgentlySkillsRuntimeConfig:
     skills_runtime_sdk_fork_root: Optional[Path] = None
 
 
-class AgentlySkillsRuntime:
+class Runtime:
     """桥接层主入口：在 TriggerFlow 节点内运行 skills runtime。"""
 
     def __init__(
@@ -125,7 +125,7 @@ class AgentlySkillsRuntime:
         *,
         agently_agent: Any,
         triggerflow_runner: Optional[TriggerFlowRunner] = None,
-        config: AgentlySkillsRuntimeConfig,
+        config: RuntimeConfig,
         env_store: Optional[Dict[str, str]] = None,
         approval_provider: Optional[ApprovalProvider] = None,
         human_io: Optional[HumanIOProvider] = None,
@@ -557,7 +557,7 @@ class AgentlySkillsRuntime:
                 reason="upstream_dependency_error",
                 completion_reason="upstream_verification_failed",
                 engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                bridge={"name": "agently-skills-runtime"},
+                bridge={"name": "capability-runtime"},
                 run_id=run_id or "upstream",
                 events_path=None,
                 activated_skills=[],
@@ -587,7 +587,7 @@ class AgentlySkillsRuntime:
                 reason="skill_config_error",
                 completion_reason="preflight_failed",
                 engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                bridge={"name": "agently-skills-runtime"},
+                bridge={"name": "capability-runtime"},
                 run_id=run_id or "preflight",
                 events_path=None,
                 activated_skills=[],
@@ -659,7 +659,7 @@ class AgentlySkillsRuntime:
                 reason="bridge_error",
                 completion_reason="bridge_exception",
                 engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk"},
-                bridge={"name": "agently-skills-runtime"},
+                bridge={"name": "capability-runtime"},
                 run_id=str(hook_context.get("run_id") or run_id or "bridge"),
                 events_path=None,
                 activated_skills=[],

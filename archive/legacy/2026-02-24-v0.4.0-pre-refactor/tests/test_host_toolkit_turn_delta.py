@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from agently_skills_runtime.host_toolkit.turn_delta import TurnDelta, TruncatingTurnDeltaRedactor
-from agently_skills_runtime.types import NodeReportV2
+from capability_runtime.host_toolkit.turn_delta import TurnDelta, TruncatingTurnDeltaRedactor
+from capability_runtime.types import NodeReportV2
 
 
 def test_turn_delta_can_represent_data_and_control_and_events_pointer():
@@ -10,7 +10,7 @@ def test_turn_delta_can_represent_data_and_control_and_events_pointer():
         reason=None,
         completion_reason="run_completed",
         engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk", "version": "0"},
-        bridge={"name": "agently-skills-runtime", "version": "0"},
+        bridge={"name": "capability-runtime", "version": "0"},
         run_id="r1",
         turn_id="t1",
         events_path="wal.jsonl",
@@ -39,7 +39,7 @@ def test_turn_delta_redactor_truncates_user_and_assistant_text_only():
         reason=None,
         completion_reason="run_completed",
         engine={"name": "skills-runtime-sdk-python", "module": "agent_sdk", "version": "0"},
-        bridge={"name": "agently-skills-runtime", "version": "0"},
+        bridge={"name": "capability-runtime", "version": "0"},
         run_id="r1",
         turn_id="t1",
         events_path="wal.jsonl",

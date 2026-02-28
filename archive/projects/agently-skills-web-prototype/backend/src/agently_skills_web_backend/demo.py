@@ -18,8 +18,8 @@ from agent_sdk.config.defaults import load_default_config_dict
 from agent_sdk.config.loader import load_config_dicts
 from agent_sdk.core.agent import Agent
 
-from agently_skills_runtime.adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend
-from agently_skills_runtime.adapters.triggerflow_tool import TriggerFlowRunner, TriggerFlowToolDeps, build_triggerflow_run_flow_tool
+from capability_runtime.adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend
+from capability_runtime.adapters.triggerflow_tool import TriggerFlowRunner, TriggerFlowToolDeps, build_triggerflow_run_flow_tool
 
 from .rag import RAG_DEMO_TOOL_QUERY, RagProvider, RagToolDeps, build_rag_retrieve_tool
 

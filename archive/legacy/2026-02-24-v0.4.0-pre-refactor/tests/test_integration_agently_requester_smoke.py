@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agently_skills_runtime.adapters.agently_backend import build_openai_compatible_requester_factory
+from capability_runtime.adapters.agently_backend import build_openai_compatible_requester_factory
 
 
 @pytest.mark.integration

@@ -17,7 +17,7 @@
 ```
 
 > 说明（方案2）：本仓库不再提供 `SkillSpec/SkillAdapter`。如需 skills，请用 `agent_sdk` 的 Strict Catalog + strict mention + overlays 方式接入，
-> 并通过 `AgentlySkillsRuntime.preflight()` / `preflight_or_raise()` 做开发机 gate（见工程规格）。
+> 并通过 `Runtime.preflight()` / `preflight_or_raise()` 做开发机 gate（见工程规格）。
 
 ## 运行方式
 
@@ -60,7 +60,7 @@ python examples/11_agent_domain_starter/main.py --real
 门禁行为：
 - 缺 `.env` / 缺关键变量：打印提示并 exit 0
 - `agently` 导入失败：打印安装提示并 exit 0
-- 条件满足：接线 `AgentlySkillsRuntime + AgentAdapter(runner=bridge.run_async)` 执行同一 workflow
+- 条件满足：接线 `Runtime + AgentAdapter(runner=bridge.run_async)` 执行同一 workflow
 
 ## 如何扩展
 

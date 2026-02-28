@@ -1,8 +1,8 @@
-"""agently-skills-runtime: 桥接胶水层 + 能力组织层。"""
+"""capability-runtime: 桥接胶水层 + 能力组织层。"""
 from __future__ import annotations
 
 # === 桥接层导出（保持向后兼容）===
-from .bridge import AgentlySkillsRuntime, AgentlySkillsRuntimeConfig
+from .bridge import Runtime, RuntimeConfig
 from .config import BridgeConfigModel
 from .types import NodeReportV2, NodeResultV2
 
@@ -37,12 +37,12 @@ from .adapters.agent_adapter import AgentAdapter
 from .adapters.workflow_adapter import WorkflowAdapter
 
 # === 错误导出 ===
-from .errors import AdapterNotFoundError, AgentlySkillsRuntimeError, CapabilityNotFoundError
+from .errors import AdapterNotFoundError, RuntimeFrameworkError, CapabilityNotFoundError
 
 __all__ = [
     # Bridge
-    "AgentlySkillsRuntime",
-    "AgentlySkillsRuntimeConfig",
+    "Runtime",
+    "RuntimeConfig",
     "NodeReportV2",
     "NodeResultV2",
     "BridgeConfigModel",
@@ -75,7 +75,7 @@ __all__ = [
     "AgentAdapter",
     "WorkflowAdapter",
     # Errors
-    "AgentlySkillsRuntimeError",
+    "RuntimeFrameworkError",
     "AdapterNotFoundError",
     "CapabilityNotFoundError",
 ]

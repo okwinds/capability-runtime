@@ -47,7 +47,7 @@ class NodeReportV2(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    schema_id: str = Field(default="agently-skills-runtime.node_report.v2", alias="schema")
+    schema_id: str = Field(default="capability-runtime.node_report.v2", alias="schema")
     status: NodeStatus
     reason: Optional[str] = None
     completion_reason: str = ""

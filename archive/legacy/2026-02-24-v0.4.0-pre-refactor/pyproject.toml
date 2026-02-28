@@ -1,5 +1,5 @@
 [project]
-name = "agently-skills-runtime"
+name = "capability-runtime"
 version = "0.4.0"
 description = "Bridge/glue layer that composes Agently (LLM/TriggerFlow) with skills-runtime-sdk (skills/tools/WAL/events)."
 readme = "README.md"

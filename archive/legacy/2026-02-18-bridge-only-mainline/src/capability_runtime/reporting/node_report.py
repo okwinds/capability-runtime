@@ -2,7 +2,7 @@
 NodeReportBuilder：把 SDK `AgentEvent` 聚合为 NodeReport v2。
 
 对齐规格：
-- `docs/internal/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
+- `docs/specs/engineering-spec/02_Technical_Design/CONTRACTS.md`
 """
 
 from __future__ import annotations
@@ -23,24 +23,6 @@ def _get_dist_version(dist_name: str) -> Optional[str]:
         return importlib.metadata.version(dist_name)
     except Exception:
         return None
-
-
-def _get_first_dist_version(dist_names: List[str]) -> Optional[str]:
-    """
-    读取一组候选 distribution 名称中的第一个可用版本号。
-
-    参数：
-    - dist_names：候选 dist 名称列表（按优先级排序）
-
-    返回：
-    - 第一个可读取的版本号；都不可用则返回 None
-    """
-
-    for name in dist_names:
-        v = _get_dist_version(name)
-        if v:
-            return v
-    return None
 
 
 @dataclass
@@ -77,27 +59,9 @@ class NodeReportBuilder:
         activated_skills: List[str] = []
         seen_skills: set[str] = set()
 
-        artifacts: List[str] = []
-        seen_artifacts: set[str] = set()
-
-        def _add_artifact(path: str) -> None:
-            """
-            记录 artifact 路径（去重但保持首次出现顺序）。
-
-            参数：
-            - path：artifact 路径字符串（必须为非空）
-            """
-
-            p = str(path or "").strip()
-            if not p or p in seen_artifacts:
-                return
-            artifacts.append(p)
-            seen_artifacts.add(p)
-
         # call_id -> aggregated fields
         tool_calls: Dict[str, Dict[str, Any]] = {}
         approval_pending: set[str] = set()
-        requires_approval_inferred: set[str] = set()
 
         # 兼容 SDK 默认 approvals 事件形态：
         # - tool_call_requested payload 带 call_id/name
@@ -128,10 +92,6 @@ class NodeReportBuilder:
             return tool_calls[call_id]
 
         for ev in events:
-            artifact_path = ev.payload.get("artifact_path")
-            if isinstance(artifact_path, str) and artifact_path.strip():
-                _add_artifact(artifact_path)
-
             if ev.type == "skill_injected":
                 skill_name = str(ev.payload.get("skill_name") or "").strip()
                 if skill_name and skill_name not in seen_skills:
@@ -158,8 +118,6 @@ class NodeReportBuilder:
                 if call_id and tool:
                     t = _ensure_tool(call_id, name=tool)
                     t["requires_approval"] = True
-                    # Bridge 无法稳定读取 tool spec 时，只能通过 approval_* 事件推断 requires_approval。
-                    requires_approval_inferred.add(call_id)
                     if isinstance(approval_key, str) and approval_key:
                         t["approval_key"] = approval_key
                     approval_pending.add(call_id)
@@ -177,7 +135,6 @@ class NodeReportBuilder:
                 if call_id and tool:
                     t = _ensure_tool(call_id, name=tool)
                     t["requires_approval"] = True
-                    requires_approval_inferred.add(call_id)
                     if isinstance(decision, str) and decision:
                         t["approval_decision"] = decision
                     if isinstance(reason, str) and reason:
@@ -205,25 +162,13 @@ class NodeReportBuilder:
                 events_path_raw = ev.payload.get("events_path")
                 if isinstance(events_path_raw, str) and events_path_raw.strip():
                     events_path = events_path_raw.strip()
-
-                # artifacts（run 级别产物列表）
-                artifacts_raw = ev.payload.get("artifacts")
-                if isinstance(artifacts_raw, list):
-                    for item in artifacts_raw:
-                        if isinstance(item, str) and item.strip():
-                            _add_artifact(item)
-
                 completion_reason = ev.type
                 if ev.type == "run_completed":
                     completion_status = "success"
                 elif ev.type == "run_failed":
+                    completion_status = "failed"
                     final_error_kind = ev.payload.get("error_kind") if isinstance(ev.payload.get("error_kind"), str) else None
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
-                    # 对齐契约：预算耗尽属于“未完成”而非“失败”（Host 可能需要走补偿/降级）。
-                    if final_error_kind in ("budget_exceeded", "terminated"):
-                        completion_status = "incomplete"
-                    else:
-                        completion_status = "failed"
                 else:
                     completion_status = "incomplete"
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
@@ -260,12 +205,7 @@ class NodeReportBuilder:
             else:
                 reason = "unknown"
         elif status == "incomplete":
-            if final_error_kind == "budget_exceeded":
-                reason = "budget_exceeded"
-            elif final_error_kind == "terminated":
-                reason = "cancelled"
-            else:
-                reason = "cancelled" if completion_reason == "run_cancelled" else "unknown"
+            reason = "cancelled" if completion_reason == "run_cancelled" else "unknown"
 
         tool_reports = [
             NodeToolCallReport.model_validate(item) for item in tool_calls.values() if isinstance(item, dict)
@@ -278,28 +218,18 @@ class NodeReportBuilder:
             engine={
                 "name": "skills-runtime-sdk-python",
                 "module": "agent_sdk",
-                "version": _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
+                "version": _get_dist_version("skills-runtime-sdk-python"),
             },
-            bridge={"name": "agently-skills-runtime", "version": _get_first_dist_version(["agently-skills-runtime"])},
+            bridge={"name": "capability-runtime", "version": _get_dist_version("capability-runtime")},
             run_id=run_id,
             turn_id=turn_id,
             events_path=events_path,
             activated_skills=activated_skills,
             tool_calls=tool_reports,
-            artifacts=artifacts,
+            artifacts=[],
             meta={
                 "missing_events_path": events_path is None,
                 "final_message": final_message,
-                **(
-                    {
-                        "approval_inference": {
-                            "requires_approval_call_ids": sorted(requires_approval_inferred),
-                            "source": "events_only",
-                        }
-                    }
-                    if requires_approval_inferred
-                    else {}
-                ),
             },
         )
         return report

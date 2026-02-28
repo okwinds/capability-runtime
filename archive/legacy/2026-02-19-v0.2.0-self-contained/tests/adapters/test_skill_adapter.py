@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.adapters.skill_adapter import SkillAdapter
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.adapters.skill_adapter import SkillAdapter
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.protocol.context import ExecutionContext
-from agently_skills_runtime.protocol.skill import SkillDispatchRule, SkillSpec
+from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.protocol.skill import SkillDispatchRule, SkillSpec
 
 
 class FakeRuntime:
@@ -25,7 +25,7 @@ class FakeRuntime:
 
     async def _execute(self, *, capability_id: str, input: dict, context: ExecutionContext):
         self.called.append(capability_id)
-        from agently_skills_runtime.protocol.capability import CapabilityResult
+        from capability_runtime.protocol.capability import CapabilityResult
 
         return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"id": capability_id})
 
@@ -74,7 +74,7 @@ async def test_skill_uri_disabled_by_default_without_network(tmp_path, monkeypat
     def _blocked_urlopen(*_args, **_kwargs):
         raise AssertionError("urlopen should not be called when uri source is not allowlisted")
 
-    monkeypatch.setattr("agently_skills_runtime.adapters.skill_adapter.urlopen", _blocked_urlopen)
+    monkeypatch.setattr("capability_runtime.adapters.skill_adapter.urlopen", _blocked_urlopen)
 
     rt = FakeRuntime(workspace_root=str(tmp_path))
     adapter = SkillAdapter()

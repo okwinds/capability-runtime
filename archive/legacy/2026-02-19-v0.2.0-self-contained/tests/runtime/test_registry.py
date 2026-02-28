@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
-from agently_skills_runtime.protocol.skill import SkillDispatchRule, SkillSpec
-from agently_skills_runtime.protocol.workflow import (
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import CapabilityKind, CapabilityRef, CapabilitySpec
+from capability_runtime.protocol.skill import SkillDispatchRule, SkillSpec
+from capability_runtime.protocol.workflow import (
     ConditionalStep,
     LoopStep,
     ParallelStep,
     Step,
     WorkflowSpec,
 )
-from agently_skills_runtime.runtime.registry import CapabilityRegistry
+from capability_runtime.runtime.registry import CapabilityRegistry
 
 
 def test_registry_register_get_list_by_kind() -> None:

@@ -3,15 +3,15 @@ from __future__ import annotations
 
 import pytest
 
-from agently_skills_runtime.protocol.agent import AgentSpec
-from agently_skills_runtime.protocol.capability import (
+from capability_runtime.protocol.agent import AgentSpec
+from capability_runtime.protocol.capability import (
     CapabilityKind,
     CapabilityRef,
     CapabilityResult,
     CapabilitySpec,
     CapabilityStatus,
 )
-from agently_skills_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
+from capability_runtime.runtime.engine import CapabilityRuntime, RuntimeConfig
 
 
 class MockAdapter:

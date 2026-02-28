@@ -12,7 +12,7 @@ from agent_sdk.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from agent_sdk.llm.fake import FakeChatBackend, FakeChatCall
 from agent_sdk.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from agently_skills_runtime.host_toolkit import (
+from capability_runtime.host_toolkit import (
     ApprovalsProfiles,
     HistoryAssembler,
     StaticSystemPromptProvider,
@@ -22,10 +22,10 @@ from agently_skills_runtime.host_toolkit import (
     TurnDelta,
     validate_approvals_profile,
 )
-from agently_skills_runtime.host_toolkit.resume import build_resume_replay_summary, load_agent_events_from_jsonl
-from agently_skills_runtime.host_toolkit.system_prompt import build_prompt_overlay, compute_system_prompt_digest
-from agently_skills_runtime.reporting.node_report import NodeReportBuilder
-from agently_skills_runtime.types import NodeResultV2
+from capability_runtime.host_toolkit.resume import build_resume_replay_summary, load_agent_events_from_jsonl
+from capability_runtime.host_toolkit.system_prompt import build_prompt_overlay, compute_system_prompt_digest
+from capability_runtime.reporting.node_report import NodeReportBuilder
+from capability_runtime.types import NodeResultV2
 
 
 class _SleepyApprovalProvider(ApprovalProvider):

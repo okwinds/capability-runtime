@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentIOSchema,
     AgentAdapter,
     AgentSpec,

@@ -16,10 +16,10 @@ SRC_DIR = REPO_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from agently_skills_runtime import (
+from capability_runtime import (
     AgentAdapter,
-    AgentlySkillsRuntime,
-    AgentlySkillsRuntimeConfig,
+    Runtime,
+    RuntimeConfig,
     CapabilityKind,
     CapabilityRuntime,
     RuntimeConfig,
@@ -106,9 +106,9 @@ async def build_real_runtime(example_dir: Path) -> CapabilityRuntime | None:
             "auth": os.environ["OPENAI_API_KEY"],
         },
     )
-    bridge = AgentlySkillsRuntime(
+    bridge = Runtime(
         agently_agent=Agently.create_agent(),
-        config=AgentlySkillsRuntimeConfig(
+        config=RuntimeConfig(
             workspace_root=Path.cwd(),
             config_paths=[],
             preflight_mode="off",

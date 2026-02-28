@@ -6,11 +6,11 @@ import pytest
 from agent_sdk.core.contracts import AgentEvent
 from agent_sdk.core.errors import FrameworkError, FrameworkIssue
 
-import agently_skills_runtime.bridge as runtime_mod
-from agently_skills_runtime.bridge import (
-    AgentlySkillsRuntime,
-    AgentlySkillsRuntimeConfig,
-    AgentlySkillsRuntimeConfig as RuntimeCfg,
+import capability_runtime.bridge as runtime_mod
+from capability_runtime.bridge import (
+    Runtime,
+    RuntimeConfig,
+    RuntimeConfig as RuntimeCfg,
 )
 
 
@@ -44,13 +44,13 @@ def _patch_requester_factory(monkeypatch):
 
 def _mk_runtime(monkeypatch, *, preflight_mode="error", config_paths=None):
     _patch_requester_factory(monkeypatch)
-    cfg = AgentlySkillsRuntimeConfig(
+    cfg = RuntimeConfig(
         workspace_root=Path("."),
         config_paths=[Path(p) for p in (config_paths or [])],
         preflight_mode=preflight_mode,
     )
     # agently_agent is unused after patching requester_factory
-    return AgentlySkillsRuntime(agently_agent=object(), config=cfg)
+    return Runtime(agently_agent=object(), config=cfg)
 
 
 @pytest.mark.asyncio
