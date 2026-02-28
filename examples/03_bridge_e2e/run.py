@@ -172,7 +172,7 @@ async def main() -> None:
                 name="BridgeE2E",
                 description=(
                     "请调用 tool `file_write` 写入一个 Python 文件，然后用一句话说明你写了什么。\n"
-                    "要求：写入 artifacts/hello.py，内容是一个可运行的 hello world。"
+                    "要求：写入 hello.py（相对 artifacts/），内容是一个可运行的 hello world。"
                 ),
             )
         )

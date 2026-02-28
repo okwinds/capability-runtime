@@ -393,6 +393,20 @@ def stream_runtime_with_min_ux(
                     tool = str((item.payload or {}).get("tool") or "")
                     ok = (item.payload or {}).get("result", {}).get("ok") if isinstance(item.payload, dict) else None
                     print(f"[tool] done {tool} ok={ok}")
+            elif isinstance(item, dict):
+                typ = str(item.get("type") or "")
+                if typ.startswith("workflow."):
+                    step_id = str(item.get("step_id") or "")
+                    suffix = f" step_id={step_id}" if step_id else ""
+                    print(f"[event] {typ}{suffix}")
+                    continue
+                # 非 workflow 事件：保持 best-effort 展示，避免误判为终态结果。
+                if typ:
+                    print(f"[event] {typ}")
+                    continue
+                # 未知 dict：不应落入终态解析（避免 AttributeError）
+                print("[event] dict")
+                continue
             else:
                 final_output = str(item.output or "")
                 wal_locator = str(item.node_report.events_path) if item.node_report and item.node_report.events_path else None
