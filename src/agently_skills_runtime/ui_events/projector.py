@@ -249,26 +249,27 @@ class RuntimeUIEventProjector:
         if ev.type in ("run_completed", "run_failed", "run_cancelled"):
             if ev.type == "run_completed":
                 status = "success"
-                terminal_phase = "DONE"
-                out.append(self._emit(type="node.phase", path=base_path, data={"phase": terminal_phase}))
+                # best-effort：run_* 事件出现后通常意味着进入“产出/收敛”阶段
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": "REPORTING"}))
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": "DONE"}))
                 out.append(self._emit(type="node.finished", path=base_path, data={"status": status}))
                 return out
 
             if ev.type == "run_failed":
                 status = "failed"
-                terminal_phase = "DONE"
                 data: Dict[str, Any] = {"status": status}
                 error_kind = ev.payload.get("error_kind")
                 if isinstance(error_kind, str) and error_kind.strip():
                     data["error_kind"] = error_kind.strip()
-                out.append(self._emit(type="node.phase", path=base_path, data={"phase": terminal_phase}))
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": "REPORTING"}))
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": "DONE"}))
                 out.append(self._emit(type="node.finished", path=base_path, data=data))
                 return out
 
             # run_cancelled：在本仓多数语义用于“中断等待”（例如审批挂起），UI 层用 pending 表达更稳妥。
             status = "pending"
-            terminal_phase = "DONE"
-            out.append(self._emit(type="node.phase", path=base_path, data={"phase": terminal_phase}))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "REPORTING"}))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "DONE"}))
             out.append(self._emit(type="node.finished", path=base_path, data={"status": status}))
             return out
 

@@ -444,6 +444,7 @@ class Runtime:
         input: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None,
         level: Any = None,
+        store: Any = None,
         store_max_events: int = 10_000,
         heartbeat_interval_s: float = 15.0,
     ) -> Any:
@@ -454,6 +455,11 @@ class Runtime:
         - 会话负责“执行 + 投影 + 存储”，订阅侧可随时重连；
         - 不绑定任何传输协议；JSONL/SSE framing 由 `ui_events.transport` 提供；
         - UI events 不是审计真相源；证据链仍以 NodeReport/WAL 为准。
+
+        参数补充：
+        - store：可选自定义 store（用于注入持久化/分布式实现，保持中立）
+          - 若提供，则 `store_max_events` 将被忽略；
+          - store 需要实现最小接口：append(ev)/read_after(after_id)/min_rid/max_rid。
         """
 
         from .ui_events.session import RuntimeUIEventsSession
@@ -462,14 +468,14 @@ class Runtime:
 
         ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth, bag={})
         lv = level if isinstance(level, StreamLevel) else StreamLevel.UI
-        store = InMemoryRuntimeEventStore(max_events=int(store_max_events))
+        store_impl = store if store is not None else InMemoryRuntimeEventStore(max_events=int(store_max_events))
         return RuntimeUIEventsSession(
             runtime=self,
             capability_id=capability_id,
             input=input or {},
             context=ctx,
             level=lv,
-            store=store,
+            store=store_impl,
             heartbeat_interval_s=float(heartbeat_interval_s),
         )
 

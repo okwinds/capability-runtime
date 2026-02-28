@@ -9,7 +9,7 @@ from skills_runtime.core.contracts import AgentEvent
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
 from .projector import RuntimeUIEventProjector, _AgentCtx
-from .store import AfterIdExpiredError, InMemoryRuntimeEventStore
+from .store import AfterIdExpiredError, RuntimeEventStore
 from .v1 import RuntimeEvent, StreamLevel
 
 
@@ -39,7 +39,7 @@ class RuntimeUIEventsSession:
         input: Dict[str, Any],
         context: ExecutionContext,
         level: StreamLevel,
-        store: InMemoryRuntimeEventStore,
+        store: RuntimeEventStore,
         heartbeat_interval_s: float,
     ) -> None:
         self._runtime = runtime
@@ -61,7 +61,7 @@ class RuntimeUIEventsSession:
         return self._context.run_id
 
     @property
-    def store(self) -> InMemoryRuntimeEventStore:
+    def store(self) -> RuntimeEventStore:
         return self._store
 
     def _publish_nowait(self, ev: RuntimeEvent) -> None:
@@ -186,4 +186,3 @@ class RuntimeUIEventsSession:
                     return
         finally:
             self._subs.discard(q)
-
