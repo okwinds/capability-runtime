@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from typing import Any, AsyncIterator, Dict, List, cast
 
 from agently import TriggerFlow
@@ -21,6 +22,7 @@ from .workflow_engine import WorkflowStreamEvent, WorkflowStreamItem
 
 
 _WF_WORKFLOW_ID_KEY = "__wf_workflow_id"
+_WF_WORKFLOW_INSTANCE_ID_KEY = "__wf_workflow_instance_id"
 _WF_STEP_ID_KEY = "__wf_step_id"
 _WF_BRANCH_ID_KEY = "__wf_branch_id"
 
@@ -99,7 +101,9 @@ class TriggerFlowWorkflowEngine:
         """
 
         context.bag.update(input)
+        workflow_instance_id = uuid.uuid4().hex
         prev_wf = _set_ctx_hint(context, key=_WF_WORKFLOW_ID_KEY, value=str(spec.base.id))
+        prev_wf_inst = _set_ctx_hint(context, key=_WF_WORKFLOW_INSTANCE_ID_KEY, value=str(workflow_instance_id))
         event_queue: asyncio.Queue[WorkflowStreamEvent | object] = asyncio.Queue()
         terminal_holder: Dict[str, CapabilityResult] = {}
         queue_stop = object()
@@ -112,6 +116,7 @@ class TriggerFlowWorkflowEngine:
                 "type": "workflow.started",
                 "run_id": context.run_id,
                 "workflow_id": spec.base.id,
+                "workflow_instance_id": workflow_instance_id,
             }
         )
 
@@ -146,6 +151,7 @@ class TriggerFlowWorkflowEngine:
                         "type": "workflow.step.started",
                         "run_id": context.run_id,
                         "workflow_id": spec.base.id,
+                        "workflow_instance_id": workflow_instance_id,
                         "step_id": getattr(bound_step, "id", f"step_{bound_index}"),
                     }
                 )
@@ -164,6 +170,7 @@ class TriggerFlowWorkflowEngine:
                         "type": "workflow.step.finished",
                         "run_id": context.run_id,
                         "workflow_id": spec.base.id,
+                        "workflow_instance_id": workflow_instance_id,
                         "step_id": step_id,
                         "status": getattr(result.status, "value", str(result.status)),
                         "error": result.error,
@@ -196,6 +203,7 @@ class TriggerFlowWorkflowEngine:
                     "type": "workflow.finished",
                     "run_id": context.run_id,
                     "workflow_id": spec.base.id,
+                    "workflow_instance_id": workflow_instance_id,
                     "status": getattr(result.status, "value", str(result.status)),
                 }
             )
@@ -229,6 +237,7 @@ class TriggerFlowWorkflowEngine:
                 yield cast(WorkflowStreamEvent, item)
         finally:
             await flow_task
+            _restore_ctx_hint(context, key=_WF_WORKFLOW_INSTANCE_ID_KEY, prev=prev_wf_inst)
             _restore_ctx_hint(context, key=_WF_WORKFLOW_ID_KEY, prev=prev_wf)
 
         terminal = terminal_holder.get("result")

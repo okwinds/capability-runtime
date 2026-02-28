@@ -77,8 +77,11 @@ class _AgentCtx:
     run_id: str
     capability_id: str
     workflow_id: Optional[str] = None
+    workflow_instance_id: Optional[str] = None
     step_id: Optional[str] = None
     branch_id: Optional[str] = None
+    # outer → inner 的嵌套链提示（best-effort）；若存在则优先用于生成 path
+    wf_frames: Optional[List[Dict[str, str]]] = None
 
 
 class RuntimeUIEventProjector:
@@ -96,6 +99,8 @@ class RuntimeUIEventProjector:
         self._seq = 0
         self._skill_mention_to_locator: Dict[str, str] = {}
         self._skill_name_to_locator: Dict[str, str] = {}
+        # call_id -> origin path（用于“哪来哪去”，避免 tool/approval 生命周期事件归属漂移）
+        self._call_origin_path: Dict[str, List[PathSegment]] = {}
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -105,12 +110,40 @@ class RuntimeUIEventProjector:
         segs: List[PathSegment] = [PathSegment(kind="run", id=self._run_id)]
         if ctx is None:
             return segs
-        if ctx.workflow_id:
-            segs.append(PathSegment(kind="workflow", id=ctx.workflow_id))
-        if ctx.step_id:
-            segs.append(PathSegment(kind="step", id=ctx.step_id))
-        if ctx.branch_id:
-            segs.append(PathSegment(kind="branch", id=ctx.branch_id))
+        if ctx.wf_frames:
+            for frame in ctx.wf_frames:
+                wf_id = frame.get("workflow_id")
+                wf_inst = frame.get("workflow_instance_id") or wf_id
+                if wf_inst:
+                    segs.append(
+                        PathSegment(
+                            kind="workflow",
+                            id=wf_inst,
+                            instance_id=wf_inst,
+                            ref={"kind": "workflow", "id": wf_id} if wf_id else None,
+                        )
+                    )
+                step_id = frame.get("step_id")
+                if step_id:
+                    segs.append(PathSegment(kind="step", id=step_id))
+                branch_id = frame.get("branch_id")
+                if branch_id:
+                    segs.append(PathSegment(kind="branch", id=branch_id))
+        else:
+            if ctx.workflow_id:
+                # legacy：仍提供 ref，便于消费端按逻辑 workflow_id 过滤
+                segs.append(
+                    PathSegment(
+                        kind="workflow",
+                        id=ctx.workflow_instance_id or ctx.workflow_id,
+                        instance_id=ctx.workflow_instance_id or ctx.workflow_id,
+                        ref={"kind": "workflow", "id": ctx.workflow_id},
+                    )
+                )
+            if ctx.step_id:
+                segs.append(PathSegment(kind="step", id=ctx.step_id))
+            if ctx.branch_id:
+                segs.append(PathSegment(kind="branch", id=ctx.branch_id))
         if ctx.capability_id:
             segs.append(PathSegment(kind="agent", id=ctx.capability_id))
         return segs
@@ -153,34 +186,53 @@ class RuntimeUIEventProjector:
             return []
 
         workflow_id = str(ev.get("workflow_id") or "").strip() or None
+        workflow_instance_id = str(ev.get("workflow_instance_id") or "").strip() or None
         step_id = str(ev.get("step_id") or "").strip() or None
 
         out: List[RuntimeEvent] = []
         if typ == "workflow.started" and workflow_id:
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
             out.append(
                 self._emit(
                     type="node.started",
-                    path=[PathSegment(kind="run", id=self._run_id), PathSegment(kind="workflow", id=workflow_id)],
-                    data={"node_kind": "workflow"},
+                    path=[PathSegment(kind="run", id=self._run_id), wf_seg],
+                    data={"node_kind": "workflow", "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id},
                 )
             )
             if self._level != StreamLevel.LITE:
                 out.append(
                     self._emit(
                         type="node.phase",
-                        path=[PathSegment(kind="run", id=self._run_id), PathSegment(kind="workflow", id=workflow_id)],
+                        path=[PathSegment(kind="run", id=self._run_id), wf_seg],
                         data={"phase": "RUNNING"},
                     )
                 )
             return out
 
         if typ == "workflow.step.started" and workflow_id and step_id:
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
             path = [
                 PathSegment(kind="run", id=self._run_id),
-                PathSegment(kind="workflow", id=workflow_id),
+                wf_seg,
                 PathSegment(kind="step", id=step_id),
             ]
-            out.append(self._emit(type="node.started", path=path, data={"node_kind": "step"}))
+            out.append(
+                self._emit(
+                    type="node.started",
+                    path=path,
+                    data={"node_kind": "step", "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id, "step_id": step_id},
+                )
+            )
             if self._level != StreamLevel.LITE:
                 out.append(self._emit(type="node.phase", path=path, data={"phase": "RUNNING"}))
             return out
@@ -188,23 +240,47 @@ class RuntimeUIEventProjector:
         if typ == "workflow.step.finished" and workflow_id and step_id:
             status_raw = str(ev.get("status") or "").strip()
             status = status_raw if status_raw in {"success", "failed", "pending", "cancelled"} else "pending"
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
             path = [
                 PathSegment(kind="run", id=self._run_id),
-                PathSegment(kind="workflow", id=workflow_id),
+                wf_seg,
                 PathSegment(kind="step", id=step_id),
             ]
             if self._level != StreamLevel.LITE:
                 out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
-            out.append(self._emit(type="node.finished", path=path, data={"status": status}))
+            out.append(
+                self._emit(
+                    type="node.finished",
+                    path=path,
+                    data={"status": status, "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id, "step_id": step_id},
+                )
+            )
             return out
 
         if typ == "workflow.finished" and workflow_id:
             status_raw = str(ev.get("status") or "").strip()
             status = status_raw if status_raw in {"success", "failed", "pending", "cancelled"} else "pending"
-            path = [PathSegment(kind="run", id=self._run_id), PathSegment(kind="workflow", id=workflow_id)]
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
+            path = [PathSegment(kind="run", id=self._run_id), wf_seg]
             if self._level != StreamLevel.LITE:
                 out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
-            out.append(self._emit(type="node.finished", path=path, data={"status": status}))
+            out.append(
+                self._emit(
+                    type="node.finished",
+                    path=path,
+                    data={"status": status, "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id},
+                )
+            )
             return out
 
         return []
@@ -303,6 +379,8 @@ class RuntimeUIEventProjector:
                 path.append(PathSegment(kind="tool", id=tool))
             if call_id:
                 path.append(PathSegment(kind="call", id=call_id))
+                # 绑定 call origin：后续 finished/approval 必须复用该归属（哪来哪去）
+                self._call_origin_path.setdefault(call_id, list(path))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
             data: Dict[str, Any] = {"tool": tool, "call_id": call_id}
             if args_summary is not None:
@@ -314,11 +392,13 @@ class RuntimeUIEventProjector:
             tool = str(ev.payload.get("tool") or "").strip()
             call_id = str(ev.payload.get("call_id") or "").strip()
             approval_key = ev.payload.get("approval_key")
-            path = list(base_path)
-            if tool:
-                path.append(PathSegment(kind="tool", id=tool))
-            if call_id:
-                path.append(PathSegment(kind="call", id=call_id))
+            origin = self._call_origin_path.get(call_id) if call_id else None
+            path = list(origin) if origin is not None else list(base_path)
+            if origin is None:
+                if tool:
+                    path.append(PathSegment(kind="tool", id=tool))
+                if call_id:
+                    path.append(PathSegment(kind="call", id=call_id))
             path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "WAITING_APPROVAL"}))
             data: Dict[str, Any] = {"tool": tool}
@@ -335,11 +415,13 @@ class RuntimeUIEventProjector:
             decision = str(ev.payload.get("decision") or "").strip()
             reason = ev.payload.get("reason")
             approval_key = ev.payload.get("approval_key")
-            path = list(base_path)
-            if tool:
-                path.append(PathSegment(kind="tool", id=tool))
-            if call_id:
-                path.append(PathSegment(kind="call", id=call_id))
+            origin = self._call_origin_path.get(call_id) if call_id else None
+            path = list(origin) if origin is not None else list(base_path)
+            if origin is None:
+                if tool:
+                    path.append(PathSegment(kind="tool", id=tool))
+                if call_id:
+                    path.append(PathSegment(kind="call", id=call_id))
             path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
             data: Dict[str, Any] = {"tool": tool, "decision": decision or "unknown"}
@@ -357,11 +439,13 @@ class RuntimeUIEventProjector:
             ok = result.get("ok") if isinstance(result.get("ok"), bool) else None
             error_kind = result.get("error_kind") if isinstance(result.get("error_kind"), str) else None
             result_summary = _summarize_dict(result.get("data"))
-            path = list(base_path)
-            if tool:
-                path.append(PathSegment(kind="tool", id=tool))
-            if call_id:
-                path.append(PathSegment(kind="call", id=call_id))
+            origin = self._call_origin_path.get(call_id) if call_id else None
+            path = list(origin) if origin is not None else list(base_path)
+            if origin is None:
+                if tool:
+                    path.append(PathSegment(kind="tool", id=tool))
+                if call_id:
+                    path.append(PathSegment(kind="call", id=call_id))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "THINKING"}))
             data: Dict[str, Any] = {"tool": tool, "call_id": call_id, "ok": bool(ok)}
             if error_kind:

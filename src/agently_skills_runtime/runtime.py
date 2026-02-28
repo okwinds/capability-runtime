@@ -317,16 +317,66 @@ class Runtime:
         if not self._agent_event_taps:
             return
 
+        def _collect_workflow_frames(ctx: ExecutionContext) -> List[Dict[str, str]]:
+            """
+            从当前 context 向上回溯 parent_context，收集 workflow 嵌套链的最小信息。
+
+            设计目标：
+            - 不依赖“在 bag 里维护可变栈”（child() 的 bag 是浅拷贝，list 会共享引用）；
+            - 通过 `__wf_workflow_instance_id`（若存在）进行 frame 分段，支持递归/重入；
+            - 以最小字段（workflow_id/workflow_instance_id/step_id/branch_id）供 UI projector 组装 path。
+            """
+
+            frames_inner_to_outer: List[Dict[str, str]] = []
+            last_frame_key: Optional[str] = None
+            cur: Optional[ExecutionContext] = ctx
+            while cur is not None:
+                bag0 = getattr(cur, "bag", None)
+                bag = bag0 if isinstance(bag0, dict) else {}
+
+                wf_id = bag.get("__wf_workflow_id")
+                wf_inst = bag.get("__wf_workflow_instance_id")
+                step_id = bag.get("__wf_step_id")
+                branch_id = bag.get("__wf_branch_id")
+
+                wf_id_s = wf_id.strip() if isinstance(wf_id, str) else ""
+                wf_inst_s = wf_inst.strip() if isinstance(wf_inst, str) else ""
+                step_id_s = step_id.strip() if isinstance(step_id, str) else ""
+                branch_id_s = branch_id.strip() if isinstance(branch_id, str) else ""
+
+                key = wf_inst_s or wf_id_s
+                if key and key != last_frame_key:
+                    frame: Dict[str, str] = {}
+                    if wf_id_s:
+                        frame["workflow_id"] = wf_id_s
+                    if wf_inst_s:
+                        frame["workflow_instance_id"] = wf_inst_s
+                    if step_id_s:
+                        frame["step_id"] = step_id_s
+                    if branch_id_s:
+                        frame["branch_id"] = branch_id_s
+                    frames_inner_to_outer.append(frame)
+                    last_frame_key = key
+
+                cur = getattr(cur, "parent_context", None)
+
+            return list(reversed(frames_inner_to_outer))
+
         bag = dict(getattr(context, "bag", {}) or {})
         tap_ctx: Dict[str, Any] = {"run_id": context.run_id, "capability_id": capability_id}
         for k, out_key in (
             ("__wf_workflow_id", "workflow_id"),
+            ("__wf_workflow_instance_id", "workflow_instance_id"),
             ("__wf_step_id", "step_id"),
             ("__wf_branch_id", "branch_id"),
         ):
             v = bag.get(k)
             if isinstance(v, str) and v.strip():
                 tap_ctx[out_key] = v.strip()
+
+        frames = _collect_workflow_frames(context)
+        if frames:
+            tap_ctx["wf_frames"] = frames
 
         for t in list(self._agent_event_taps):
             try:
@@ -412,8 +462,14 @@ class Runtime:
                         run_id=str(tap_ctx.get("run_id") or ctx.run_id),
                         capability_id=str(tap_ctx.get("capability_id") or ""),
                         workflow_id=str(tap_ctx.get("workflow_id")) if isinstance(tap_ctx.get("workflow_id"), str) else None,
+                        workflow_instance_id=str(tap_ctx.get("workflow_instance_id"))
+                        if isinstance(tap_ctx.get("workflow_instance_id"), str)
+                        else None,
                         step_id=str(tap_ctx.get("step_id")) if isinstance(tap_ctx.get("step_id"), str) else None,
                         branch_id=str(tap_ctx.get("branch_id")) if isinstance(tap_ctx.get("branch_id"), str) else None,
+                        wf_frames=list(tap_ctx.get("wf_frames"))
+                        if isinstance(tap_ctx.get("wf_frames"), list)
+                        else None,
                     )
                     for out_ev in projector.on_agent_event(agent_ev, ctx=agent_ctx):
                         yield out_ev

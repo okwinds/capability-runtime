@@ -30,6 +30,11 @@ class PathSegment(BaseModel):
 
     kind: str = Field(min_length=1)
     id: str = Field(min_length=1)
+    # v1 加法演进：用于多实例/嵌套消歧与展示（不要求每条事件都提供）
+    instance_id: Optional[str] = None
+    # `ref` 用于携带“逻辑身份”（例如 workflow spec id / capability id / tool name），避免 id 变为 opaque 后 UI 无法展示。
+    # 约束：保持通用性，只提供 kind/id 两个维度。
+    ref: Optional[Dict[str, str]] = None
 
 
 class Evidence(BaseModel):
@@ -68,4 +73,3 @@ class RuntimeEvent(BaseModel):
 
     rid: Optional[str] = None
     evidence: Optional[Evidence] = None
-
