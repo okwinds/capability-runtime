@@ -7,7 +7,7 @@
 - **对外协议原语**：仅 **Agent / Workflow**（可声明、可注册、可校验、可执行、可编排）
 - **skills 引擎**：由上游 `skills_runtime`（skills-runtime-sdk）提供（catalog/mention/sources/preflight/tools/approvals/WAL/events）
 - **证据链优先**：桥接模式下产出稳定的结构化证据 `NodeReport`（控制面），同时保留生态友好的 `output`（数据面）
-- **当前版本号**：`0.0.0`（建设期；版本号已重置，暂不做历史继承口径）
+- **当前版本号**：`0.0.1`（建设期；不承诺历史继承口径）
 
 ### 关键设计决策（避免学习成本扩散）
 

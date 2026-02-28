@@ -77,7 +77,7 @@ def test_app_form_interview_pro_offline_smoke(tmp_path: Path) -> None:
     assert (workspace / "report.md").exists()
 
     # contract：至少一个人类 app 示例需在输出中可观察到多段 namespace（>=3 segments）
-    # pinned: skills-runtime-sdk==0.1.6（spaces schema 为 namespace）
+    # pinned: skills-runtime-sdk==0.1.7（spaces schema 为 namespace）
     ns_line = next((x for x in p.stdout.splitlines() if x.startswith("namespace=")), "")
     assert ns_line, p.stdout
     assert ns_line == "namespace=examples:apps:form-interview"

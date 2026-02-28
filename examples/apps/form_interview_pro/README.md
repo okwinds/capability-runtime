@@ -21,7 +21,7 @@ python examples/apps/form_interview_pro/run.py --workspace-root /tmp/caprt-app-f
   - `runtime.yaml`（overlay）
 - 最终输出中包含 wal_locator（NodeReport.events_path）
 
-本示例的 namespace 口径（pinned: `skills-runtime-sdk==0.1.6`）：
+本示例的 namespace 口径（pinned: `skills-runtime-sdk==0.1.7`）：
 - overlay：`skills.spaces[].namespace="examples:apps:form-interview"`（≥3 段）
 - strict mention：`$[examples:apps:form-interview].form-interviewer`（同一 namespace 下的多个 skill 同理）
 
