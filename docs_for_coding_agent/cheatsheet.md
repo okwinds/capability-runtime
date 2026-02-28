@@ -22,8 +22,10 @@ assert rt.validate() == []
 res = asyncio.run(rt.run("echo", input={"x": 1}))
 print(res.status.value)
 print(res.output)
-print(res.node_report)
+print(res.node_report is not None)
 ```
+
+> 注意：`mode="mock"` 主要用于离线逻辑回归；如需稳定的 WAL/NodeReport 证据链，请参考 `docs_for_coding_agent/examples/atomic/01_sdk_native_minimal/`（离线注入 backend + overlays）。
 
 ## 2) import 速查（只列公共 API）
 

@@ -4,7 +4,7 @@
 
 - 不偏航：所有改动服务于“生产级能力运行时基座”的主旨
 - 可回归：变更必须可测试、可复现
-- 可追溯：关键命令/结论写入 `docs/internal/worklog.md`
+- 可追溯：关键命令/结论写入工作记录（按 `DOCS_INDEX.md` 的 canonical 入口；通常为 `docs/worklog.md`）
 
 ## 1) 最小闭环（你每次都应该走）
 
@@ -13,7 +13,7 @@
 3. 先补离线回归测试（RED）
 4. 实现最小改动（GREEN）
 5. 跑离线回归（至少 `python -m pytest tests/ -q`）
-6. 更新：`docs/internal/worklog.md`、`DOCS_INDEX.md`、（必要时）任务总结
+6. 更新：工作记录（通常 `docs/worklog.md`）、`DOCS_INDEX.md`、任务总结（`docs/task-summaries/YYYY-MM-DD-*.md`）
 
 > 约束提示：所有“删除”必须先归档并保持可索引追溯；未经授权不得修改 `.gitignore`。
 

@@ -5,7 +5,7 @@
 - 最短路径（怎么跑通 / 怎么扩展）
 - 质量门禁（怎么写测试、怎么证明“完整完成”）
 
-> 约定：本文档包以 `src/` 与 `tests/` 为“地面真相源”；关键边界与验收以 `docs/context/refactoring-spec.md` 为准。
+> 约定：本文档包以 `DOCS_INDEX.md` 与 `openspec/specs/*` 为“契约/验收真相源”，以 `src/` 与 `tests/` 为“代码真相源”。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯。
 
 ## 推荐阅读顺序
 
@@ -16,12 +16,12 @@
 5. `examples/README.md` — 可回归示例库（atomic + recipes）
 
 补充说明：
-- 本目录只维护“最短闭环”三份文档，避免为建设期引入多套叙事与学习面。
-- 扩展文档（API 清单 / 组合模式 / 接线指南 / Agent Domain 指南）已归档到 `archive/` 中（追溯入口见 `archive/README.md`）。
+- 本目录只维护“最短闭环”主线文档（上表 1~4）+ 示例入口（第 5 项），避免为建设期引入多套叙事与学习面。
+- 扩展文档（API 清单 / 组合模式 / 接线指南 / Agent Domain 指南）已归档到仓库根目录 `archive/` 中（追溯入口见 `archive/README.md`）。
 
 ## 配套示例
 
-`examples/` 目录包含可运行的渐进式示例：
+仓库根目录 `examples/` 包含可运行的渐进式示例：
 - 01：最短闭环（mock + bridge）
 - 02：Workflow（顺序 + 循环 + 条件）
 - 03-04：端到端（真实 LLM + 证据链；TriggerFlow 顶层编排）

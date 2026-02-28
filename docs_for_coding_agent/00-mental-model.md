@@ -2,7 +2,7 @@
 
 > 面向：编码智能体 / 维护者  
 > 目标：避免把本仓误读成“另一个 Agent Framework / Prompt 工程项目”。  
-> 真相源：以 `src/` 与 `tests/` 为准；边界与验收以输入文档 `docs/context/refactoring-spec.md`（2.5/2.7/BRIDGE-05/BRIDGE-06）为准。
+> 真相源优先级：`DOCS_INDEX.md` → `openspec/specs/*`（契约/验收）→ `src/` 与 `tests/`（实现/回归）。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯（其中的章节号可作为背景索引，而非当前验收口径）。
 
 ## 1) 本仓解决的核心矛盾是什么？
 
