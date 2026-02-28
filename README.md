@@ -1,4 +1,4 @@
-# agently-skills-runtime
+# capability-runtime
 
 一句话定位：一个**生产级的能力运行时（Capability Runtime）基座 + 双上游桥接层**。
 
@@ -54,7 +54,7 @@ flowchart TD
   D -->|Workflow| F[TriggerFlowWorkflowEngine<br/>内部编排]
   F --> E
   E --> G[WAL / AgentEvent / Tool Evidence]
-  G --> H[NodeReport<br/>schema=agently-skills-runtime.node_report.v1]
+  G --> H[NodeReport<br/>schema=capability-runtime.node_report.v1]
   C --> I[轻量 workflow 流事件<br/>workflow.started / workflow.step.* / workflow.finished]
   H --> J[CapabilityResult.node_report（控制面）]
   E --> K[final_output（数据面）]
@@ -145,7 +145,7 @@ Runtime.run_stream(capability_id)
                                 | (optional: LLM transport / orchestration entry)
                                 v
 +---------------------------------------------------------------------+
-| This Repo: agently-skills-runtime                                   |
+| This Repo: capability-runtime                                   |
 | - Protocol:  AgentSpec / WorkflowSpec (capability primitives)       |
 | - Runtime:   Runtime (register/validate/run)                        |
 | - Adapters:  TriggerFlowWorkflowEngine / AgentAdapter               |
@@ -287,24 +287,24 @@ Host / TriggerFlow  ------------------------------->  Runtime.run("WF-*")
 - 上游 tool handler 为同步函数（tool dispatch 为同步路径），因此在 handler 内不能直接 `await`。
 - 当子能力调用本身为 async API（例如 `Runtime.run(...)`）时，宿主应使用“后台线程 + 独立 event loop”执行子调用并等待结果返回；不要在运行中的 event loop 中直接调用 `asyncio.run()`。
 
-参考实现（公共 API，推荐包根导入）：`agently_skills_runtime.make_invoke_capability_tool`（实现文件：`src/agently_skills_runtime/host_toolkit/invoke_capability.py`）。
+参考实现（公共 API，推荐包根导入）：`capability_runtime.make_invoke_capability_tool`（实现文件：`src/capability_runtime/host_toolkit/invoke_capability.py`）。
 
 ## 公共 API（对外承诺）
 
 按输入文档 `docs/context/refactoring-spec.md` 的 2.7 节收敛后，本仓对外推荐只从包根导入：
 
 ```python
-from agently_skills_runtime import Runtime, RuntimeConfig, CustomTool
-from agently_skills_runtime import (
+from capability_runtime import Runtime, RuntimeConfig, CustomTool
+from capability_runtime import (
     CapabilitySpec, CapabilityKind, CapabilityRef,
     CapabilityResult, CapabilityStatus,
     AgentSpec, AgentIOSchema,
     WorkflowSpec, Step, LoopStep, ParallelStep, ConditionalStep, InputMapping,
     ExecutionContext,
 )
-from agently_skills_runtime import NodeReport, NodeResult
-from agently_skills_runtime import (
-    AgentlySkillsRuntimeError,
+from capability_runtime import NodeReport, NodeResult
+from capability_runtime import (
+    RuntimeFrameworkError,
     CapabilityNotFoundError,
     AdapterNotFoundError,
 )
@@ -320,20 +320,20 @@ from agently_skills_runtime import (
 
 > 目标：把“主旨/结构/用法”落到真实代码位置，避免 README 变成抽象口号。
 
-- `Runtime`（唯一入口）：`src/agently_skills_runtime/runtime.py`
+- `Runtime`（唯一入口）：`src/capability_runtime/runtime.py`
   - `Runtime.register*()`：注册
   - `Runtime.run()` / `Runtime.run_stream()`：执行
-- `TriggerFlowWorkflowEngine`（Workflow 内部编排引擎）：`src/agently_skills_runtime/adapters/triggerflow_workflow_engine.py`
-- `AgentAdapter`（承载 skills/桥接）：`src/agently_skills_runtime/adapters/agent_adapter.py`
-- `NodeReport`（证据链聚合）：`src/agently_skills_runtime/reporting/node_report.py`
+- `TriggerFlowWorkflowEngine`（Workflow 内部编排引擎）：`src/capability_runtime/adapters/triggerflow_workflow_engine.py`
+- `AgentAdapter`（承载 skills/桥接）：`src/capability_runtime/adapters/agent_adapter.py`
+- `NodeReport`（证据链聚合）：`src/capability_runtime/reporting/node_report.py`
 
 ## 代码导航（建议从这里读）
 
-- 公共 API 面：`src/agently_skills_runtime/__init__.py`
-- 统一执行入口：`src/agently_skills_runtime/runtime.py`
-- 协议原语：`src/agently_skills_runtime/protocol/`
-- 适配层：`src/agently_skills_runtime/adapters/`
-- 证据链聚合：`src/agently_skills_runtime/reporting/node_report.py`
+- 公共 API 面：`src/capability_runtime/__init__.py`
+- 统一执行入口：`src/capability_runtime/runtime.py`
+- 协议原语：`src/capability_runtime/protocol/`
+- 适配层：`src/capability_runtime/adapters/`
+- 证据链聚合：`src/capability_runtime/reporting/node_report.py`
 
 ## 示例与文档
 
