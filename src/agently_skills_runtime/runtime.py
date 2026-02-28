@@ -71,10 +71,14 @@ class Runtime:
         self._last_node_report: Optional[NodeReport] = None
         self._sdk_state: Optional[_SdkInitState] = None
         self._last_lock = asyncio.Lock()
+        # UI events taps：用于把 SDK AgentEvent（含 workflow 内 nested agent 事件）
+        # 旁路投影为 RuntimeEvent v1，不影响 NodeReport/WAL 真相源。
+        self._agent_event_taps: List[Any] = []
         from .adapters.agent_adapter import AgentAdapter
 
         self._agent_adapter = AgentAdapter(runtime=self)
-        self._workflow_engine = TriggerFlowWorkflowEngine()
+        injected_engine = getattr(config, "workflow_engine", None)
+        self._workflow_engine = injected_engine if injected_engine is not None else TriggerFlowWorkflowEngine()
 
         if config.mode in ("bridge", "sdk_native"):
             self._sdk_state = self._init_sdk_state(mode=config.mode)
@@ -286,6 +290,188 @@ class Runtime:
                 async with self._last_lock:
                     self._last_node_report = item.node_report
             yield item
+
+    def _register_agent_event_tap(self, tap: Any) -> None:
+        """
+        注册一个 AgentEvent 旁路 tap（内部使用）。
+
+        参数：
+        - tap：可调用对象，签名为 `(ev: AgentEvent, ctx: Dict[str, Any]) -> None`
+        """
+
+        self._agent_event_taps.append(tap)
+
+    def _unregister_agent_event_tap(self, tap: Any) -> None:
+        """反注册 AgentEvent tap（内部使用）。"""
+
+        self._agent_event_taps = [t for t in self._agent_event_taps if t is not tap]
+
+    def _emit_agent_event_taps(self, *, ev: AgentEvent, context: ExecutionContext, capability_id: str) -> None:
+        """
+        将 SDK AgentEvent 分发给内部 taps（不影响对外事件流）。
+
+        说明：
+        - 只传递最小上下文信息（避免泄露 context.bag 的业务 payload）。
+        """
+
+        if not self._agent_event_taps:
+            return
+
+        bag = dict(getattr(context, "bag", {}) or {})
+        tap_ctx: Dict[str, Any] = {"run_id": context.run_id, "capability_id": capability_id}
+        for k, out_key in (
+            ("__wf_workflow_id", "workflow_id"),
+            ("__wf_step_id", "step_id"),
+            ("__wf_branch_id", "branch_id"),
+        ):
+            v = bag.get(k)
+            if isinstance(v, str) and v.strip():
+                tap_ctx[out_key] = v.strip()
+
+        for t in list(self._agent_event_taps):
+            try:
+                t(ev, tap_ctx)
+            except Exception:
+                # 旁路 tap 不得影响主流程（fail-open）
+                pass
+
+    async def run_ui_events(
+        self,
+        capability_id: str,
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+        level: Any = None,
+        heartbeat_interval_s: float = 15.0,
+    ) -> AsyncIterator[Any]:
+        """
+        UI events 流式执行：输出 RuntimeEvent v1（Envelope/path/levels/types）。
+
+        说明：
+        - 不改变现有 `run_stream()` 对外行为；这是新增的投影层输出；
+        - UI events 不是审计真相源；证据链仍以 NodeReport/WAL 为准；
+        - `rid` 默认等于 `seq` 的字符串，支持 after_id exclusive 的最小实现。
+
+        参数：
+        - capability_id：目标能力 ID
+        - input：输入参数
+        - context：可选执行上下文；不传则创建（以便提前固定 run_id）
+        - level：`StreamLevel`（lite/ui/raw），默认 ui
+        - heartbeat_interval_s：心跳间隔（秒）
+
+        返回：
+        - AsyncIterator[RuntimeEvent]
+        """
+
+        from .ui_events.projector import RuntimeUIEventProjector, _AgentCtx
+        from .ui_events.v1 import StreamLevel
+
+        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth, bag={})
+        lv = level if isinstance(level, StreamLevel) else StreamLevel.UI
+        projector = RuntimeUIEventProjector(run_id=ctx.run_id, level=lv)
+
+        q: asyncio.Queue = asyncio.Queue()
+        done = False
+
+        def _tap(agent_ev: AgentEvent, tap_ctx: Dict[str, Any]) -> None:
+            q.put_nowait(("agent_event", agent_ev, tap_ctx))
+
+        self._register_agent_event_tap(_tap)
+
+        async def _runner() -> None:
+            try:
+                async for item in self.run_stream(capability_id, input=input, context=ctx):
+                    if isinstance(item, dict):
+                        await q.put(("workflow_event", item))
+                    elif isinstance(item, CapabilityResult):
+                        await q.put(("terminal", item))
+                        return
+                    else:
+                        # AgentEvent：由 tap 旁路处理，避免重复投影
+                        continue
+            except Exception as exc:
+                await q.put(("error", exc))
+
+        task = asyncio.create_task(_runner())
+        try:
+            for ev in projector.start():
+                yield ev
+
+            while not done:
+                try:
+                    item = await asyncio.wait_for(q.get(), timeout=float(heartbeat_interval_s))
+                except asyncio.TimeoutError:
+                    if lv != StreamLevel.LITE:
+                        yield projector.heartbeat()
+                    continue
+
+                kind = item[0]
+                if kind == "agent_event":
+                    agent_ev, tap_ctx = item[1], item[2]
+                    agent_ctx = _AgentCtx(
+                        run_id=str(tap_ctx.get("run_id") or ctx.run_id),
+                        capability_id=str(tap_ctx.get("capability_id") or ""),
+                        workflow_id=str(tap_ctx.get("workflow_id")) if isinstance(tap_ctx.get("workflow_id"), str) else None,
+                        step_id=str(tap_ctx.get("step_id")) if isinstance(tap_ctx.get("step_id"), str) else None,
+                        branch_id=str(tap_ctx.get("branch_id")) if isinstance(tap_ctx.get("branch_id"), str) else None,
+                    )
+                    for out_ev in projector.on_agent_event(agent_ev, ctx=agent_ctx):
+                        yield out_ev
+                elif kind == "workflow_event":
+                    wf_ev = item[1]
+                    for out_ev in projector.on_workflow_event(wf_ev):
+                        yield out_ev
+                elif kind == "terminal":
+                    terminal = item[1]
+                    for out_ev in projector.on_terminal(terminal):
+                        yield out_ev
+                    done = True
+                elif kind == "error":
+                    exc = item[1]
+                    yield projector.error(kind="runner_error", message=str(exc))
+                    for out_ev in projector.on_terminal(CapabilityResult(status=CapabilityStatus.FAILED, error=str(exc))):
+                        yield out_ev
+                    done = True
+
+            await task
+        finally:
+            self._unregister_agent_event_tap(_tap)
+
+    def start_ui_events_session(
+        self,
+        capability_id: str,
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+        level: Any = None,
+        store_max_events: int = 10_000,
+        heartbeat_interval_s: float = 15.0,
+    ) -> Any:
+        """
+        创建一次 run 的 UI events 会话（支持多订阅者 + after_id 续传）。
+
+        说明：
+        - 会话负责“执行 + 投影 + 存储”，订阅侧可随时重连；
+        - 不绑定任何传输协议；JSONL/SSE framing 由 `ui_events.transport` 提供；
+        - UI events 不是审计真相源；证据链仍以 NodeReport/WAL 为准。
+        """
+
+        from .ui_events.session import RuntimeUIEventsSession
+        from .ui_events.store import InMemoryRuntimeEventStore
+        from .ui_events.v1 import StreamLevel
+
+        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth, bag={})
+        lv = level if isinstance(level, StreamLevel) else StreamLevel.UI
+        store = InMemoryRuntimeEventStore(max_events=int(store_max_events))
+        return RuntimeUIEventsSession(
+            runtime=self,
+            capability_id=capability_id,
+            input=input or {},
+            context=ctx,
+            level=lv,
+            store=store,
+            heartbeat_interval_s=float(heartbeat_interval_s),
+        )
 
     def _map_node_status(self, report: NodeReport) -> CapabilityStatus:
         """

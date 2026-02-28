@@ -1,0 +1,395 @@
+from __future__ import annotations
+
+"""
+Runtime UI Events：把底层事件投影为 RuntimeEvent v1（ui-friendly）。
+
+输入（事实源）：
+- skills_runtime.AgentEvent（tool/approval/run_* 等）
+- WorkflowStreamEvent（workflow.* 轻量事件 dict）
+- CapabilityResult（终态）
+
+输出：
+- RuntimeEvent v1（Envelope + path + level）
+
+约束：
+- 不把 UI events 当作审计真相源；证据链指针只引用 WAL/NodeReport/tool evidence。
+- 最小披露：不输出 tool args/outputs 明文，只输出摘要（top_keys/bytes/sha256）。
+"""
+
+import hashlib
+import json
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from skills_runtime.core.contracts import AgentEvent
+
+from ..protocol.capability import CapabilityResult, CapabilityStatus
+from ..types import NodeReport
+from .v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
+
+
+_SCHEMA = "agently-skills-runtime.runtime_event.v1"
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _sha256_text(s: str) -> str:
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _summarize_dict(obj: Any) -> Optional[Dict[str, Any]]:
+    """
+    将 dict 归一为最小披露摘要。
+
+    返回：
+    - None：无法摘要（非 dict）
+    - dict：包含 top_keys/bytes/sha256（不含明文 values）
+    """
+
+    if not isinstance(obj, dict):
+        return None
+    try:
+        raw = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    except Exception:
+        raw = "{}"
+    return {
+        "top_keys": sorted([str(k) for k in obj.keys()])[:50],
+        "bytes": len(raw.encode("utf-8")),
+        "sha256": _sha256_text(raw),
+    }
+
+
+def _normalize_terminal_status(status: CapabilityStatus) -> str:
+    if status == CapabilityStatus.SUCCESS:
+        return "completed"
+    if status == CapabilityStatus.FAILED:
+        return "failed"
+    if status == CapabilityStatus.CANCELLED:
+        return "cancelled"
+    return "pending"
+
+
+@dataclass
+class _AgentCtx:
+    run_id: str
+    capability_id: str
+    workflow_id: Optional[str] = None
+    step_id: Optional[str] = None
+    branch_id: Optional[str] = None
+
+
+class RuntimeUIEventProjector:
+    """
+    投影器（per-run）。
+
+    说明：
+    - `seq`/`rid` 在投影器内生成：单 run 单调递增；
+    - `rid` 默认等于 `seq` 的字符串（满足断线续传 exclusive 语义的最小实现）。
+    """
+
+    def __init__(self, *, run_id: str, level: StreamLevel) -> None:
+        self._run_id = run_id
+        self._level = level
+        self._seq = 0
+        self._skill_mention_to_locator: Dict[str, str] = {}
+        self._skill_name_to_locator: Dict[str, str] = {}
+
+    def _next_seq(self) -> int:
+        self._seq += 1
+        return self._seq
+
+    def _base_path(self, *, ctx: Optional[_AgentCtx] = None) -> List[PathSegment]:
+        segs: List[PathSegment] = [PathSegment(kind="run", id=self._run_id)]
+        if ctx is None:
+            return segs
+        if ctx.workflow_id:
+            segs.append(PathSegment(kind="workflow", id=ctx.workflow_id))
+        if ctx.step_id:
+            segs.append(PathSegment(kind="step", id=ctx.step_id))
+        if ctx.branch_id:
+            segs.append(PathSegment(kind="branch", id=ctx.branch_id))
+        if ctx.capability_id:
+            segs.append(PathSegment(kind="agent", id=ctx.capability_id))
+        return segs
+
+    def _emit(
+        self,
+        *,
+        type: str,
+        path: List[PathSegment],
+        data: Dict[str, Any],
+        evidence: Optional[Evidence] = None,
+    ) -> RuntimeEvent:
+        seq = self._next_seq()
+        return RuntimeEvent(
+            schema=_SCHEMA,
+            type=type,
+            run_id=self._run_id,
+            seq=seq,
+            ts_ms=_now_ms(),
+            level=self._level,
+            path=path,
+            data=dict(data or {}),
+            rid=str(seq),
+            evidence=evidence,
+        )
+
+    def start(self) -> List[RuntimeEvent]:
+        return [self._emit(type="run.status", path=self._base_path(), data={"status": "running"})]
+
+    def heartbeat(self) -> RuntimeEvent:
+        return self._emit(type="heartbeat", path=self._base_path(), data={})
+
+    def error(self, *, kind: str, message: str) -> RuntimeEvent:
+        return self._emit(type="error", path=self._base_path(), data={"kind": str(kind), "message": str(message)})
+
+    def on_workflow_event(self, ev: Dict[str, Any]) -> List[RuntimeEvent]:
+        typ = str(ev.get("type") or "")
+        run_id = str(ev.get("run_id") or "")
+        if run_id and run_id != self._run_id:
+            return []
+
+        workflow_id = str(ev.get("workflow_id") or "").strip() or None
+        step_id = str(ev.get("step_id") or "").strip() or None
+
+        out: List[RuntimeEvent] = []
+        if typ == "workflow.started" and workflow_id:
+            out.append(
+                self._emit(
+                    type="node.started",
+                    path=[PathSegment(kind="run", id=self._run_id), PathSegment(kind="workflow", id=workflow_id)],
+                    data={"node_kind": "workflow"},
+                )
+            )
+            if self._level != StreamLevel.LITE:
+                out.append(
+                    self._emit(
+                        type="node.phase",
+                        path=[PathSegment(kind="run", id=self._run_id), PathSegment(kind="workflow", id=workflow_id)],
+                        data={"phase": "RUNNING"},
+                    )
+                )
+            return out
+
+        if typ == "workflow.step.started" and workflow_id and step_id:
+            path = [
+                PathSegment(kind="run", id=self._run_id),
+                PathSegment(kind="workflow", id=workflow_id),
+                PathSegment(kind="step", id=step_id),
+            ]
+            out.append(self._emit(type="node.started", path=path, data={"node_kind": "step"}))
+            if self._level != StreamLevel.LITE:
+                out.append(self._emit(type="node.phase", path=path, data={"phase": "RUNNING"}))
+            return out
+
+        if typ == "workflow.step.finished" and workflow_id and step_id:
+            status_raw = str(ev.get("status") or "").strip()
+            status = status_raw if status_raw in {"success", "failed", "pending", "cancelled"} else "pending"
+            path = [
+                PathSegment(kind="run", id=self._run_id),
+                PathSegment(kind="workflow", id=workflow_id),
+                PathSegment(kind="step", id=step_id),
+            ]
+            if self._level != StreamLevel.LITE:
+                out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
+            out.append(self._emit(type="node.finished", path=path, data={"status": status}))
+            return out
+
+        if typ == "workflow.finished" and workflow_id:
+            status_raw = str(ev.get("status") or "").strip()
+            status = status_raw if status_raw in {"success", "failed", "pending", "cancelled"} else "pending"
+            path = [PathSegment(kind="run", id=self._run_id), PathSegment(kind="workflow", id=workflow_id)]
+            if self._level != StreamLevel.LITE:
+                out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
+            out.append(self._emit(type="node.finished", path=path, data={"status": status}))
+            return out
+
+        return []
+
+    def on_agent_event(self, ev: AgentEvent, *, ctx: _AgentCtx) -> List[RuntimeEvent]:
+        if self._level == StreamLevel.LITE:
+            return []
+        if ev.run_id != self._run_id:
+            return []
+
+        out: List[RuntimeEvent] = []
+        base_path = self._base_path(ctx=ctx)
+
+        if self._level == StreamLevel.RAW:
+            out.append(
+                self._emit(
+                    type="raw.agent_event",
+                    path=base_path,
+                    data={
+                        "agent_event_type": str(ev.type),
+                        "payload_summary": _summarize_dict(ev.payload) or {},
+                    },
+                )
+            )
+
+        if ev.type == "skill_injected":
+            locator = ev.payload.get("skill_locator")
+            skill_name = ev.payload.get("skill_name")
+            mention_text = ev.payload.get("mention_text")
+            if isinstance(locator, str) and locator.strip():
+                if isinstance(mention_text, str) and mention_text.strip():
+                    self._skill_mention_to_locator[mention_text.strip()] = locator.strip()
+                if isinstance(skill_name, str) and skill_name.strip():
+                    self._skill_name_to_locator[skill_name.strip()] = locator.strip()
+            return out
+
+        if ev.type == "run_started":
+            out.append(self._emit(type="node.started", path=base_path, data={"node_kind": "agent"}))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "THINKING"}))
+            return out
+
+        if ev.type in ("run_completed", "run_failed", "run_cancelled"):
+            if ev.type == "run_completed":
+                status = "success"
+                terminal_phase = "DONE"
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": terminal_phase}))
+                out.append(self._emit(type="node.finished", path=base_path, data={"status": status}))
+                return out
+
+            if ev.type == "run_failed":
+                status = "failed"
+                terminal_phase = "DONE"
+                data: Dict[str, Any] = {"status": status}
+                error_kind = ev.payload.get("error_kind")
+                if isinstance(error_kind, str) and error_kind.strip():
+                    data["error_kind"] = error_kind.strip()
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": terminal_phase}))
+                out.append(self._emit(type="node.finished", path=base_path, data=data))
+                return out
+
+            # run_cancelled：在本仓多数语义用于“中断等待”（例如审批挂起），UI 层用 pending 表达更稳妥。
+            status = "pending"
+            terminal_phase = "DONE"
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": terminal_phase}))
+            out.append(self._emit(type="node.finished", path=base_path, data={"status": status}))
+            return out
+
+        if ev.type == "tool_call_requested":
+            call_id = str(ev.payload.get("call_id") or "").strip()
+            tool = str(ev.payload.get("name") or "").strip()
+            args_summary = _summarize_dict(ev.payload.get("args")) or _summarize_dict(ev.payload.get("arguments"))
+            path = list(base_path)
+            if tool in {"skill_exec", "skill_ref_read"}:
+                args = ev.payload.get("args") if isinstance(ev.payload.get("args"), dict) else None
+                if args is None:
+                    args = ev.payload.get("arguments") if isinstance(ev.payload.get("arguments"), dict) else None
+
+                locator = None
+                if isinstance(ev.payload.get("skill_locator"), str) and str(ev.payload.get("skill_locator")).strip():
+                    locator = str(ev.payload.get("skill_locator")).strip()
+                if locator is None and isinstance(args, dict):
+                    if isinstance(args.get("skill_locator"), str) and str(args.get("skill_locator")).strip():
+                        locator = str(args.get("skill_locator")).strip()
+                if locator is None and isinstance(args, dict):
+                    mention = args.get("mention_text") or args.get("skill_mention")
+                    if isinstance(mention, str) and mention.strip():
+                        locator = self._skill_mention_to_locator.get(mention.strip())
+                if locator is None and isinstance(args, dict):
+                    sn = args.get("skill_name")
+                    if isinstance(sn, str) and sn.strip():
+                        locator = self._skill_name_to_locator.get(sn.strip())
+                if isinstance(locator, str) and locator.strip():
+                    path.append(PathSegment(kind="skill", id=locator.strip()))
+            if tool:
+                path.append(PathSegment(kind="tool", id=tool))
+            if call_id:
+                path.append(PathSegment(kind="call", id=call_id))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
+            data: Dict[str, Any] = {"tool": tool, "call_id": call_id}
+            if args_summary is not None:
+                data["args_summary"] = args_summary
+            out.append(self._emit(type="tool.requested", path=path, data=data, evidence=Evidence(call_id=call_id)))
+            return out
+
+        if ev.type == "approval_requested":
+            tool = str(ev.payload.get("tool") or "").strip()
+            call_id = str(ev.payload.get("call_id") or "").strip()
+            approval_key = ev.payload.get("approval_key")
+            path = list(base_path)
+            if tool:
+                path.append(PathSegment(kind="tool", id=tool))
+            if call_id:
+                path.append(PathSegment(kind="call", id=call_id))
+            path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "WAITING_APPROVAL"}))
+            data: Dict[str, Any] = {"tool": tool}
+            if call_id:
+                data["call_id"] = call_id
+            if approval_key is not None:
+                data["approval_key"] = str(approval_key)
+            out.append(self._emit(type="approval.requested", path=path, data=data, evidence=Evidence(call_id=call_id)))
+            return out
+
+        if ev.type == "approval_decided":
+            tool = str(ev.payload.get("tool") or "").strip()
+            call_id = str(ev.payload.get("call_id") or "").strip()
+            decision = str(ev.payload.get("decision") or "").strip()
+            reason = ev.payload.get("reason")
+            approval_key = ev.payload.get("approval_key")
+            path = list(base_path)
+            if tool:
+                path.append(PathSegment(kind="tool", id=tool))
+            if call_id:
+                path.append(PathSegment(kind="call", id=call_id))
+            path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
+            data: Dict[str, Any] = {"tool": tool, "decision": decision or "unknown"}
+            if call_id:
+                data["call_id"] = call_id
+            if reason is not None:
+                data["reason"] = str(reason)
+            out.append(self._emit(type="approval.decided", path=path, data=data, evidence=Evidence(call_id=call_id)))
+            return out
+
+        if ev.type == "tool_call_finished":
+            call_id = str(ev.payload.get("call_id") or "").strip()
+            tool = str(ev.payload.get("tool") or "").strip()
+            result = ev.payload.get("result") if isinstance(ev.payload.get("result"), dict) else {}
+            ok = result.get("ok") if isinstance(result.get("ok"), bool) else None
+            error_kind = result.get("error_kind") if isinstance(result.get("error_kind"), str) else None
+            result_summary = _summarize_dict(result.get("data"))
+            path = list(base_path)
+            if tool:
+                path.append(PathSegment(kind="tool", id=tool))
+            if call_id:
+                path.append(PathSegment(kind="call", id=call_id))
+            out.append(self._emit(type="node.phase", path=base_path, data={"phase": "THINKING"}))
+            data: Dict[str, Any] = {"tool": tool, "call_id": call_id, "ok": bool(ok)}
+            if error_kind:
+                data["error_kind"] = error_kind
+            if result_summary is not None:
+                data["result_summary"] = result_summary
+            out.append(self._emit(type="tool.finished", path=path, data=data, evidence=Evidence(call_id=call_id)))
+            return out
+
+        return []
+
+    def on_terminal(self, result: CapabilityResult) -> List[RuntimeEvent]:
+        terminal_status = _normalize_terminal_status(result.status)
+        evidence = self._evidence_from_node_report(result.node_report)
+        return [
+            self._emit(
+                type="run.status",
+                path=self._base_path(),
+                data={"status": terminal_status},
+                evidence=evidence,
+            )
+        ]
+
+    def _evidence_from_node_report(self, report: Optional[NodeReport]) -> Optional[Evidence]:
+        if report is None:
+            return None
+        ev = Evidence(node_report_schema=getattr(report, "schema_id", None))
+        if isinstance(report.events_path, str) and report.events_path:
+            ev.events_path = report.events_path
+        if report.artifacts and isinstance(report.artifacts[0], str) and report.artifacts[0].strip():
+            ev.artifact_path = report.artifacts[0].strip()
+        return ev

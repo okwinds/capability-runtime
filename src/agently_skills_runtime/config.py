@@ -49,6 +49,7 @@ class RuntimeConfig:
     参数分组：
     - 执行模式：mode
     - 桥接执行：workspace_root / sdk_config_paths / agently_agent
+    - Workflow：workflow_engine（可注入）
     - SDK 注入：approval_provider / human_io / cancel_checker / wal_backend / env_vars
     - Skills 配置：skills_config / in_memory_skills
     - 自定义工具：custom_tools
@@ -64,6 +65,15 @@ class RuntimeConfig:
     workspace_root: Optional[Path] = None
     sdk_config_paths: List[Path] = field(default_factory=list)
     agently_agent: Optional[Any] = None
+
+    # === Workflow 引擎注入（可选）===
+    #
+    # 说明：
+    # - 默认使用 TriggerFlowWorkflowEngine（Agently TriggerFlow）；
+    # - 当上游 workflow engine 需要替换/隔离时，可注入兼容接口的实现：
+    #   - execute(*, spec, input, context, runtime) -> CapabilityResult
+    #   - execute_stream(*, spec, input, context, runtime) -> AsyncIterator[WorkflowStreamItem]
+    workflow_engine: Optional[Any] = None
 
     # === SDK 注入 ===
     approval_provider: Optional[ApprovalProvider] = None

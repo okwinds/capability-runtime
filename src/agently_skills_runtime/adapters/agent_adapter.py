@@ -134,6 +134,11 @@ class AgentAdapter:
         try:
             async for ev in agent.run_stream_async(task, run_id=context.run_id, initial_history=initial_history):
                 events.append(ev)
+                # 内部旁路：UI events v1 投影（不改变对外 AgentEvent 语义）
+                try:
+                    self._runtime._emit_agent_event_taps(ev=ev, context=context, capability_id=spec.base.id)
+                except Exception:
+                    pass
                 if getattr(self._runtime.config, "on_event", None) is not None:
                     try:
                         self._runtime._call_callback(

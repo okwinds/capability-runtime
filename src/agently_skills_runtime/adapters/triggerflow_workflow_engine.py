@@ -20,6 +20,29 @@ from ..protocol.workflow import (
 from .workflow_engine import WorkflowStreamEvent, WorkflowStreamItem
 
 
+_WF_WORKFLOW_ID_KEY = "__wf_workflow_id"
+_WF_STEP_ID_KEY = "__wf_step_id"
+_WF_BRANCH_ID_KEY = "__wf_branch_id"
+
+_MISSING = object()
+
+
+def _set_ctx_hint(context: ExecutionContext, *, key: str, value: str | None) -> object:
+    prev = context.bag.get(key, _MISSING)
+    if value is None:
+        context.bag.pop(key, None)
+    else:
+        context.bag[key] = value
+    return prev
+
+
+def _restore_ctx_hint(context: ExecutionContext, *, key: str, prev: object) -> None:
+    if prev is _MISSING:
+        context.bag.pop(key, None)
+    else:
+        context.bag[key] = prev
+
+
 def _to_step_result_dict(result: CapabilityResult) -> Dict[str, Any]:
     """把 CapabilityResult 归一为 workflow step_results 的最小可编排结构。"""
 
@@ -76,6 +99,7 @@ class TriggerFlowWorkflowEngine:
         """
 
         context.bag.update(input)
+        prev_wf = _set_ctx_hint(context, key=_WF_WORKFLOW_ID_KEY, value=str(spec.base.id))
         event_queue: asyncio.Queue[WorkflowStreamEvent | object] = asyncio.Queue()
         terminal_holder: Dict[str, CapabilityResult] = {}
         queue_stop = object()
@@ -126,14 +150,21 @@ class TriggerFlowWorkflowEngine:
                     }
                 )
 
-                result = await self._execute_step(cast(Any, bound_step), context=context, runtime=runtime)
+                step_id = getattr(bound_step, "id", f"step_{bound_index}")
+                prev_step = _set_ctx_hint(context, key=_WF_STEP_ID_KEY, value=str(step_id))
+                prev_branch = _set_ctx_hint(context, key=_WF_BRANCH_ID_KEY, value=None)
+                try:
+                    result = await self._execute_step(cast(Any, bound_step), context=context, runtime=runtime)
+                finally:
+                    _restore_ctx_hint(context, key=_WF_BRANCH_ID_KEY, prev=prev_branch)
+                    _restore_ctx_hint(context, key=_WF_STEP_ID_KEY, prev=prev_step)
 
                 await emit(
                     {
                         "type": "workflow.step.finished",
                         "run_id": context.run_id,
                         "workflow_id": spec.base.id,
-                        "step_id": getattr(bound_step, "id", f"step_{bound_index}"),
+                        "step_id": step_id,
                         "status": getattr(result.status, "value", str(result.status)),
                         "error": result.error,
                     }
@@ -198,6 +229,7 @@ class TriggerFlowWorkflowEngine:
                 yield cast(WorkflowStreamEvent, item)
         finally:
             await flow_task
+            _restore_ctx_hint(context, key=_WF_WORKFLOW_ID_KEY, prev=prev_wf)
 
         terminal = terminal_holder.get("result")
         if terminal is None:
@@ -275,6 +307,7 @@ class TriggerFlowWorkflowEngine:
                 step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),
             )
+            _set_ctx_hint(item_context, key=_WF_BRANCH_ID_KEY, value=f"{step.id}:{_idx}")
             step_input = self._resolve_input_mappings(step.item_input_mappings, item_context)
             if not step_input:
                 step_input = item if isinstance(item, dict) else {"item": item}
@@ -321,6 +354,8 @@ class TriggerFlowWorkflowEngine:
             )
             for _ in step.branches
         ]
+        for i, bc in enumerate(branch_contexts):
+            _set_ctx_hint(bc, key=_WF_BRANCH_ID_KEY, value=f"{step.id}:{i}")
         tasks = [
             self._execute_step(branch, context=branch_ctx, runtime=runtime)
             for branch, branch_ctx in zip(step.branches, branch_contexts)
@@ -422,7 +457,11 @@ class TriggerFlowWorkflowEngine:
                 ),
             )
 
-        result = await self._execute_step(branch, context=context, runtime=runtime)
+        prev_branch = _set_ctx_hint(context, key=_WF_BRANCH_ID_KEY, value=f"{step.id}:{condition_key or 'default'}")
+        try:
+            result = await self._execute_step(branch, context=context, runtime=runtime)
+        finally:
+            _restore_ctx_hint(context, key=_WF_BRANCH_ID_KEY, prev=prev_branch)
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
         return result
