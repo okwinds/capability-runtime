@@ -543,6 +543,70 @@ async def test_workflow_run_stream_emits_lightweight_events() -> None:
 
 
 @pytest.mark.asyncio
+async def test_workflow_run_stream_cancellation_stops_at_step_boundary() -> None:
+    """
+    规格护栏（execution-cancellation delta spec）：
+    - run_stream 期间通过 context.cancel_token 请求取消；
+    - 当前 step 允许完成（协作式取消，不强制中断）；
+    - 下一步开始前检测到已取消：终态为 CANCELLED，且后续步骤不得执行。
+    """
+
+    started = asyncio.Event()
+    proceed = asyncio.Event()
+    called_b = False
+
+    async def handler(spec: AgentSpec, _input: Dict[str, Any], _ctx: ExecutionContext):
+        nonlocal called_b
+        if spec.base.id == "A":
+            started.set()
+            await proceed.wait()
+            return {"ok": True, "agent": "A"}
+        if spec.base.id == "B":
+            called_b = True
+            raise AssertionError("step B should not be executed after cancellation")
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-CANCEL-STREAM", kind=CapabilityKind.WORKFLOW, name="cancel-stream"),
+        steps=[
+            Step(id="s1", capability=CapabilityRef(id="A")),
+            Step(id="s2", capability=CapabilityRef(id="B")),
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    token = CancellationToken()
+    ctx = ExecutionContext(run_id="r1", cancel_token=token)
+
+    async def _consume():
+        events: list[dict[str, Any]] = []
+        terminal: CapabilityResult | None = None
+        async for item in rt.run_stream("WF-CANCEL-STREAM", context=ctx):
+            if isinstance(item, CapabilityResult):
+                terminal = item
+            else:
+                assert isinstance(item, dict)
+                events.append(item)
+        return events, terminal
+
+    task = asyncio.create_task(_consume())
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    token.cancel()
+    proceed.set()
+
+    events, terminal = await asyncio.wait_for(task, timeout=2.0)
+    assert terminal is not None
+    assert called_b is False
+    assert terminal.status == CapabilityStatus.CANCELLED
+    assert terminal.error == "execution cancelled"
+
+    started_steps = [e.get("step_id") for e in events if e.get("type") == "workflow.step.started"]
+    assert "s2" not in started_steps
+
+
+@pytest.mark.asyncio
 async def test_workflow_run_stream_pending_propagates_and_stops_next_steps() -> None:
     """
     验收护栏：

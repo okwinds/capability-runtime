@@ -33,13 +33,15 @@ def _env_exists(app_name: str) -> bool:
 
     说明：
     - 真实模型（real mode）回归天然具备外部不确定性（网络波动、provider 行为变化、模型漂移等）；
-    - 因此默认不在 `pytest -q` 中自动触发，需显式设置环境变量开关：
-      `RUN_REAL_INTEGRATION=1`。
+    - 因此默认不在 `pytest -q` 中自动触发，需显式设置门禁开关：
+      - `CAPRT_TEST_E2E_BRIDGE=1`（推荐，与示例/Bridge E2E 同口径）
+      - 或兼容旧开关 `RUN_REAL_INTEGRATION=1`
     """
 
-    flag = str(os.environ.get("RUN_REAL_INTEGRATION", "")).strip().lower()
-    if flag not in {"1", "true", "yes"}:
-        return False
+    if os.environ.get("CAPRT_TEST_E2E_BRIDGE") != "1":
+        flag = str(os.environ.get("RUN_REAL_INTEGRATION", "")).strip().lower()
+        if flag not in {"1", "true", "yes"}:
+            return False
     return (_REPO_ROOT / "examples" / "apps" / app_name / ".env").exists()
 
 

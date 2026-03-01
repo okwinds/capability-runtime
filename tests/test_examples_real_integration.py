@@ -12,6 +12,7 @@ from __future__ import annotations
 """
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -32,8 +33,16 @@ pytestmark = pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptio
 
 
 def _env_exists(app_name: str) -> bool:
-    """检查 examples/apps/<app_name>/.env 是否存在（集成测试开关）。"""
+    """
+    检查 examples/apps/<app_name>/.env 是否存在（集成测试开关）。
 
+    说明：
+    - 真实模型（real mode）回归天然具备外部不确定性（费用/外网/敏感信息风险等）；
+    - 因此默认 fail-closed：只有显式开启门禁时才允许运行。
+    """
+
+    if os.environ.get("CAPRT_TEST_E2E_BRIDGE") != "1":
+        return False
     return (_REPO_ROOT / "examples" / "apps" / app_name / ".env").exists()
 
 

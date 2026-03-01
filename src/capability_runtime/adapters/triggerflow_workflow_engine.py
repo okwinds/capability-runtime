@@ -136,18 +136,29 @@ class TriggerFlowWorkflowEngine:
                     # 终态已确定，后续 chunk 跳过执行（保持 stop-on-non-success 语义）。
                     return payload
 
+                step_id = getattr(bound_step, "id", f"step_{bound_index}")
+                step_context = context.with_bag_overlay(**{_WF_STEP_ID_KEY: str(step_id)})
+
+                # 取消语义（协作式）：
+                # - 当前 step 执行中取消：不强制中断，由 _execute_step 内部与下一个 step 边界决定；
+                # - 下一步开始前已取消：不得发出 step.started（避免误导为“已开始执行”）。
+                if step_context.cancel_token is not None and step_context.cancel_token.is_cancelled:
+                    payload["__terminal_result__"] = CapabilityResult(
+                        status=CapabilityStatus.CANCELLED,
+                        error="execution cancelled",
+                    )
+                    return payload
+
                 await emit(
                     {
                         "type": "workflow.step.started",
                         "run_id": context.run_id,
                         "workflow_id": spec.base.id,
                         "workflow_instance_id": workflow_instance_id,
-                        "step_id": getattr(bound_step, "id", f"step_{bound_index}"),
+                        "step_id": step_id,
                     }
                 )
 
-                step_id = getattr(bound_step, "id", f"step_{bound_index}")
-                step_context = context.with_bag_overlay(**{_WF_STEP_ID_KEY: str(step_id)})
                 result = await self._execute_step(cast(Any, bound_step), context=step_context, services=services)
                 # 顶层 LoopStep.collect_as 需要把结果写回 workflow 级 bag，供后续步骤使用。
                 if isinstance(bound_step, LoopStep) and result.status == CapabilityStatus.SUCCESS and bound_step.collect_as:

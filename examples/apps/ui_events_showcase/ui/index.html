@@ -133,6 +133,9 @@
         <div id="panelEvidence" class="tabpanel is-hidden" role="tabpanel" aria-label="Evidence">
           <div class="hint">
             证据指针（locator）：<span class="mono">events_path</span>（exported） / <span class="mono">wal_locator</span>（upstream；语义对齐）
+            <div class="small">
+              提示：UI events 是<strong>观察流</strong>（best-effort），<strong>非审计账本</strong>；需要审计/回放请复制 locator 追溯 WAL/NodeReport。
+            </div>
           </div>
           <div class="card">
             <div class="kv">
