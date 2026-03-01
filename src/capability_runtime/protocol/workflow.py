@@ -36,6 +36,7 @@ class Step:
     id: str
     capability: CapabilityRef
     input_mappings: List[InputMapping] = field(default_factory=list)
+    timeout_s: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class LoopStep:
     max_iterations: int = 100
     collect_as: str = "results"
     fail_strategy: str = "abort"
+    timeout_s: Optional[float] = None
 
 
 @dataclass(frozen=True)

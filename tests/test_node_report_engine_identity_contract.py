@@ -62,7 +62,7 @@ async def test_engine_name_is_fixed_when_preflight_fail_closed(monkeypatch: pyte
     """
 
     rt = _mk_runtime(monkeypatch, preflight_mode="error")
-    monkeypatch.setattr(rt, "_preflight", lambda: [FrameworkIssue(code="SKILL_PREFLIGHT_FAILED", message="x", details={})])
+    monkeypatch.setattr(rt, "preflight", lambda: [FrameworkIssue(code="SKILL_PREFLIGHT_FAILED", message="x", details={})])
 
     out = await rt.run("A", context=ExecutionContext(run_id="rid-preflight"))
     assert out.node_report is not None

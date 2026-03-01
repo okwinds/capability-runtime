@@ -80,7 +80,25 @@ class NodeReportBuilder:
         """
 
         if not events:
-            raise ValueError("events must be non-empty")
+            return NodeReport(
+                status="failed",
+                reason="no_events",
+                completion_reason="no_events",
+                engine={
+                    "name": "skills-runtime-sdk-python",
+                    "module": "skills_runtime",
+                    "version": _get_skills_runtime_version()
+                    or _get_first_dist_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
+                },
+                bridge={"name": "capability-runtime", "version": _get_first_dist_version(["capability-runtime"])},
+                run_id="",
+                turn_id=None,
+                events_path=None,
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={"missing_events_path": True, "final_message": None},
+            )
 
         run_id = events[0].run_id
         turn_id = None
@@ -330,3 +348,61 @@ def build_node_report_from_events(events: Iterable[AgentEvent]) -> NodeReport:
 
     builder = NodeReportBuilder()
     return builder.build(events=list(events))
+
+
+def build_fail_closed_report(
+    *,
+    run_id: str,
+    status: str,
+    reason: Optional[str],
+    completion_reason: str,
+    meta: Dict[str, Any],
+) -> NodeReport:
+    """
+    构造不依赖事件流的最小 NodeReport（用于 fail-closed 分支）。
+
+    说明：
+    - preflight/output validator 等 gate 可能在启动引擎前返回；
+    - 仍需产出稳定的 engine/bridge 身份信息，供编排与审计使用；
+    - events_path 在此分支为 None（不得伪造）。
+    """
+
+    def _get_version(names: List[str]) -> Optional[str]:
+        # 证据链上优先使用 skills_runtime.__version__（比 dist-info 更可靠，尤其在 editable 安装场景）。
+        if any(n in ("skills-runtime-sdk", "skills-runtime-sdk-python") for n in names):
+            try:
+                import skills_runtime  # type: ignore
+
+                v = getattr(skills_runtime, "__version__", None)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+            except Exception:
+                pass
+        for n in names:
+            try:
+                return importlib.metadata.version(n)
+            except Exception:
+                continue
+        return None
+
+    return NodeReport(
+        status=status,  # type: ignore[arg-type]
+        reason=reason,
+        completion_reason=completion_reason,
+        engine={
+            "name": "skills-runtime-sdk-python",
+            "module": "skills_runtime",
+            "version": _get_version(["skills-runtime-sdk", "skills-runtime-sdk-python"]),
+        },
+        bridge={
+            "name": "capability-runtime",
+            "version": _get_version(["capability-runtime"]),
+        },
+        run_id=run_id,
+        turn_id=None,
+        events_path=None,
+        activated_skills=[],
+        tool_calls=[],
+        artifacts=[],
+        meta=dict(meta or {}),
+    )

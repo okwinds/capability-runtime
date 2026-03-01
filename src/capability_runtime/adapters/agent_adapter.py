@@ -10,7 +10,7 @@ AgentAdapter：AgentSpec 的执行适配器（统一 mock/bridge/sdk_native）�
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Dict, List, Optional, Union
+from typing import AsyncIterator, Dict, List, Optional, Union
 
 from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.core.errors import FrameworkIssue
@@ -19,6 +19,7 @@ from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
 from ..reporting.node_report import NodeReportBuilder
+from ..services import RuntimeServices
 
 
 class AgentAdapter:
@@ -29,7 +30,7 @@ class AgentAdapter:
     - runtime：统一 Runtime 实例（提供 config 与 bridge 执行的内部工厂方法）
     """
 
-    def __init__(self, *, runtime: Any) -> None:
+    def __init__(self, *, runtime: RuntimeServices) -> None:
         self._runtime = runtime
 
     async def execute_stream(
@@ -104,9 +105,9 @@ class AgentAdapter:
         # preflight gate（生产默认 fail-closed）
         issues: List[FrameworkIssue] = []
         if getattr(self._runtime.config, "preflight_mode", "error") != "off":
-            issues = self._runtime._preflight()
+            issues = self._runtime.preflight()
         if issues and getattr(self._runtime.config, "preflight_mode", "error") == "error":
-            report = self._runtime._build_fail_closed_report(
+            report = self._runtime.build_fail_closed_report(
                 run_id=context.run_id,
                 status="failed",
                 reason="skill_config_error",
@@ -115,7 +116,7 @@ class AgentAdapter:
                     "preflight_mode": "error",
                     "skill_issue": {
                         "code": "SKILL_PREFLIGHT_FAILED",
-                        "details": {"issues": [self._runtime._redact_issue(i) for i in issues]},
+                        "details": {"issues": [self._runtime.redact_issue(i) for i in issues]},
                     },
                 },
             )
@@ -124,15 +125,15 @@ class AgentAdapter:
                 error="Skills preflight failed",
                 report=report,
                 node_report=report,
-                metadata={"skill_issues": [self._runtime._redact_issue(i) for i in issues]},
+                metadata={"skill_issues": [self._runtime.redact_issue(i) for i in issues]},
             )
             return
 
         task = self._build_task(spec=spec, input=input)
-        agent = self._runtime._create_sdk_agent()
+        agent = self._runtime.create_sdk_agent()
 
         events: List[AgentEvent] = []
-        host_meta = self._runtime._get_host_meta(context=context)
+        host_meta = self._runtime.get_host_meta(context=context)
         initial_history = host_meta.get("initial_history") if isinstance(host_meta.get("initial_history"), list) else None
 
         try:
@@ -140,12 +141,12 @@ class AgentAdapter:
                 events.append(ev)
                 # 内部旁路：UI events v1 投影（不改变对外 AgentEvent 语义）
                 try:
-                    self._runtime._emit_agent_event_taps(ev=ev, context=context, capability_id=spec.base.id)
+                    self._runtime.emit_agent_event_taps(ev=ev, context=context, capability_id=spec.base.id)
                 except Exception:
                     pass
                 if getattr(self._runtime.config, "on_event", None) is not None:
                     try:
-                        self._runtime._call_callback(
+                        self._runtime.call_callback(
                             self._runtime.config.on_event,
                             ev,
                             {"run_id": context.run_id, "capability_id": spec.base.id},
@@ -154,7 +155,7 @@ class AgentAdapter:
                         pass
                 yield ev
         except Exception as exc:
-            report = self._runtime._build_fail_closed_report(
+            report = self._runtime.build_fail_closed_report(
                 run_id=context.run_id,
                 status="failed",
                 reason="engine_error",
@@ -167,7 +168,7 @@ class AgentAdapter:
         report = NodeReportBuilder().build(events=events)
         if issues and getattr(self._runtime.config, "preflight_mode", "error") == "warn":
             report.meta["preflight_mode"] = "warn"
-            report.meta["preflight_issues"] = [self._runtime._redact_issue(i) for i in issues]
+            report.meta["preflight_issues"] = [self._runtime.redact_issue(i) for i in issues]
 
         if initial_history is not None:
             report.meta["initial_history_injected"] = True
@@ -185,7 +186,7 @@ class AgentAdapter:
             if ev.type in ("run_failed", "run_cancelled"):
                 final_output = str(ev.payload.get("message") or "")
 
-        self._runtime._apply_output_validation(
+        self._runtime.apply_output_validation(
             final_output=final_output,
             report=report,
             context={"run_id": context.run_id, "capability_id": spec.base.id, "bag": dict(context.bag)},

@@ -10,6 +10,24 @@ class RecursionLimitError(Exception):
     """嵌套深度超限。"""
 
 
+class CancellationToken:
+    """协作取消 token（不强制打断正在运行的步骤）。"""
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    @property
+    def is_cancelled(self) -> bool:
+        """是否已被标记为取消。"""
+
+        return self._cancelled
+
+    def cancel(self) -> None:
+        """标记为取消。"""
+
+        self._cancelled = True
+
+
 @dataclass
 class ExecutionContext:
     """
@@ -31,11 +49,35 @@ class ExecutionContext:
     depth: int = 0
     max_depth: int = 10
     guards: Any = None
+    cancel_token: Optional[CancellationToken] = None
     bag: Dict[str, Any] = field(default_factory=dict)
     step_outputs: Dict[str, Any] = field(default_factory=dict)
     # step_id -> {status, output, error, report}（面向编排的执行证据；不落盘）
     step_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     call_chain: List[str] = field(default_factory=list)
+
+    def with_bag_overlay(self, **updates: Any) -> ExecutionContext:
+        """
+        返回带 bag 覆盖的新 ExecutionContext（不修改原对象）。
+
+        设计目标：
+        - 用于 workflow_id/step_id/branch_id 等"临时 hint"注入；
+        - 共享 step_outputs/step_results 引用，保证执行证据链可持续累积；
+        - 不改变公共 API；并保持 `bag` 仍可用于持久写入（例如 LoopStep.collect_as）。
+        """
+
+        return ExecutionContext(
+            run_id=self.run_id,
+            parent_context=self.parent_context,
+            depth=self.depth,
+            max_depth=self.max_depth,
+            guards=self.guards,
+            cancel_token=self.cancel_token,
+            bag={**self.bag, **updates},
+            step_outputs=self.step_outputs,
+            step_results=self.step_results,
+            call_chain=self.call_chain,
+        )
 
     def child(self, capability_id: str) -> ExecutionContext:
         """
@@ -60,6 +102,7 @@ class ExecutionContext:
             depth=new_depth,
             max_depth=self.max_depth,
             guards=self.guards,
+            cancel_token=self.cancel_token,
             bag=dict(self.bag),
             step_outputs={},
             step_results={},

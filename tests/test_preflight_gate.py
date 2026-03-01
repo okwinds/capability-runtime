@@ -67,7 +67,7 @@ async def test_run_preflight_error_returns_failed_node_report(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="error")
     monkeypatch.setattr(
         rt,
-        "_preflight",
+        "preflight",
         lambda: [FrameworkIssue(code="X", message="m", details={"path": "skills.scan.ttlSecs"})],
     )
 
@@ -87,7 +87,7 @@ async def test_run_preflight_warn_injects_meta(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="warn")
     monkeypatch.setattr(
         rt,
-        "_preflight",
+        "preflight",
         lambda: [FrameworkIssue(code="X", message="m", details={"path": "skills.scan.ttlSecs"})],
     )
     ctx = ExecutionContext(run_id="r-preflight-warn")
@@ -101,7 +101,7 @@ async def test_run_preflight_warn_injects_meta(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_preflight_off_does_not_call_preflight(monkeypatch):
     rt = _mk_runtime(monkeypatch, preflight_mode="off")
-    monkeypatch.setattr(rt, "_preflight", lambda: (_ for _ in ()).throw(RuntimeError("should not call")))
+    monkeypatch.setattr(rt, "preflight", lambda: (_ for _ in ()).throw(RuntimeError("should not call")))
 
     out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-off"))
     assert out.status == CapabilityStatus.SUCCESS

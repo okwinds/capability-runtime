@@ -29,9 +29,10 @@ from .protocol.workflow import (
     Step,
     WorkflowSpec,
 )
+from .services import RuntimeServices
 
 # === 错误导出 ===
-from .errors import AdapterNotFoundError, CapabilityNotFoundError, RuntimeFrameworkError
+from .errors import CapabilityNotFoundError, RuntimeFrameworkError
 
 __all__ = [
     # Runtime
@@ -59,8 +60,8 @@ __all__ = [
     "ConditionalStep",
     "InputMapping",
     "ExecutionContext",
+    "RuntimeServices",
     # Errors
     "RuntimeFrameworkError",
-    "AdapterNotFoundError",
     "CapabilityNotFoundError",
 ]

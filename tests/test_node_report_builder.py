@@ -205,9 +205,19 @@ def test_report_turn_id_is_last_non_null_turn_id():
     assert rep.turn_id == "t3"
 
 
-def test_report_raises_on_empty_events():
-    with pytest.raises(ValueError, match="non-empty"):
-        NodeReportBuilder().build(events=[])
+def test_report_empty_events_returns_fail_closed_node_report():
+    rep = NodeReportBuilder().build(events=[])
+    assert rep.status == "failed"
+    assert rep.reason == "no_events"
+    assert rep.completion_reason == "no_events"
+    assert rep.run_id == ""
+    assert rep.turn_id is None
+    assert rep.events_path is None
+    assert rep.engine.get("name") == "skills-runtime-sdk-python"
+    assert rep.engine.get("module") == "skills_runtime"
+    assert "version" in rep.engine
+    assert rep.bridge.get("name") == "capability-runtime"
+    assert "version" in rep.bridge
 
 
 def test_report_engine_version_prefers_skills_runtime_dunder_version(monkeypatch: pytest.MonkeyPatch) -> None:

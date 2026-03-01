@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from skills_runtime.tools.protocol import ToolCall, ToolResult, ToolSpec
@@ -29,7 +29,9 @@ from skills_runtime.tools.registry import ToolExecutionContext
 from ..config import CustomTool, RuntimeConfig
 from ..protocol.context import ExecutionContext
 from ..registry import AnySpec
-from ..runtime import Runtime
+
+if TYPE_CHECKING:  # pragma: no cover
+    from ..runtime import Runtime
 
 
 _ARTIFACT_SCHEMA_ID = "capability-runtime.invoke_capability.v1"
@@ -115,6 +117,7 @@ def make_invoke_capability_tool(
     *,
     child_runtime_config: RuntimeConfig,
     child_specs: List[AnySpec],
+    shared_runtime: Optional["Runtime"] = None,
     allowlist: Optional[InvokeCapabilityAllowlist] = None,
     requires_approval: bool = True,
     artifacts_subdir: str = "artifacts/invoke_capability",
@@ -127,6 +130,7 @@ def make_invoke_capability_tool(
     参数：
     - child_runtime_config：子调用 Runtime 的配置模板（在后台线程的独立 event loop 中创建 Runtime）
     - child_specs：子调用可执行的能力声明快照（AgentSpec/WorkflowSpec 列表）
+    - shared_runtime：可选共享 Runtime；提供时将复用该实例执行子能力（不再为每次子调用创建新 Runtime）
     - allowlist：可选能力白名单；提供后将启用校验（未命中则拒绝）
     - requires_approval：是否提示该 tool 需要审批（最终由 safety/policy 决定）
     - artifacts_subdir：产物子目录（相对 workspace_root）
@@ -209,16 +213,28 @@ def make_invoke_capability_tool(
             在线程内运行子能力（async），返回摘要 dict。
 
             注意：
-            - Runtime 必须在该线程的 event loop 内创建，避免 asyncio 原语绑定错误。
+            - tool handler 为同步函数，且由上游在运行中的 event loop 线程内直接调用；
+              因此这里使用"后台线程 + 独立 event loop"封装 async 子调用，避免在运行中的 loop 中调用 `asyncio.run()`。
+            - 当 shared_runtime 为空时：Runtime 必须在该线程的 event loop 内创建，避免 asyncio 原语绑定错误。
             """
 
             async def _run_child() -> Dict[str, Any]:
-                # 在 event loop 内创建 Runtime（避免 asyncio.Lock 绑定到错误的 loop）。
-                rt = Runtime(child_runtime_config)
-                rt.register_many(list(child_specs or []))
+                if shared_runtime is None:
+                    # 在 event loop 内创建 Runtime（避免 asyncio 原语绑定到错误的 loop）。
+                    from ..runtime import Runtime  # lazy import（避免循环导入）
+
+                    rt = Runtime(child_runtime_config)
+                    rt.register_many(list(child_specs or []))
+                    max_depth = child_runtime_config.max_depth
+                else:
+                    # 复用宿主提供的 Runtime 实例。
+                    rt = shared_runtime
+                    # 兼容：允许调用方仍提供 child_specs；此时将其注册到 shared runtime（last-write-wins）。
+                    rt.register_many(list(child_specs or []))
+                    max_depth = int(getattr(rt.config, "max_depth", child_runtime_config.max_depth))
 
                 # 子调用上下文（独立 run_id，避免与父 run 的证据链混淆）。
-                child_ctx = ExecutionContext(run_id=child_run_id, max_depth=child_runtime_config.max_depth, guards=None, bag={})
+                child_ctx = ExecutionContext(run_id=child_run_id, max_depth=max_depth, guards=None, bag={})
                 result = await rt.run(capability_id, input=input_dict, context=child_ctx)
 
                 capability_status = getattr(result.status, "value", str(result.status))

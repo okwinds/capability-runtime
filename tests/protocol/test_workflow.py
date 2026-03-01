@@ -18,10 +18,12 @@ def test_step_construction():
         id="s1",
         capability=CapabilityRef(id="MA-013A"),
         input_mappings=[InputMapping(source="context.故事梗概", target_field="故事梗概")],
+        timeout_s=3.0,
     )
     assert step.id == "s1"
     assert step.capability.id == "MA-013A"
     assert len(step.input_mappings) == 1
+    assert step.timeout_s == 3.0
 
 
 def test_loop_step_construction():
@@ -32,10 +34,12 @@ def test_loop_step_construction():
         item_input_mappings=[InputMapping(source="item.定位", target_field="角色定位")],
         max_iterations=20,
         fail_strategy="skip",
+        timeout_s=5.0,
     )
     assert step.iterate_over == "step.s1.角色列表"
     assert step.max_iterations == 20
     assert step.fail_strategy == "skip"
+    assert step.timeout_s == 5.0
 
 
 def test_parallel_step_construction():

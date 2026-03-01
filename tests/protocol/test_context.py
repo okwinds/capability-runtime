@@ -115,3 +115,39 @@ class TestChild:
         # 再 child 才超限
         with pytest.raises(RecursionLimitError):
             c2.child("C")
+
+
+class TestBagOverlay:
+    def test_with_bag_overlay_returns_new_context(self):
+        ctx = ExecutionContext(run_id="r1", bag={"a": 1})
+        over = ctx.with_bag_overlay(b=2)
+
+        assert over is not ctx
+        assert ctx.bag == {"a": 1}
+        assert over.bag == {"a": 1, "b": 2}
+
+    def test_with_bag_overlay_keeps_step_outputs_reference(self):
+        ctx = ExecutionContext(run_id="r1", bag={"a": 1})
+        ctx.step_outputs["s1"] = {"x": 1}
+        over = ctx.with_bag_overlay(b=2)
+
+        assert over.step_outputs is ctx.step_outputs
+        assert over.step_results is ctx.step_results
+
+
+class TestCancellationToken:
+    def test_token_cancelled_flag(self):
+        from capability_runtime.protocol.context import CancellationToken
+
+        token = CancellationToken()
+        assert token.is_cancelled is False
+        token.cancel()
+        assert token.is_cancelled is True
+
+    def test_child_inherits_cancel_token(self):
+        from capability_runtime.protocol.context import CancellationToken
+
+        token = CancellationToken()
+        parent = ExecutionContext(run_id="r1", cancel_token=token)
+        child = parent.child("A")
+        assert child.cancel_token is token

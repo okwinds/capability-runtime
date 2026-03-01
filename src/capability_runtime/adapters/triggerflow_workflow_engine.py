@@ -18,6 +18,7 @@ from ..protocol.workflow import (
     WorkflowSpec,
     WorkflowStep,
 )
+from ..services import RuntimeServices
 from .workflow_engine import WorkflowStreamEvent, WorkflowStreamItem
 
 
@@ -25,24 +26,6 @@ _WF_WORKFLOW_ID_KEY = "__wf_workflow_id"
 _WF_WORKFLOW_INSTANCE_ID_KEY = "__wf_workflow_instance_id"
 _WF_STEP_ID_KEY = "__wf_step_id"
 _WF_BRANCH_ID_KEY = "__wf_branch_id"
-
-_MISSING = object()
-
-
-def _set_ctx_hint(context: ExecutionContext, *, key: str, value: str | None) -> object:
-    prev = context.bag.get(key, _MISSING)
-    if value is None:
-        context.bag.pop(key, None)
-    else:
-        context.bag[key] = value
-    return prev
-
-
-def _restore_ctx_hint(context: ExecutionContext, *, key: str, prev: object) -> None:
-    if prev is _MISSING:
-        context.bag.pop(key, None)
-    else:
-        context.bag[key] = prev
 
 
 def _to_step_result_dict(result: CapabilityResult) -> Dict[str, Any]:
@@ -72,12 +55,12 @@ class TriggerFlowWorkflowEngine:
         spec: WorkflowSpec,
         input: Dict[str, Any],
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> CapabilityResult:
         """执行 Workflow（非流式）。"""
 
         terminal: CapabilityResult | None = None
-        async for item in self.execute_stream(spec=spec, input=input, context=context, runtime=runtime):
+        async for item in self.execute_stream(spec=spec, input=input, context=context, services=services):
             if isinstance(item, CapabilityResult):
                 terminal = item
         if terminal is not None:
@@ -90,7 +73,7 @@ class TriggerFlowWorkflowEngine:
         spec: WorkflowSpec,
         input: Dict[str, Any],
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> AsyncIterator[WorkflowStreamItem]:
         """
         执行 Workflow（流式）。
@@ -101,10 +84,14 @@ class TriggerFlowWorkflowEngine:
         - 深审计与编排分支依据应读取 WAL/events + NodeReport（真相源），而非依赖轻量事件的 payload 细节。
         """
 
-        context.bag.update(input)
         workflow_instance_id = uuid.uuid4().hex
-        prev_wf = _set_ctx_hint(context, key=_WF_WORKFLOW_ID_KEY, value=str(spec.base.id))
-        prev_wf_inst = _set_ctx_hint(context, key=_WF_WORKFLOW_INSTANCE_ID_KEY, value=str(workflow_instance_id))
+        context = context.with_bag_overlay(**(input or {}))
+        context = context.with_bag_overlay(
+            **{
+                _WF_WORKFLOW_ID_KEY: str(spec.base.id),
+                _WF_WORKFLOW_INSTANCE_ID_KEY: str(workflow_instance_id),
+            }
+        )
         event_queue: asyncio.Queue[WorkflowStreamEvent | object] = asyncio.Queue()
         terminal_holder: Dict[str, CapabilityResult] = {}
         queue_stop = object()
@@ -158,13 +145,11 @@ class TriggerFlowWorkflowEngine:
                 )
 
                 step_id = getattr(bound_step, "id", f"step_{bound_index}")
-                prev_step = _set_ctx_hint(context, key=_WF_STEP_ID_KEY, value=str(step_id))
-                prev_branch = _set_ctx_hint(context, key=_WF_BRANCH_ID_KEY, value=None)
-                try:
-                    result = await self._execute_step(cast(Any, bound_step), context=context, runtime=runtime)
-                finally:
-                    _restore_ctx_hint(context, key=_WF_BRANCH_ID_KEY, prev=prev_branch)
-                    _restore_ctx_hint(context, key=_WF_STEP_ID_KEY, prev=prev_step)
+                step_context = context.with_bag_overlay(**{_WF_STEP_ID_KEY: str(step_id)})
+                result = await self._execute_step(cast(Any, bound_step), context=step_context, services=services)
+                # 顶层 LoopStep.collect_as 需要把结果写回 workflow 级 bag，供后续步骤使用。
+                if isinstance(bound_step, LoopStep) and result.status == CapabilityStatus.SUCCESS and bound_step.collect_as:
+                    context.bag[bound_step.collect_as] = result.output
 
                 await emit(
                     {
@@ -238,8 +223,6 @@ class TriggerFlowWorkflowEngine:
                 yield cast(WorkflowStreamEvent, item)
         finally:
             await flow_task
-            _restore_ctx_hint(context, key=_WF_WORKFLOW_INSTANCE_ID_KEY, prev=prev_wf_inst)
-            _restore_ctx_hint(context, key=_WF_WORKFLOW_ID_KEY, prev=prev_wf)
 
         terminal = terminal_holder.get("result")
         if terminal is None:
@@ -251,18 +234,21 @@ class TriggerFlowWorkflowEngine:
         step: Any,
         *,
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> CapabilityResult:
         """按步骤类型分发执行。"""
 
+        if context.cancel_token is not None and context.cancel_token.is_cancelled:
+            return CapabilityResult(status=CapabilityStatus.CANCELLED, error="Cancelled by token")
+
         if isinstance(step, Step):
-            return await self._execute_basic_step(step, context=context, runtime=runtime)
+            return await self._execute_basic_step(step, context=context, services=services)
         if isinstance(step, LoopStep):
-            return await self._execute_loop_step(step, context=context, runtime=runtime)
+            return await self._execute_loop_step(step, context=context, services=services)
         if isinstance(step, ParallelStep):
-            return await self._execute_parallel_step(step, context=context, runtime=runtime)
+            return await self._execute_parallel_step(step, context=context, services=services)
         if isinstance(step, ConditionalStep):
-            return await self._execute_conditional_step(step, context=context, runtime=runtime)
+            return await self._execute_conditional_step(step, context=context, services=services)
         return CapabilityResult(
             status=CapabilityStatus.FAILED,
             error=f"Unknown step type: {type(step).__name__}",
@@ -273,13 +259,22 @@ class TriggerFlowWorkflowEngine:
         step: Step,
         *,
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> CapabilityResult:
         """执行基础步骤。"""
 
         step_input = self._resolve_input_mappings(step.input_mappings, context)
-        target_spec = runtime.registry.get_or_raise(step.capability.id)
-        result = await runtime._execute(spec=target_spec, input=step_input, context=context)
+        target_spec = services.registry.get_or_raise(step.capability.id)
+        if step.timeout_s is not None:
+            try:
+                result = await asyncio.wait_for(
+                    services.execute_capability(spec=target_spec, input=step_input, context=context),
+                    timeout=step.timeout_s,
+                )
+            except asyncio.TimeoutError:
+                result = CapabilityResult(status=CapabilityStatus.FAILED, error=f"step timeout: {step.id}")
+        else:
+            result = await services.execute_capability(spec=target_spec, input=step_input, context=context)
 
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
@@ -290,7 +285,7 @@ class TriggerFlowWorkflowEngine:
         step: LoopStep,
         *,
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> CapabilityResult:
         """执行循环步骤。"""
 
@@ -304,7 +299,7 @@ class TriggerFlowWorkflowEngine:
                 ),
             )
 
-        target_spec = runtime.registry.get_or_raise(step.capability.id)
+        target_spec = services.registry.get_or_raise(step.capability.id)
 
         async def execute_item(item: Any, _idx: int) -> CapabilityResult:
             item_context = ExecutionContext(
@@ -312,16 +307,21 @@ class TriggerFlowWorkflowEngine:
                 parent_context=context,
                 depth=context.depth,
                 max_depth=context.max_depth,
-                bag={**context.bag, "__current_item__": item},
+                guards=context.guards,
+                cancel_token=context.cancel_token,
+                bag={
+                    **context.bag,
+                    "__current_item__": item,
+                    _WF_BRANCH_ID_KEY: f"{step.id}:{_idx}",
+                },
                 step_outputs=dict(context.step_outputs),
                 step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),
             )
-            _set_ctx_hint(item_context, key=_WF_BRANCH_ID_KEY, value=f"{step.id}:{_idx}")
             step_input = self._resolve_input_mappings(step.item_input_mappings, item_context)
             if not step_input:
                 step_input = item if isinstance(item, dict) else {"item": item}
-            return await runtime._execute(spec=target_spec, input=step_input, context=item_context)
+            return await services.execute_capability(spec=target_spec, input=step_input, context=item_context)
 
         if context.guards is None:
             return CapabilityResult(
@@ -329,12 +329,30 @@ class TriggerFlowWorkflowEngine:
                 error=f"LoopStep '{step.id}': missing ExecutionGuards in ExecutionContext",
             )
 
-        result = await context.guards.run_loop(
-            items=items,
-            max_iterations=step.max_iterations,
-            execute_fn=execute_item,
-            fail_strategy=step.fail_strategy,
-        )
+        if step.timeout_s is not None:
+            try:
+                result = await asyncio.wait_for(
+                    context.guards.run_loop(
+                        items=items,
+                        max_iterations=step.max_iterations,
+                        execute_fn=execute_item,
+                        fail_strategy=step.fail_strategy,
+                    ),
+                    timeout=step.timeout_s,
+                )
+            except asyncio.TimeoutError:
+                result = CapabilityResult(
+                    status=CapabilityStatus.FAILED,
+                    error=f"step timeout: {step.id}",
+                    output=[],
+                )
+        else:
+            result = await context.guards.run_loop(
+                items=items,
+                max_iterations=step.max_iterations,
+                execute_fn=execute_item,
+                fail_strategy=step.fail_strategy,
+            )
 
         context.step_outputs[step.id] = result.output
         if result.status == CapabilityStatus.SUCCESS and step.collect_as:
@@ -347,7 +365,7 @@ class TriggerFlowWorkflowEngine:
         step: ParallelStep,
         *,
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> CapabilityResult:
         """执行并行步骤。"""
 
@@ -357,25 +375,31 @@ class TriggerFlowWorkflowEngine:
                 parent_context=context,
                 depth=context.depth,
                 max_depth=context.max_depth,
-                bag=dict(context.bag),
+                guards=context.guards,
+                cancel_token=context.cancel_token,
+                bag={**context.bag, _WF_BRANCH_ID_KEY: f"{step.id}:{i}"},
                 step_outputs=dict(context.step_outputs),
                 step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),
             )
-            for _ in step.branches
+            for i, _ in enumerate(step.branches)
         ]
-        for i, bc in enumerate(branch_contexts):
-            _set_ctx_hint(bc, key=_WF_BRANCH_ID_KEY, value=f"{step.id}:{i}")
         tasks = [
-            self._execute_step(branch, context=branch_ctx, runtime=runtime)
+            self._execute_step(branch, context=branch_ctx, services=services)
             for branch, branch_ctx in zip(step.branches, branch_contexts)
         ]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         branch_results: List[CapabilityResult] = []
         for result in raw_results:
-            if isinstance(result, Exception):
-                branch_results.append(CapabilityResult(status=CapabilityStatus.FAILED, error=str(result)))
+            if isinstance(result, BaseException):
+                msg = str(result).strip()
+                branch_results.append(
+                    CapabilityResult(
+                        status=CapabilityStatus.FAILED,
+                        error=msg or type(result).__name__,
+                    )
+                )
             else:
                 branch_results.append(result)
 
@@ -451,7 +475,7 @@ class TriggerFlowWorkflowEngine:
         step: ConditionalStep,
         *,
         context: ExecutionContext,
-        runtime: Any,
+        services: RuntimeServices,
     ) -> CapabilityResult:
         """执行条件步骤。"""
 
@@ -467,11 +491,10 @@ class TriggerFlowWorkflowEngine:
                 ),
             )
 
-        prev_branch = _set_ctx_hint(context, key=_WF_BRANCH_ID_KEY, value=f"{step.id}:{condition_key or 'default'}")
-        try:
-            result = await self._execute_step(branch, context=context, runtime=runtime)
-        finally:
-            _restore_ctx_hint(context, key=_WF_BRANCH_ID_KEY, prev=prev_branch)
+        branch_context = context.with_bag_overlay(
+            **{_WF_BRANCH_ID_KEY: f"{step.id}:{condition_key or 'default'}"}
+        )
+        result = await self._execute_step(branch, context=branch_context, services=services)
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
         return result

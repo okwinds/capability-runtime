@@ -33,9 +33,9 @@ def test_public_api_all_exports_are_stable() -> None:
         "ConditionalStep",
         "InputMapping",
         "ExecutionContext",
+        "RuntimeServices",
         # Errors
         "RuntimeFrameworkError",
-        "AdapterNotFoundError",
         "CapabilityNotFoundError",
     ]
 
