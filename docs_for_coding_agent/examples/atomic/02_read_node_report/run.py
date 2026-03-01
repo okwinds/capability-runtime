@@ -44,7 +44,7 @@ def _build_backend() -> FakeChatBackend:
                             LlmToolCall(
                                 call_id="t1",
                                 name="shell_exec",
-                                args={"argv": argv, "timeout_ms": 5000, "sandbox": "none"},
+                                args={"argv": argv, "timeout_ms": 5000, "sandbox": "inherit"},
                             ),
                             LlmToolCall(call_id="w1", name="file_write", args={"path": "report.md", "content": "# ok\\n"}),
                         ],
