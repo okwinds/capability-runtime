@@ -3,15 +3,17 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>UI Events Showcase (offline)</title>
+    <title>UI Events Showcase</title>
     <link rel="stylesheet" href="/ui/styles.css" />
   </head>
   <body>
     <a class="skip-link" href="#main">跳到主要内容</a>
-    <header class="topbar" role="banner">
+    <header class="topbar" role="banner" aria-label="UI Events Showcase Header">
       <div class="brand">
         <div class="brand__title">UI Events Showcase</div>
-        <div class="brand__subtitle">RuntimeEvent v1 · offline fixtures</div>
+        <div class="brand__subtitle">
+          RuntimeEvent v1 · <span id="modePill" class="pill pill--ok" aria-label="mode">OFFLINE</span>
+        </div>
       </div>
       <div class="controls" role="group" aria-label="连接控制">
         <label class="field">
@@ -29,7 +31,20 @@
             <option value="raw">raw</option>
           </select>
         </label>
+        <label class="field">
+          <span class="field__label">Transport</span>
+          <select id="transportSelect" class="field__input" aria-label="transport">
+            <option value="sse" selected>sse</option>
+            <option value="jsonl">jsonl</option>
+          </select>
+        </label>
         <button id="connectBtn" class="btn btn--primary" type="button">连接</button>
+        <button id="disconnectBtn" class="btn" type="button">断开</button>
+        <button id="breakBtn" class="btn btn--ghost" type="button" aria-label="断线演示（会自动重连）">断线演示</button>
+        <button id="drawerBtn" class="btn btn--ghost" type="button" aria-label="打开/关闭过程抽屉" aria-expanded="true">
+          过程/证据
+        </button>
+        <button id="themeBtn" class="btn btn--ghost" type="button" aria-label="切换主题">主题</button>
       </div>
     </header>
 
@@ -37,51 +52,119 @@
       <section class="panel panel--left" aria-label="Workflow">
         <div class="panel__header">
           <h2 class="panel__title">Workflow</h2>
-          <button id="toggleLeftBtn" class="btn btn--ghost" type="button" aria-label="折叠/展开 workflow 面板">
+          <button
+            id="toggleLeftBtn"
+            class="btn btn--ghost"
+            type="button"
+            aria-label="折叠/展开 workflow 面板"
+            aria-expanded="true"
+            aria-controls="workflowTree"
+          >
             折叠
           </button>
         </div>
         <div class="panel__body">
-          <div id="workflowTree" class="mono small" aria-live="polite"></div>
+          <div class="hint">点击节点可过滤 Timeline（再次点击取消）。</div>
+          <div id="workflowTree" class="tree" role="tree" aria-label="workflow outline"></div>
         </div>
       </section>
 
       <section class="panel panel--center" aria-label="Chat">
         <div class="panel__header">
           <h2 class="panel__title">Chat</h2>
-          <div id="statusPill" class="pill" aria-live="polite">未连接</div>
-        </div>
-        <div class="panel__body">
-          <div id="chatLog" class="chat" aria-live="polite"></div>
-        </div>
-      </section>
-
-      <section class="panel panel--right" aria-label="Events and Evidence">
-        <div class="panel__header">
-          <h2 class="panel__title">Events & Evidence</h2>
-          <div class="panel__meta mono small">
-            <div>session: <span id="sessionIdText">-</span></div>
-            <div>run: <span id="runIdText">-</span></div>
+          <div class="header-right">
+            <div id="statusPill" class="pill" aria-live="polite">未连接</div>
+            <div class="meta mono small" aria-label="run metadata">
+              <span>run:</span> <span id="runIdText">-</span>
+              <span class="sep">·</span>
+              <span>level:</span> <span id="levelText">-</span>
+              <span class="sep">·</span>
+              <span>last_rid:</span> <span id="lastRidText">-</span>
+            </div>
+            <button id="copyLocatorBtn" class="btn btn--ghost" type="button" aria-label="复制证据指针 locator">
+              复制 locator
+            </button>
           </div>
         </div>
         <div class="panel__body">
-          <details class="details" open>
-            <summary class="details__summary">最新事件</summary>
-            <pre id="latestEvent" class="code" aria-label="latest event"></pre>
-          </details>
-          <details class="details" open>
-            <summary class="details__summary">证据指针（evidence）</summary>
-            <div id="evidenceBox" class="mono small"></div>
-          </details>
-          <details class="details">
-            <summary class="details__summary">全部事件（最近 200 条）</summary>
-            <pre id="eventsLog" class="code" aria-label="events log"></pre>
-          </details>
+          <div id="chatLog" class="chat" role="log" aria-live="polite" aria-relevant="additions text"></div>
         </div>
       </section>
+
+      <aside id="drawer" class="drawer" aria-label="Process & Evidence Drawer">
+        <div class="drawer__header">
+          <div>
+            <div class="drawer__title">过程 / 证据</div>
+            <div class="drawer__subtitle mono small">
+              session: <span id="sessionIdText">-</span>
+            </div>
+          </div>
+          <button id="drawerCloseBtn" class="btn btn--ghost" type="button" aria-label="关闭抽屉">关闭</button>
+        </div>
+
+        <div class="tabs" role="tablist" aria-label="drawer tabs">
+          <button id="tabTools" class="tab is-active" type="button" role="tab" aria-selected="true" aria-controls="panelTools">
+            Tools&Approvals
+          </button>
+          <button id="tabTimeline" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panelTimeline">
+            Timeline
+          </button>
+          <button id="tabEvidence" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panelEvidence">
+            Evidence
+          </button>
+        </div>
+
+        <div id="panelTools" class="tabpanel" role="tabpanel" aria-label="Tools and approvals">
+          <div class="hint">按 <span class="mono">call_id</span> 聚合；点击某条可联动 Evidence。</div>
+          <div id="toolsList" class="list"></div>
+        </div>
+
+        <div id="panelTimeline" class="tabpanel is-hidden" role="tabpanel" aria-label="Timeline">
+          <div class="row">
+            <label class="field field--inline">
+              <span class="field__label">Filter</span>
+              <input id="filterInput" class="field__input" aria-label="filter" placeholder="type/path/call_id…" />
+            </label>
+            <button id="pauseBtn" class="btn btn--ghost" type="button">暂停</button>
+          </div>
+          <div id="timelineList" class="list"></div>
+        </div>
+
+        <div id="panelEvidence" class="tabpanel is-hidden" role="tabpanel" aria-label="Evidence">
+          <div class="hint">
+            证据指针（locator）：<span class="mono">events_path</span>（exported） / <span class="mono">wal_locator</span>（upstream；语义对齐）
+          </div>
+          <div class="card">
+            <div class="kv">
+              <div class="k mono">events_path</div>
+              <div class="v mono" id="eventsPathText">-</div>
+              <button id="copyEventsPathBtn" class="btn btn--ghost" type="button">复制</button>
+            </div>
+            <div class="kv">
+              <div class="k mono">wal_locator</div>
+              <div class="v mono" id="walLocatorText">-</div>
+              <button id="copyWalLocatorBtn" class="btn btn--ghost" type="button">复制</button>
+            </div>
+            <div class="kv">
+              <div class="k mono">call_id</div>
+              <div class="v mono" id="callIdText">-</div>
+              <button id="copyCallIdBtn" class="btn btn--ghost" type="button">复制</button>
+            </div>
+            <div class="kv">
+              <div class="k mono">node_report_schema</div>
+              <div class="v mono" id="nodeReportSchemaText">-</div>
+              <button id="copyNodeReportSchemaBtn" class="btn btn--ghost" type="button">复制</button>
+            </div>
+          </div>
+
+          <details class="details">
+            <summary class="details__summary">原始事件 JSON（诊断用途；可能包含敏感信息）</summary>
+            <pre id="rawEvent" class="code" aria-label="raw event"></pre>
+          </details>
+        </div>
+      </aside>
     </main>
 
     <script src="/ui/app.js"></script>
   </body>
 </html>
-
