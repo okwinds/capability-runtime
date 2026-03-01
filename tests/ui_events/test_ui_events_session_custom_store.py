@@ -79,9 +79,8 @@ async def test_start_ui_events_session_accepts_custom_store_injection(tmp_path: 
     out: List = []
     async for ev in sess.subscribe(after_id=None):
         out.append(ev)
-        if ev.type == "tool.requested":
+        if ev.type == "run.status" and ev.data.get("status") in {"completed", "failed", "cancelled", "pending"}:
             break
 
     assert out
     assert store.append_count > 0, "expected custom store to be used for append()"
-

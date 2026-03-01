@@ -6,28 +6,34 @@ ui_events_showcase：Runtime UI Events v1 展示小应用（offline-first）。
 约束：
 - 不新增第三方依赖（仅标准库）
 - 默认 offline fixtures 回放
-- real 模式（本切片）仅实现 fail-closed 门禁：未显式开启时不得触达 provider/init/.env
+- real 模式（可选集成）门禁：未显式开启时不得触达 provider/init/.env
 """
 
 import argparse
+import asyncio
 import json
 import os
+import queue
 import sys
 import time
 import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from capability_runtime.ui_events.transport import encode_json_line
-from capability_runtime.ui_events.v1 import RuntimeEvent, StreamLevel
-
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+SRC_ROOT = REPO_ROOT / "src"
+for p in (REPO_ROOT, SRC_ROOT):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
+from capability_runtime.ui_events.transport import encode_json_line
+from capability_runtime.ui_events.v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
+
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime
+from examples.apps._shared.app_support import AutoApprovalProvider, build_bridge_runtime_from_env, load_env_file, write_overlay_for_app
 
 
 def _load_dotenv_for_real(app_dir: Path) -> None:
@@ -55,7 +61,8 @@ def _init_real_provider() -> None:
     注意：本切片不实现真实 provider；门禁开启后如果走到这里，应显式报错提示尚未实现。
     """
 
-    raise NotImplementedError("real mode provider is not implemented in offline slice")
+    # provider 初始化通过 `build_bridge_runtime_from_env` 完成（这里仅保留占位，供测试打桩验证 fail-closed）。
+    return None
 
 
 def _stream_level_rank(level: StreamLevel) -> int:
@@ -82,7 +89,54 @@ def _read_fixture_events(fixtures_path: Path) -> List[RuntimeEvent]:
     return events
 
 
-class _Session:
+class _AsyncLoopThread:
+    def __init__(self) -> None:
+        self._loop = asyncio.new_event_loop()
+        self._t = None
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        return self._loop
+
+    def start(self) -> None:
+        if self._t is not None:
+            return
+
+        def _run() -> None:
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_forever()
+
+        import threading
+
+        self._t = threading.Thread(target=_run, name="ui-events-async-loop", daemon=True)
+        self._t.start()
+
+    def submit(self, coro: Any) -> "asyncio.Future[Any]":
+        self.start()
+        return asyncio.run_coroutine_threadsafe(coro, self._loop)  # type: ignore[return-value]
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _make_after_id_error_event(*, run_id: str, level: StreamLevel, after_id: str, known_min_id: Optional[str], known_max_id: Optional[str]) -> RuntimeEvent:
+    msg = f"after_id expired or not found: {after_id!r} (available: {known_min_id!r}..{known_max_id!r})"
+    return RuntimeEvent(
+        schema="capability-runtime.runtime_event.v1",
+        type="error",
+        run_id=str(run_id),
+        seq=0,
+        ts_ms=_now_ms(),
+        level=level,
+        path=[PathSegment(kind="run", id=str(run_id))],
+        data={"kind": "after_id_expired", "message": msg, "known_min_id": known_min_id, "known_max_id": known_max_id},
+        rid="err_" + uuid.uuid4().hex[:12],
+        evidence=None,
+    )
+
+
+class _OfflineSession:
     def __init__(self, *, session_id: str, run_id: str, level: StreamLevel, events: List[RuntimeEvent]) -> None:
         self.session_id = session_id
         self.run_id = run_id
@@ -106,7 +160,15 @@ class _Session:
             return list(self.events)
         idx = self._rid_to_idx.get(str(after_id))
         if idx is None:
-            raise KeyError(str(after_id))
+            return [
+                _make_after_id_error_event(
+                    run_id=self.run_id,
+                    level=self.level,
+                    after_id=str(after_id),
+                    known_min_id=self.min_rid(),
+                    known_max_id=self.max_rid(),
+                )
+            ]
         return list(self.events[idx + 1 :])
 
 
@@ -116,9 +178,12 @@ class _AppState:
         self.ui_dir = app_dir / "ui"
         self.fixtures_path = app_dir / "fixtures" / "demo.jsonl"
         self._fixture_events = _read_fixture_events(self.fixtures_path)
-        self.sessions: Dict[str, _Session] = {}
+        self.sessions: Dict[str, Any] = {}
+        self.loop_thread = _AsyncLoopThread()
+        self._skills_root = (self.app_dir / "skills").resolve()
+        self._skills_root.mkdir(parents=True, exist_ok=True)
 
-    def new_offline_session(self, *, level: StreamLevel) -> _Session:
+    def new_offline_session(self, *, level: StreamLevel) -> _OfflineSession:
         session_id = "sess_" + uuid.uuid4().hex
         run_id = self._fixture_events[0].run_id if self._fixture_events else ("run_" + uuid.uuid4().hex)
 
@@ -126,9 +191,66 @@ class _AppState:
         want_rank = _stream_level_rank(level)
         filtered = [ev for ev in self._fixture_events if _stream_level_rank(ev.level) <= want_rank]
 
-        s = _Session(session_id=session_id, run_id=str(run_id), level=level, events=filtered)
+        s = _OfflineSession(session_id=session_id, run_id=str(run_id), level=level, events=filtered)
         self.sessions[session_id] = s
         return s
+
+    def new_real_session(self, *, level: StreamLevel, workspace_root: Path) -> Any:
+        session_id = "sess_" + uuid.uuid4().hex
+        app_dir = self.app_dir
+
+        dotenv_path = app_dir / ".env"
+        if not dotenv_path.exists():
+            raise RuntimeError("missing .env for real mode (cp .env.example .env)")
+
+        load_env_file(dotenv_path)
+        required = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
+        missing = [k for k in required if not str(os.environ.get(k, "")).strip()]
+        if missing:
+            raise RuntimeError("missing env vars for real mode: " + ", ".join(missing))
+
+        # workspace：每次 session 独立目录，避免相互污染
+        ws = (workspace_root / "ui_events_showcase" / session_id).resolve()
+        ws.mkdir(parents=True, exist_ok=True)
+
+        overlay = write_overlay_for_app(
+            workspace_root=ws,
+            skills_root=self._skills_root,
+            max_steps=6,
+            safety_mode="allow",
+            tool_allowlist=["read_file", "grep_files", "list_dir", "file_read", "update_plan", "file_write", "apply_patch", "shell_exec"],
+            account="examples",
+            domain="ui-events-showcase",
+        )
+
+        runtime = build_bridge_runtime_from_env(
+            workspace_root=ws,
+            overlay=overlay,
+            approval_provider=AutoApprovalProvider(),
+            human_io=None,
+        )
+
+        cap_id = "agent.ui_events_showcase.real"
+        runtime.register(
+            AgentSpec(
+                base=CapabilitySpec(
+                    id=cap_id,
+                    kind=CapabilityKind.AGENT,
+                    name="UI Events Showcase (Real)",
+                    description="用于展示 Runtime UI Events v1（real mode）。",
+                ),
+                system_prompt="你是一个演示 Agent。严禁输出任何 `$[...]` mention；严禁调用任何工具。",
+                prompt_template="请用简体中文用 2-3 句话解释：{topic}",
+            )
+        )
+        errs = runtime.validate()
+        if errs:
+            raise RuntimeError("runtime.validate failed: " + str(errs))
+
+        session = runtime.start_ui_events_session(cap_id, input={"topic": "Capability Runtime 的 UI Events v1 是什么？"}, level=level)
+        out = {"kind": "real", "session_id": session_id, "runtime": runtime, "session": session, "level": level, "run_id": session.run_id}
+        self.sessions[session_id] = out
+        return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -182,10 +304,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if mode == "real":
-            # 门禁已开，但本切片不实现真实 provider；这里先演示“会去初始化”的结构。
-            _load_dotenv_for_real(self._read_app_state().app_dir)
-            _init_real_provider()
-            self._json(HTTPStatus.NOT_IMPLEMENTED, {"error": "real mode not implemented"})
+            st = self._read_app_state()
+            try:
+                _load_dotenv_for_real(st.app_dir)
+                _init_real_provider()
+                sess = st.new_real_session(level=level, workspace_root=getattr(self.server, "workspace_root"))  # type: ignore[attr-defined]
+            except RuntimeError as exc:
+                self._json(HTTPStatus.PRECONDITION_FAILED, {"error": str(exc)})
+                return
+            self._json(
+                HTTPStatus.OK,
+                {
+                    "session_id": sess["session_id"],
+                    "run_id": str(sess["run_id"]),
+                    "mode": "real",
+                    "level": level.value,
+                },
+            )
             return
 
         st = self._read_app_state()
@@ -220,33 +355,50 @@ class Handler(BaseHTTPRequestHandler):
             after_id = (qs.get("after_id") or [None])[0]
 
             st = self._read_app_state()
-            s = st.sessions.get(str(session_id))
-            if s is None:
+            sess = st.sessions.get(str(session_id))
+            if sess is None:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "session_id not found"})
                 return
 
-            try:
-                events = s.iter_after(after_id=str(after_id) if after_id else None)
-            except KeyError:
-                self._json(
-                    HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE,
-                    {
-                        "error": "after_id not found",
-                        "known_min_id": s.min_rid(),
-                        "known_max_id": s.max_rid(),
-                    },
-                )
-                return
+            events_iter: Iterable[RuntimeEvent]
+            if isinstance(sess, _OfflineSession):
+                events_iter = sess.iter_after(after_id=str(after_id) if after_id else None)
+            else:
+                # real session（RuntimeUIEventsSession）：用 async subscribe 输出
+                session = sess["session"]
+
+                q_out: "queue.Queue[Optional[RuntimeEvent]]" = queue.Queue()
+
+                async def _produce() -> None:
+                    try:
+                        async for ev in session.subscribe(after_id=str(after_id) if after_id else None):
+                            q_out.put(ev)
+                    finally:
+                        q_out.put(None)
+
+                st.loop_thread.submit(_produce())
+
+                def _iter() -> Iterator[RuntimeEvent]:
+                    while True:
+                        ev = q_out.get()
+                        if ev is None:
+                            return
+                        yield ev
+
+                events_iter = _iter()
 
             if transport == "jsonl":
                 self.send_response(HTTPStatus.OK)
                 self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
                 self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
-                for ev in events:
-                    chunk = encode_json_line(ev, prefix_data=False).encode("utf-8")
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                for ev in events_iter:
+                    try:
+                        chunk = encode_json_line(ev, prefix_data=False).encode("utf-8")
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                    except BrokenPipeError:
+                        return
                 return
 
             # default: SSE subset
@@ -255,12 +407,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
-            for ev in events:
-                chunk = encode_json_line(ev, prefix_data=True).encode("utf-8")
-                self.wfile.write(chunk)
-                self.wfile.flush()
+            for ev in events_iter:
+                try:
+                    chunk = encode_json_line(ev, prefix_data=True).encode("utf-8")
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except BrokenPipeError:
+                    return
                 # 轻微 pacing，避免某些客户端一次性吞完后 UI 无感
                 time.sleep(0.01)
+                if ev.type == "run.status" and ev.data.get("status") != "running":
+                    # 终态后留一点时间给客户端关闭连接，避免误判为“断线”
+                    time.sleep(0.3)
+                    return
             return
 
         self._json(HTTPStatus.NOT_FOUND, {"error": "not found"})
@@ -276,11 +435,12 @@ def create_server(*, host: str, port: int, mode: str, workspace_root: Path) -> T
     参数保持与其它 examples/apps 一致（mode/workspace_root 暂用于兼容形态）。
     """
 
-    _ = (mode, workspace_root)
+    _ = mode
     app_dir = Path(__file__).resolve().parent
     st = _AppState(app_dir=app_dir)
     httpd = ThreadingHTTPServer((host, int(port)), Handler)
     httpd.app_state = st  # type: ignore[attr-defined]
+    httpd.workspace_root = workspace_root  # type: ignore[attr-defined]
     return httpd
 
 
@@ -304,4 +464,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
