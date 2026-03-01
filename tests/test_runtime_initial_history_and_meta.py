@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -51,7 +52,7 @@ async def test_run_async_passes_initial_history_to_sdk_agent(monkeypatch):
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
 
     hist = [{"role": "user", "content": "hello"}]
-    ctx = ExecutionContext(run_id="r1", bag={"__host_meta__": {"initial_history": hist}})
+    ctx = ExecutionContext(run_id="r1", bag=MappingProxyType({"__host_meta__": {"initial_history": hist}}))
     out = await rt.run("A", context=ctx)
     assert out.output == "ok"
     assert fake_agent.last_initial_history == hist
@@ -78,7 +79,7 @@ async def test_run_async_injects_session_and_turn_id_into_node_report_meta(monke
 
     ctx = ExecutionContext(
         run_id="r1",
-        bag={"__host_meta__": {"session_id": "SID", "host_turn_id": "TID"}},
+        bag=MappingProxyType({"__host_meta__": {"session_id": "SID", "host_turn_id": "TID"}}),
     )
     out = await rt.run("A", context=ctx)
     assert out.node_report is not None

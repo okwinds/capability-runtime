@@ -38,7 +38,8 @@ def test_ui_events_showcase_real_mode_smoke(tmp_path: Path, monkeypatch: pytest.
     from examples.apps.ui_events_showcase.run import create_server  # type: ignore
 
     httpd = create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=tmp_path)
-    host, port = httpd.server_address[0], int(httpd.server_address[1])
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
 
     import threading
 
@@ -82,4 +83,3 @@ def test_ui_events_showcase_real_mode_smoke(tmp_path: Path, monkeypatch: pytest.
     finally:
         httpd.shutdown()
         httpd.server_close()
-

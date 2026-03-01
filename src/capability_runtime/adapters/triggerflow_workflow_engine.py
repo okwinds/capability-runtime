@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from types import MappingProxyType
 from typing import Any, AsyncIterator, Dict, List, cast
 
 from agently import TriggerFlow
@@ -127,6 +128,7 @@ class TriggerFlowWorkflowEngine:
                 bound_step: WorkflowStep = step,
                 bound_index: int = index,
             ) -> Dict[str, Any]:
+                nonlocal context
                 payload_raw = getattr(data, "value", None)
                 payload: Dict[str, Any] = dict(payload_raw) if isinstance(payload_raw, dict) else {}
                 terminal = payload.get("__terminal_result__")
@@ -149,7 +151,7 @@ class TriggerFlowWorkflowEngine:
                 result = await self._execute_step(cast(Any, bound_step), context=step_context, services=services)
                 # 顶层 LoopStep.collect_as 需要把结果写回 workflow 级 bag，供后续步骤使用。
                 if isinstance(bound_step, LoopStep) and result.status == CapabilityStatus.SUCCESS and bound_step.collect_as:
-                    context.bag[bound_step.collect_as] = result.output
+                    context = context.with_bag_overlay(**{str(bound_step.collect_as): result.output})
 
                 await emit(
                     {
@@ -239,7 +241,7 @@ class TriggerFlowWorkflowEngine:
         """按步骤类型分发执行。"""
 
         if context.cancel_token is not None and context.cancel_token.is_cancelled:
-            return CapabilityResult(status=CapabilityStatus.CANCELLED, error="Cancelled by token")
+            return CapabilityResult(status=CapabilityStatus.CANCELLED, error="execution cancelled")
 
         if isinstance(step, Step):
             return await self._execute_basic_step(step, context=context, services=services)
@@ -309,11 +311,13 @@ class TriggerFlowWorkflowEngine:
                 max_depth=context.max_depth,
                 guards=context.guards,
                 cancel_token=context.cancel_token,
-                bag={
-                    **context.bag,
-                    "__current_item__": item,
-                    _WF_BRANCH_ID_KEY: f"{step.id}:{_idx}",
-                },
+                bag=MappingProxyType(
+                    {
+                        **dict(context.bag),
+                        "__current_item__": item,
+                        _WF_BRANCH_ID_KEY: f"{step.id}:{_idx}",
+                    }
+                ),
                 step_outputs=dict(context.step_outputs),
                 step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),
@@ -343,7 +347,7 @@ class TriggerFlowWorkflowEngine:
             except asyncio.TimeoutError:
                 result = CapabilityResult(
                     status=CapabilityStatus.FAILED,
-                    error=f"step timeout: {step.id}",
+                    error=f"loop timeout: {step.id}",
                     output=[],
                 )
         else:
@@ -355,8 +359,6 @@ class TriggerFlowWorkflowEngine:
             )
 
         context.step_outputs[step.id] = result.output
-        if result.status == CapabilityStatus.SUCCESS and step.collect_as:
-            context.bag[step.collect_as] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
         return result
 
@@ -377,7 +379,7 @@ class TriggerFlowWorkflowEngine:
                 max_depth=context.max_depth,
                 guards=context.guards,
                 cancel_token=context.cancel_token,
-                bag={**context.bag, _WF_BRANCH_ID_KEY: f"{step.id}:{i}"},
+                bag=MappingProxyType({**dict(context.bag), _WF_BRANCH_ID_KEY: f"{step.id}:{i}"}),
                 step_outputs=dict(context.step_outputs),
                 step_results=dict(context.step_results),
                 call_chain=list(context.call_chain),

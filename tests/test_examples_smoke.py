@@ -97,7 +97,8 @@ def test_app_sse_gateway_minimal_offline_smoke(tmp_path: Path) -> None:
     workspace.mkdir(parents=True, exist_ok=True)
 
     httpd = create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=workspace)
-    host, port = httpd.server_address[0], int(httpd.server_address[1])
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
 
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()

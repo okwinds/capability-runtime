@@ -77,7 +77,8 @@ def test_ui_events_showcase_after_id_is_exclusive(monkeypatch: pytest.MonkeyPatc
     from examples.apps.ui_events_showcase.run import create_server  # type: ignore
 
     httpd = create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=tmp_path)
-    host, port = httpd.server_address[0], int(httpd.server_address[1])
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
 
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
@@ -103,7 +104,11 @@ def test_ui_events_showcase_after_id_is_exclusive(monkeypatch: pytest.MonkeyPatc
             next_one = _read_jsonl_n(resp2, 1)
         assert next_one
         assert str(next_one[0].get("rid") or "") != first_rid
-        assert int(next_one[0].get("seq")) > int(first_two[0].get("seq"))
+        next_seq = next_one[0].get("seq")
+        first_seq = first_two[0].get("seq")
+        assert isinstance(next_seq, int)
+        assert isinstance(first_seq, int)
+        assert next_seq > first_seq
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -113,7 +118,8 @@ def test_ui_events_showcase_sse_framing_is_data_prefix(monkeypatch: pytest.Monke
     from examples.apps.ui_events_showcase.run import create_server  # type: ignore
 
     httpd = create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=tmp_path)
-    host, port = httpd.server_address[0], int(httpd.server_address[1])
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     try:
@@ -149,7 +155,8 @@ def test_ui_events_showcase_after_id_invalid_emits_diagnostic_event(monkeypatch:
     from examples.apps.ui_events_showcase.run import create_server  # type: ignore
 
     httpd = create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=tmp_path)
-    host, port = httpd.server_address[0], int(httpd.server_address[1])
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     try:
@@ -186,7 +193,8 @@ def test_ui_events_showcase_real_mode_is_fail_closed(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(showcase_run, "_init_real_provider", _boom, raising=False)
 
     httpd = showcase_run.create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=tmp_path)
-    host, port = httpd.server_address[0], int(httpd.server_address[1])
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     try:

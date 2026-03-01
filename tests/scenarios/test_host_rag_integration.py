@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -117,7 +118,7 @@ async def test_pre_run_injection_meta_uses_minimal_disclosure(monkeypatch: pytes
     injected_messages = build_rag_injected_messages(query="审批 流程 证据链", rag_result=rag_result)
     rag_meta = build_rag_meta(mode="pre_run", query="审批 流程 证据链", top_k=2, rag_result=rag_result)
 
-    ctx = ExecutionContext(run_id="r1", bag={"__host_meta__": {"initial_history": injected_messages}})
+    ctx = ExecutionContext(run_id="r1", bag=MappingProxyType({"__host_meta__": {"initial_history": injected_messages}}))
     out = await rt.run("A", input={"task": "请总结审批流策略"}, context=ctx)
     assert out.node_report is not None
     out.node_report.meta["rag"] = rag_meta

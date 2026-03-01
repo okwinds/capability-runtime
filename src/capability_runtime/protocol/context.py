@@ -2,7 +2,9 @@ from __future__ import annotations
 
 """执行上下文——跨能力状态传递和调用链管理。"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Dict, List, Optional
 
 
@@ -14,18 +16,25 @@ class CancellationToken:
     """协作取消 token（不强制打断正在运行的步骤）。"""
 
     def __init__(self) -> None:
-        self._cancelled = False
+        import asyncio
+
+        self._event = asyncio.Event()
 
     @property
     def is_cancelled(self) -> bool:
         """是否已被标记为取消。"""
 
-        return self._cancelled
+        return self._event.is_set()
 
     def cancel(self) -> None:
         """标记为取消。"""
 
-        self._cancelled = True
+        self._event.set()
+
+    async def wait(self) -> None:
+        """等待取消发生。"""
+
+        await self._event.wait()
 
 
 @dataclass
@@ -50,11 +59,27 @@ class ExecutionContext:
     max_depth: int = 10
     guards: Any = None
     cancel_token: Optional[CancellationToken] = None
-    bag: Dict[str, Any] = field(default_factory=dict)
+    bag: MappingProxyType[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     step_outputs: Dict[str, Any] = field(default_factory=dict)
     # step_id -> {status, output, error, report}（面向编排的执行证据；不落盘）
     step_results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     call_chain: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        """
+        运行时强约束：bag 必须为不可变映射（MappingProxyType）。
+
+        说明：
+        - 调用方（包括 adapters/engines/tests）可能仍传入 dict；
+        - 这里统一转换为 MappingProxyType(dict(...))，保证 `context.bag[k] = v` 会抛 TypeError。
+        """
+
+        if isinstance(self.bag, MappingProxyType):
+            return
+        if isinstance(self.bag, Mapping):
+            self.bag = MappingProxyType(dict(self.bag))
+            return
+        self.bag = MappingProxyType({})
 
     def with_bag_overlay(self, **updates: Any) -> ExecutionContext:
         """
@@ -63,9 +88,11 @@ class ExecutionContext:
         设计目标：
         - 用于 workflow_id/step_id/branch_id 等"临时 hint"注入；
         - 共享 step_outputs/step_results 引用，保证执行证据链可持续累积；
-        - 不改变公共 API；并保持 `bag` 仍可用于持久写入（例如 LoopStep.collect_as）。
+        - bag 为不可变映射，所有修改必须通过 overlay 创建新 context。
         """
 
+        base = dict(self.bag)
+        base.update(updates)
         return ExecutionContext(
             run_id=self.run_id,
             parent_context=self.parent_context,
@@ -73,7 +100,7 @@ class ExecutionContext:
             max_depth=self.max_depth,
             guards=self.guards,
             cancel_token=self.cancel_token,
-            bag={**self.bag, **updates},
+            bag=MappingProxyType(base),
             step_outputs=self.step_outputs,
             step_results=self.step_results,
             call_chain=self.call_chain,
@@ -85,7 +112,7 @@ class ExecutionContext:
 
         行为：
         - depth + 1；超过 max_depth 抛 RecursionLimitError
-        - bag 浅拷贝（子 context 可修改自己的 bag 而不影响父级）
+        - bag 生成快照（不可变映射视图；修改需通过 with_bag_overlay 返回新 context）
         - step_outputs 清空（子 context 有独立的步骤输出空间）
         - call_chain 追加当前 capability_id
         """
@@ -103,7 +130,7 @@ class ExecutionContext:
             max_depth=self.max_depth,
             guards=self.guards,
             cancel_token=self.cancel_token,
-            bag=dict(self.bag),
+            bag=MappingProxyType(dict(self.bag)),
             step_outputs={},
             step_results={},
             call_chain=self.call_chain + [capability_id],
@@ -155,12 +182,12 @@ class ExecutionContext:
             rest = expression[len("step.") :]
             parts = rest.split(".", 1)
             step_id = parts[0]
-            key = parts[1] if len(parts) > 1 else None
+            step_key = parts[1] if len(parts) > 1 else None
             out = self.step_outputs.get(step_id)
-            if key is None:
+            if step_key is None:
                 return out
             if isinstance(out, dict):
-                return out.get(key)
+                return out.get(step_key)
             return None
 
         if expression.startswith("result."):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional
+from types import MappingProxyType
 
 import pytest
 
@@ -35,7 +36,11 @@ async def test_triggerflow_engine_uses_services_registry_and_execute_capability(
 
     ctx = ExecutionContext(run_id="r1")
     engine = TriggerFlowWorkflowEngine()
-    result = await engine._execute_basic_step(Step(id="s1", capability=CapabilityRef(id="A")), context=ctx, services=services)
+    result = await engine._execute_basic_step(
+        Step(id="s1", capability=CapabilityRef(id="A")),
+        context=ctx,
+        services=services,  # type: ignore[arg-type]
+    )
 
     assert result.status == CapabilityStatus.SUCCESS
     assert services.calls and services.calls[0]["spec_id"] == "A"
@@ -57,9 +62,13 @@ async def test_cancellation_token_short_circuits_step_execution() -> None:
     engine = TriggerFlowWorkflowEngine()
     services = _NoCallServices(registry=registry)
 
-    result = await engine._execute_step(Step(id="s1", capability=CapabilityRef(id="A")), context=ctx, services=services)
+    result = await engine._execute_step(
+        Step(id="s1", capability=CapabilityRef(id="A")),
+        context=ctx,
+        services=services,  # type: ignore[arg-type]
+    )
     assert result.status == CapabilityStatus.CANCELLED
-    assert result.error == "Cancelled by token"
+    assert result.error == "execution cancelled"
 
 
 @pytest.mark.asyncio
@@ -79,7 +88,7 @@ async def test_step_timeout_returns_failed_result() -> None:
     result = await engine._execute_basic_step(
         Step(id="s1", capability=CapabilityRef(id="A"), timeout_s=0.01),
         context=ctx,
-        services=services,
+        services=services,  # type: ignore[arg-type]
     )
 
     assert result.status == CapabilityStatus.FAILED
@@ -99,7 +108,7 @@ async def test_loop_step_timeout_is_supported() -> None:
     token: Optional[CancellationToken] = None
     ctx = ExecutionContext(
         run_id="r1",
-        bag={"items": [1, 2, 3]},
+        bag=MappingProxyType({"items": [1, 2, 3]}),
         guards=ExecutionGuards(max_total_loop_iterations=1000),
         cancel_token=token,
     )
@@ -110,6 +119,7 @@ async def test_loop_step_timeout_is_supported() -> None:
     result = await engine._execute_loop_step(
         LoopStep(id="loop", capability=CapabilityRef(id="A"), iterate_over="context.items", timeout_s=0.01),
         context=ctx,
-        services=services,
+        services=services,  # type: ignore[arg-type]
     )
     assert result.status == CapabilityStatus.FAILED
+    assert result.error == "loop timeout: loop"

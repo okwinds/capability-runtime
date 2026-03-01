@@ -382,7 +382,7 @@ class RuntimeUIEventProjector:
                 # 绑定 call origin：后续 finished/approval 必须复用该归属（哪来哪去）
                 self._call_origin_path.setdefault(call_id, list(path))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
-            data: Dict[str, Any] = {"tool": tool, "call_id": call_id}
+            data = {"tool": tool, "call_id": call_id}
             if args_summary is not None:
                 data["args_summary"] = args_summary
             out.append(self._emit(type="tool.requested", path=path, data=data, evidence=Evidence(call_id=call_id)))
@@ -401,7 +401,7 @@ class RuntimeUIEventProjector:
                     path.append(PathSegment(kind="call", id=call_id))
             path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "WAITING_APPROVAL"}))
-            data: Dict[str, Any] = {"tool": tool}
+            data = {"tool": tool}
             if call_id:
                 data["call_id"] = call_id
             if approval_key is not None:
@@ -424,7 +424,7 @@ class RuntimeUIEventProjector:
                     path.append(PathSegment(kind="call", id=call_id))
             path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
-            data: Dict[str, Any] = {"tool": tool, "decision": decision or "unknown"}
+            data = {"tool": tool, "decision": decision or "unknown"}
             if call_id:
                 data["call_id"] = call_id
             if reason is not None:
@@ -447,7 +447,7 @@ class RuntimeUIEventProjector:
                 if call_id:
                     path.append(PathSegment(kind="call", id=call_id))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "THINKING"}))
-            data: Dict[str, Any] = {"tool": tool, "call_id": call_id, "ok": bool(ok)}
+            data = {"tool": tool, "call_id": call_id, "ok": bool(ok)}
             if error_kind:
                 data["error_kind"] = error_kind
             if result_summary is not None:

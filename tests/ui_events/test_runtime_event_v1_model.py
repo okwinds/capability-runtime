@@ -35,9 +35,8 @@ def test_runtime_event_v1_model_forbids_extra_and_dumps_schema_alias() -> None:
             path=[],
             data={},
             rid="1",
-            extra_field="nope",  # type: ignore[arg-type]
+            extra_field="nope",  # type: ignore[call-arg]
         )
 
     with pytest.raises(ValidationError):
-        PathSegment(kind="run", id="r1", extra=1)  # type: ignore[arg-type]
-
+        PathSegment(kind="run", id="r1", extra=1)  # type: ignore[call-arg]

@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 from skills_runtime.core.errors import FrameworkIssue
 
 from .config import RuntimeConfig
-from .protocol.capability import CapabilityResult
+from .protocol.capability import CapabilityResult, CapabilityStatus
 from .protocol.context import ExecutionContext
 from .registry import CapabilityRegistry
 from .types import NodeReport
@@ -128,3 +128,22 @@ def call_callback(cb: Any, *args: Any) -> None:
         cb(args[0])
         return
     cb()
+
+
+def map_node_status(report: NodeReport) -> CapabilityStatus:
+    """
+    将 NodeReport 控制面状态映射为 CapabilityStatus。
+
+    约束：
+    - needs_approval / incomplete 不得折叠为 failed（避免编排误判）。
+    """
+
+    if report.status == "success":
+        return CapabilityStatus.SUCCESS
+    if report.status == "failed":
+        return CapabilityStatus.FAILED
+    if report.status == "needs_approval":
+        return CapabilityStatus.PENDING
+    if report.status == "incomplete":
+        return CapabilityStatus.CANCELLED if report.reason == "cancelled" else CapabilityStatus.PENDING
+    return CapabilityStatus.FAILED

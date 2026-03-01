@@ -13,7 +13,7 @@ def test_path_segment_supports_optional_instance_fields_and_forbids_extra() -> N
     assert seg.ref == {"kind": "workflow", "id": "wf.x"}
 
     with pytest.raises(Exception):
-        PathSegment(kind="workflow", id="wf_inst_1", extra_field="nope")  # type: ignore[arg-type]
+        PathSegment(kind="workflow", id="wf_inst_1", extra_field="nope")  # type: ignore[call-arg]
 
 
 def test_runtime_event_v1_accepts_repeated_kind_in_path_and_old_payload_shape() -> None:

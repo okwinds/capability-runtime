@@ -14,6 +14,7 @@ from capability_runtime.protocol.capability import (
     CapabilitySpec,
     CapabilityStatus,
 )
+from capability_runtime.protocol.context import CancellationToken, ExecutionContext
 from capability_runtime.protocol.workflow import (
     ConditionalStep,
     InputMapping,
@@ -77,6 +78,56 @@ async def test_sequential_steps():
 
 
 @pytest.mark.asyncio
+async def test_workflow_cancellation_integration_stops_at_step_boundary() -> None:
+    """
+    集成护栏（task 9.6）：workflow 在步骤边界感知 cancel_token，并返回 CANCELLED。
+
+    语义：
+    - 取消发生在 step1 执行中：step1 允许完成；
+    - 下一步开始前检测到已取消：跳过 step2，并返回 error="execution cancelled"。
+    """
+
+    started = asyncio.Event()
+    proceed = asyncio.Event()
+    called_b = False
+
+    async def handler(spec: AgentSpec, _input: Dict[str, Any], _ctx: ExecutionContext):
+        nonlocal called_b
+        if spec.base.id == "A":
+            started.set()
+            await proceed.wait()
+            return {"ok": True, "agent": "A"}
+        if spec.base.id == "B":
+            called_b = True
+            raise AssertionError("step B should not be executed after cancellation")
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-CANCEL", kind=CapabilityKind.WORKFLOW, name="cancel"),
+        steps=[
+            Step(id="s1", capability=CapabilityRef(id="A")),
+            Step(id="s2", capability=CapabilityRef(id="B")),
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    token = CancellationToken()
+    ctx = ExecutionContext(run_id="r1", cancel_token=token)
+
+    task = asyncio.create_task(rt.run("WF-CANCEL", context=ctx))
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    token.cancel()
+    proceed.set()
+    result = await asyncio.wait_for(task, timeout=1.0)
+
+    assert called_b is False
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.error == "execution cancelled"
+
+
+@pytest.mark.asyncio
 async def test_loop_step():
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-L", kind=CapabilityKind.WORKFLOW, name="loop"),
@@ -115,7 +166,8 @@ async def test_loop_step_collect_as_injects_results_into_context_bag() -> None:
 
     期望：
     - loop 的结果仍写入 `step_outputs[loop_step_id]`（对外输出保持一致）；
-    - 同时把同一结果写入 `context.bag[collect_as]`，允许后续步骤用 `context.<collect_as>` 引用。
+    - 同时把同一结果注入到 workflow 级 context 的 bag overlay（key=collect_as），允许后续步骤用
+      `context.<collect_as>` 引用。
     """
 
     wf = WorkflowSpec(
@@ -199,22 +251,12 @@ async def test_parallel_step_context_bag_is_isolated_between_branches():
     """
 
     async def handler(spec: AgentSpec, _input: Dict[str, Any], context):
-        """
-        用 parent_context.bag 做“可见层级”的写入，增强用例强度：
-        - 若并行分支错误共享同一个 branch_context，B 将观察到 A 的写入；
-        - 若隔离正确，B 不应看到 leak。
-        """
-
-        if spec.base.id == "A":
-            assert context.parent_context is not None
-            context.parent_context.bag["leak"] = "A"
-            return {"ok": True}
-        if spec.base.id == "B":
-            await asyncio.sleep(0)
-            assert context.parent_context is not None
-            if "leak" in context.parent_context.bag:
-                return CapabilityResult(status=CapabilityStatus.FAILED, error="context leak detected")
-            return {"ok": True}
+        # bag 已改为不可变映射（MappingProxyType）：不应再用“写入 bag”来测试隔离。
+        # 改为断言：每个并行分支都有独立的 __wf_branch_id。
+        _ = _input
+        bid = context.bag.get("__wf_branch_id")
+        if spec.base.id in ("A", "B"):
+            return {"branch_id": bid, "agent": spec.base.id}
         return {"ok": True}
 
     wf = WorkflowSpec(
@@ -236,6 +278,11 @@ async def test_parallel_step_context_bag_is_isolated_between_branches():
 
     result = await rt.run("WF-P-ISO")
     assert result.status == CapabilityStatus.SUCCESS
+    branches = result.output["p1"]
+    assert isinstance(branches, list)
+    assert {b.get("agent") for b in branches} == {"A", "B"}
+    assert all(b.get("branch_id") for b in branches)
+    assert len({b.get("branch_id") for b in branches}) == 2
 
 
 @pytest.mark.asyncio

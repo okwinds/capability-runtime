@@ -16,6 +16,7 @@ dependencies = [
 dev = [
   "pytest>=7",
   "pytest-asyncio>=0.23",
+  "mypy>=1.8",
 ]
 
 [tool.setuptools]
@@ -31,6 +32,19 @@ testpaths = ["tests"]
 markers = [
   "integration: optional integration tests (may require docker/services)",
 ]
+
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+explicit_package_bases = true
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_unused_configs = true
+disable_error_code = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["examples.*"]
+ignore_errors = true
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

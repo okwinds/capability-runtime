@@ -102,7 +102,7 @@ def test_invoke_capability_tool_returns_artifact_digest(tmp_path: Path) -> None:
     )
     assert rt.validate() == []
 
-    ctx = ExecutionContext(run_id="t_invoke_capability_tool", max_depth=5, guards=None, bag={})
+    ctx = ExecutionContext(run_id="t_invoke_capability_tool", max_depth=5, guards=None)
     result = asyncio.run(rt.run("outer", input={}, context=ctx))
     assert result.node_report is not None
 
@@ -193,7 +193,7 @@ def test_invoke_capability_tool_timeout_sets_error_kind(tmp_path: Path) -> None:
     )
     assert rt.validate() == []
 
-    ctx = ExecutionContext(run_id="t_invoke_capability_timeout", max_depth=5, guards=None, bag={})
+    ctx = ExecutionContext(run_id="t_invoke_capability_timeout", max_depth=5, guards=None)
     result = asyncio.run(rt.run("outer_timeout", input={}, context=ctx))
     assert result.node_report is not None
 

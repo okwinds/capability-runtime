@@ -20,7 +20,7 @@ def _get_skills_runtime_version() -> Optional[str]:
     """读取 skills_runtime.__version__（若可用）。"""
 
     try:
-        import skills_runtime  # type: ignore
+        import skills_runtime
 
         v = getattr(skills_runtime, "__version__", None)
         if isinstance(v, str) and v.strip():
@@ -371,7 +371,7 @@ def build_fail_closed_report(
         # 证据链上优先使用 skills_runtime.__version__（比 dist-info 更可靠，尤其在 editable 安装场景）。
         if any(n in ("skills-runtime-sdk", "skills-runtime-sdk-python") for n in names):
             try:
-                import skills_runtime  # type: ignore
+                import skills_runtime
 
                 v = getattr(skills_runtime, "__version__", None)
                 if isinstance(v, str) and v.strip():

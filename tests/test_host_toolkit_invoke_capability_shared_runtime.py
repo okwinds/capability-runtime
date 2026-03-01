@@ -104,7 +104,7 @@ def test_invoke_capability_shared_runtime_executes_child(tmp_path: Path) -> None
     )
     assert outer_rt.validate() == []
 
-    ctx = ExecutionContext(run_id="t_invoke_capability_shared_runtime", max_depth=5, guards=None, bag={})
+    ctx = ExecutionContext(run_id="t_invoke_capability_shared_runtime", max_depth=5, guards=None)
     result = asyncio.run(outer_rt.run("outer_shared", input={}, context=ctx))
     assert result.node_report is not None
 
@@ -120,4 +120,3 @@ def test_invoke_capability_shared_runtime_executes_child(tmp_path: Path) -> None
     expected_bytes = b"shared-child"
     assert obj.get("child_output_sha256") == hashlib.sha256(expected_bytes).hexdigest()
     assert obj.get("child_output_bytes") == len(expected_bytes)
-

@@ -14,7 +14,7 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol
+from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol, cast
 
 from skills_runtime.core.agent import ChatBackend
 from skills_runtime.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
@@ -149,7 +149,17 @@ class AgentlyChatBackend(ChatBackend):
         parser = ChatCompletionsSseParser()
         saw_done = False
 
-        async for event, data in requester.request_model(request_data):
+        # 兼容：不同版本/实现的 requester 可能返回：
+        # - async iterator（可直接 async for）
+        # - coroutine -> async iterator（需要 await 一次再 async for）
+        stream_or_coro = requester.request_model(request_data)
+        stream: AsyncIterator[tuple[str, Any]]
+        if hasattr(stream_or_coro, "__aiter__"):
+            stream = cast(AsyncIterator[tuple[str, Any]], stream_or_coro)
+        else:
+            stream = await stream_or_coro
+
+        async for event, data in stream:
             if event == "error":
                 if isinstance(data, BaseException):
                     raise data
