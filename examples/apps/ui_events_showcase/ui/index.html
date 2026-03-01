@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>UI Events Showcase (offline)</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要内容</a>
+    <header class="topbar" role="banner">
+      <div class="brand">
+        <div class="brand__title">UI Events Showcase</div>
+        <div class="brand__subtitle">RuntimeEvent v1 · offline fixtures</div>
+      </div>
+      <div class="controls" role="group" aria-label="连接控制">
+        <label class="field">
+          <span class="field__label">Mode</span>
+          <select id="modeSelect" class="field__input" aria-label="mode">
+            <option value="offline" selected>offline</option>
+            <option value="real">real (gated)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Level</span>
+          <select id="levelSelect" class="field__input" aria-label="level">
+            <option value="ui" selected>ui</option>
+            <option value="lite">lite</option>
+            <option value="raw">raw</option>
+          </select>
+        </label>
+        <button id="connectBtn" class="btn btn--primary" type="button">连接</button>
+      </div>
+    </header>
+
+    <main id="main" class="layout" role="main">
+      <section class="panel panel--left" aria-label="Workflow">
+        <div class="panel__header">
+          <h2 class="panel__title">Workflow</h2>
+          <button id="toggleLeftBtn" class="btn btn--ghost" type="button" aria-label="折叠/展开 workflow 面板">
+            折叠
+          </button>
+        </div>
+        <div class="panel__body">
+          <div id="workflowTree" class="mono small" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="panel panel--center" aria-label="Chat">
+        <div class="panel__header">
+          <h2 class="panel__title">Chat</h2>
+          <div id="statusPill" class="pill" aria-live="polite">未连接</div>
+        </div>
+        <div class="panel__body">
+          <div id="chatLog" class="chat" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="panel panel--right" aria-label="Events and Evidence">
+        <div class="panel__header">
+          <h2 class="panel__title">Events & Evidence</h2>
+          <div class="panel__meta mono small">
+            <div>session: <span id="sessionIdText">-</span></div>
+            <div>run: <span id="runIdText">-</span></div>
+          </div>
+        </div>
+        <div class="panel__body">
+          <details class="details" open>
+            <summary class="details__summary">最新事件</summary>
+            <pre id="latestEvent" class="code" aria-label="latest event"></pre>
+          </details>
+          <details class="details" open>
+            <summary class="details__summary">证据指针（evidence）</summary>
+            <div id="evidenceBox" class="mono small"></div>
+          </details>
+          <details class="details">
+            <summary class="details__summary">全部事件（最近 200 条）</summary>
+            <pre id="eventsLog" class="code" aria-label="events log"></pre>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <script src="/ui/app.js"></script>
+  </body>
+</html>
+
