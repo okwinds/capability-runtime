@@ -11,7 +11,7 @@ from capability_runtime.protocol.context import ExecutionContext, RecursionLimit
 
 
 class TestResolveMapping:
-    """resolve_mapping 6 种前缀全覆盖。"""
+    """resolve_mapping 前缀族全覆盖（含 result.*）。"""
 
     def test_context_prefix(self):
         ctx = ExecutionContext(run_id="r1", bag={"name": "Alice", "age": 25})
@@ -43,6 +43,26 @@ class TestResolveMapping:
         ctx.step_outputs["s1"] = {"x": 1, "y": 2}
         result = ctx.resolve_mapping("step.s1")
         assert result == {"x": 1, "y": 2}
+
+    def test_result_prefix_whole_and_scalar_fields(self):
+        ctx = ExecutionContext(run_id="r1")
+        ctx.step_results["s1"] = {"status": "success", "output": {"x": 1}, "error": None, "report": None}
+
+        assert ctx.resolve_mapping("result.s1") == {"status": "success", "output": {"x": 1}, "error": None, "report": None}
+        assert ctx.resolve_mapping("result.s1.status") == "success"
+        assert ctx.resolve_mapping("result.s1.output.x") == 1
+        assert ctx.resolve_mapping("result.s1.missing") is None
+        assert ctx.resolve_mapping("result.s2") is None
+
+    def test_result_prefix_report_status_supports_object_and_dict(self):
+        from types import SimpleNamespace
+
+        ctx = ExecutionContext(run_id="r1")
+        ctx.step_results["obj"] = {"report": SimpleNamespace(status="needs_approval")}
+        ctx.step_results["dict"] = {"report": {"status": "failed"}}
+
+        assert ctx.resolve_mapping("result.obj.report.status") == "needs_approval"
+        assert ctx.resolve_mapping("result.dict.report.status") == "failed"
 
     def test_literal_prefix(self):
         ctx = ExecutionContext(run_id="r1")

@@ -1,4 +1,4 @@
-# Cheatsheet：最短闭环（以统一 Runtime 为真相源）
+# Cheatsheet：最短闭环（以统一 Runtime 为唯一执行入口）
 
 > 面向：编码智能体 / 维护者  
 > 目标：用最少上下文跑通 **Protocol（声明）→ Runtime（执行）→ Report（证据链）** 的最小闭环。  
@@ -67,7 +67,7 @@ from capability_runtime import (
 ## 4) 常见错误（最短排查路径）
 
 - 忘记 `validate()`：`Capability not found: ...`（先注册缺失能力再跑）
-- 误以为本仓还内置“skills 原语/注入机制”：本仓只暴露 Agent/Workflow；skills（catalog/mention/sources/preflight/tools/approvals/WAL）以 `skills_runtime` 为真相源
+- 误以为本仓还内置“skills 原语/注入机制”：本仓只暴露 Agent/Workflow；skills（catalog/mention/sources/preflight/tools/approvals/WAL）由上游 `skills_runtime` 提供
 - 想在本仓走 “TriggerFlow tool”：已按规格搁置归档；应在业务侧用 TriggerFlow 顶层调用 `Runtime.run()`
 
 ## 5) invoke_capability（能力委托工具）要点

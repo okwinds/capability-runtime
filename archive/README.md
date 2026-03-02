@@ -15,10 +15,9 @@
 
 ## 归档内容（分类）
 
-- `archive/instructcontext/`
-  - 早期用于驱动实现的指令/上下文素材（prompt/过程输入等），保留用于追溯“为何这样设计/实现”。
 - `archive/docs/`
   - 文档与指令上下文归档包（将建设过程中的文档材料从主线移出，保留对照与可追溯入口）。
+  - 其中部分归档包包含早期“指令/上下文素材”（例如：`archive/docs/2026-02-24-unified-runtime-refactor/archive/instructcontext/`），用于追溯“为何这样设计/实现”。
 - `archive/examples-legacy/`
   - `examples/` 的对照示例归档（多数基于旧入口/旧叙事；主线不保证可运行）。
 - `archive/legacy/`

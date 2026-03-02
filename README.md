@@ -50,7 +50,7 @@ flowchart TD
   A[声明能力<br/>AgentSpec / WorkflowSpec] --> B[Runtime.register / validate]
   B --> C[Runtime.run / run_stream]
   C --> D{能力类型}
-  D -->|Agent| E[AgentAdapter -> skills_runtime.Agent]
+  D -->|Agent| E[AgentAdapter -> skills_runtime.core.agent.Agent]
   D -->|Workflow| F[TriggerFlowWorkflowEngine<br/>内部编排]
   F --> E
   E --> G[WAL / AgentEvent / Tool Evidence]
@@ -65,7 +65,7 @@ flowchart TD
 在完整系统里，**Skill / Agent / Workflow 在能力范式上都是一等公民**；但本仓对外的“公共承诺”需要稳定且可回归：
 
 - **对外承诺的能力原语**：仅 **Agent / Workflow**（可注册/可编排/可执行），统一入口为 `Runtime`。
-- **skills 引擎能力的真相源**：由上游 `skills_runtime`（`skills-runtime-sdk`）提供（strict catalog + mention + sources + preflight + tools/approvals + WAL/events）。本仓不把 `skill` 作为公共协议原语，也不重造 skills 注入/调度引擎，避免形成第二套 skills 体系。
+- **skills 引擎能力由上游提供**：由上游 `skills_runtime`（`skills-runtime-sdk`）提供（strict catalog + mention + sources + preflight + tools/approvals + WAL/events）。本仓不把 `skill` 作为公共协议原语，也不重造 skills 注入/调度引擎，避免形成第二套 skills 体系。
 - **证据链优先**：编排分支与审计优先读取 `NodeReport` / WAL / tool evidence（控制面），而不是解析 `output` 自由文本（数据面）。
 
 可将本仓理解为：**“协议二元（Agent/Workflow）+ 引擎一元（skills_runtime）+ 证据链闭环（NodeReport/WAL）”**。
@@ -84,7 +84,7 @@ flowchart TD
   - Agent：以 Skill 为主要驱动的宿主节点（thin shell）
   - Workflow：强结构编排，组合 Agent/Workflow
 
-[证据层 / Evidence Chain]（可审计、可回归的真相源）
+[证据层 / Evidence Chain]（可审计、可回归的证据链）
   - WAL/events/tool evidence → NodeReport（schema v1）
   - 编排分支与审计优先读取 NodeReport.status/reason，而非解析自由文本 output
 ```

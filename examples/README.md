@@ -1,13 +1,13 @@
 # examples（可运行示例）
 
 本目录包含两类示例资产：
-- **渐进式示例（01~04）**：展示本仓统一 `Runtime` 的核心用法（从 mock 到 bridge/编排）。
+- **渐进式示例（01~05）**：展示本仓统一 `Runtime` 的核心用法（从 mock 到 bridge/编排）。
 - **面向人类的小 app/MVP（`apps/`）**：简陋但体验好，同时支持 `offline/real` 双模式，默认离线可回归。
 
 ## 快速开始
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 最短闭环（推荐，从统一 Runtime 开始）：
@@ -22,7 +22,7 @@ Workflow 示例（离线可跑）：
 python examples/02_workflow/run.py
 ```
 
-## 渐进式示例索引（01~04）
+## 渐进式示例索引（01~05）
 
 | # | 目录 | 演示内容 | 需要真实 LLM |
 |---|------|---------|---------|
@@ -47,11 +47,12 @@ python examples/02_workflow/run.py
 
 | app | 形态 | 入口 | 说明 |
 |---|---|---|---|
-| `form_interview_pro` | Terminal | `apps/form_interview_pro/run.py` | 结构化提问→产物→确定性校验 |
-| `incident_triage_assistant` | Terminal | `apps/incident_triage_assistant/run.py` | 日志读取→澄清→runbook/report |
-| `ci_failure_triage_and_fix` | Terminal | `apps/ci_failure_triage_and_fix/run.py` | pytest fail→apply_patch→pytest ok→report |
-| `rules_parser_pro` | Terminal/Batch | `apps/rules_parser_pro/run.py` | rules→plan.json→确定性执行→result.json |
-| `sse_gateway_minimal` | HTTP/SSE | `apps/sse_gateway_minimal/run.py` | SSE 事件流→终态结果→wal_locator |
+| `form_interview_pro` | Terminal | `examples/apps/form_interview_pro/run.py` | 结构化提问→产物→确定性校验 |
+| `incident_triage_assistant` | Terminal | `examples/apps/incident_triage_assistant/run.py` | 日志读取→澄清→runbook/report |
+| `ci_failure_triage_and_fix` | Terminal | `examples/apps/ci_failure_triage_and_fix/run.py` | pytest fail→apply_patch→pytest ok→report |
+| `rules_parser_pro` | Terminal/Batch | `examples/apps/rules_parser_pro/run.py` | rules→plan.json→确定性执行→result.json |
+| `sse_gateway_minimal` | HTTP/SSE | `examples/apps/sse_gateway_minimal/run.py` | SSE 事件流→终态结果→wal_locator |
+| `ui_events_showcase` | Web UI | `examples/apps/ui_events_showcase/run.py` | UI Events v1：fixtures 回放 + SSE/JSONL + after_id 续传 |
 
 ## 对照示例（已归档，非主线）
 
@@ -62,3 +63,6 @@ python examples/02_workflow/run.py
 
 如需更完整的参考应用/原型（可能依赖真实服务与配置），见：
 - `archive/projects/`（已归档，不属于 runtime 主线交付物）
+
+补充说明：
+- “mvp studio” 属于下游的 MVP 级示例/集成目标，不属于本仓 runtime 框架主线交付物；如需追溯，请从 `archive/README.md` 进入查找归档入口。

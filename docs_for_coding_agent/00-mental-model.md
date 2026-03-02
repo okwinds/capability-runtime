@@ -2,7 +2,7 @@
 
 > 面向：编码智能体 / 维护者  
 > 目标：避免把本仓误读成“另一个 Agent Framework / Prompt 工程项目”。  
-> 真相源优先级：`DOCS_INDEX.md` → `openspec/specs/*`（契约/验收）→ `src/` 与 `tests/`（实现/回归）。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯（其中的章节号可作为背景索引，而非当前验收口径）。
+> 阅读/参考顺序（推荐）：`DOCS_INDEX.md` → `docs/specs/`（源规格/门禁依据）→ `openspec/specs/`（归档镜像/对照）→ 测试与运行证据（回归/取证）。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯（其中的章节号可作为背景索引，而非当前验收口径）。
 
 ## 1) 本仓解决的核心矛盾是什么？
 
@@ -32,7 +32,7 @@ flowchart LR
 
 关键口径：
 
-- **skills 体系**（mention/sources/preflight/tools/approvals/WAL）全部以 `skills_runtime` 为真相源；本仓不再定义“第三种 skills 协议/注入原语”。
+- **skills 体系**（mention/sources/preflight/tools/approvals/WAL）由上游 `skills_runtime` 提供；本仓不再定义“第三种 skills 协议/注入原语”。
 - **Agently 在本仓的角色**：可替换的传输层（桥接 SSE streaming）+ Workflow 内部 TriggerFlow 引擎实现（对外无感）。
 - **TriggerFlow tool（`triggerflow_run_flow`）不在主线**：按输入文档 2.5 搁置归档；推荐使用 TriggerFlow 顶层编排多个 `Runtime.run()`。
 
@@ -51,7 +51,7 @@ flowchart LR
 - `await Runtime.run(capability_id, input=..., context=...)`：直接拿终态 `CapabilityResult`
 - `async for x in Runtime.run_stream(...):`
   - Agent 路径：先转发上游事件（bridge/sdk_native），最后产出终态 `CapabilityResult`
-  - Workflow 路径：输出轻量 workflow 事件（`workflow.step.*`），最后产出终态 `CapabilityResult`
+  - Workflow 路径：输出轻量 workflow 事件（`workflow.started`、`workflow.step.*`、`workflow.finished`），最后产出终态 `CapabilityResult`
 
 ### 3.3 Report：系统级证据链（桥接模式）
 
@@ -62,7 +62,7 @@ flowchart LR
 
 你应该把 `NodeReport` 视为：
 
-- 回归护栏的“结构化真相源”（比对事件序列/工具证据）
+- 回归护栏的“结构化证据入口”（比对事件序列/工具证据）
 - 编排可观测性的“控制面”
 - 审计与排障的“证据链”
 

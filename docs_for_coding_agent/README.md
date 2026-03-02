@@ -5,7 +5,7 @@
 - 最短路径（怎么跑通 / 怎么扩展）
 - 质量门禁（怎么写测试、怎么证明“完整完成”）
 
-> 约定：本文档包以 `DOCS_INDEX.md` 与 `openspec/specs/*` 为“契约/验收真相源”，以 `src/` 与 `tests/` 为“代码真相源”。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯。
+> 约定：本文档包的阅读入口以 `DOCS_INDEX.md` 为准；源规格以 `docs/specs/` 为门禁依据；`openspec/specs/` 为归档镜像用于对照。验收与取证以离线回归测试、运行事件与 worklog 记录为准。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯。
 
 ## 推荐阅读顺序
 

@@ -22,12 +22,11 @@ python examples/apps/ui_events_showcase/run.py --mode offline
 - `GET /api/events?session_id=...&transport=sse[&after_id=...]`
 - `GET /api/events?session_id=...&transport=jsonl[&after_id=...]`
 
-## Real 模式（本切片仅门禁 fail-closed）
+## Real 模式（默认 fail-closed；需显式 gate）
 
-本切片不实现真实 provider；当请求 `mode=real` 且环境变量 `CAPRT_TEST_E2E_BRIDGE != "1"` 时：
+当请求 `mode=real` 且环境变量 `CAPRT_TEST_E2E_BRIDGE != "1"` 时：
 
 - `/api/start` 必须返回 403
 - 且不会触发 `.env` 读取或 provider 初始化
 
-后续切片将把 real 模式接到 Bridge E2E（读取 `.env`：`OPENAI_API_KEY/OPENAI_BASE_URL/MODEL_NAME`）。
-
+当 `CAPRT_TEST_E2E_BRIDGE == "1"` 且本地配置齐备时，real 模式可用于接入 Bridge E2E（读取 `.env`：`OPENAI_API_KEY/OPENAI_BASE_URL/MODEL_NAME`）。
