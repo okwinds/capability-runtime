@@ -11,6 +11,9 @@ from skills_runtime.core.contracts import AgentEvent
 from .protocol.capability import CapabilityResult, CapabilityStatus
 from .protocol.context import ExecutionContext
 
+# UI events 队列容量上限（防止内存无界增长）
+_UI_EVENTS_QUEUE_MAXSIZE = 1000
+
 
 class RuntimeUIEventsMixin:
     """
@@ -145,7 +148,7 @@ class RuntimeUIEventsMixin:
         lv = level if isinstance(level, StreamLevel) else StreamLevel.UI
         projector = RuntimeUIEventProjector(run_id=ctx.run_id, level=lv)
 
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=_UI_EVENTS_QUEUE_MAXSIZE)
         done = False
 
         def _tap(agent_ev: AgentEvent, tap_ctx: Dict[str, Any]) -> None:
@@ -153,7 +156,11 @@ class RuntimeUIEventsMixin:
             # 避免无关事件进入队列导致堆积/背压（参见 docs/specs/runtime-ui-events-v1.md）。
             if str(tap_ctx.get("run_id") or "") != str(ctx.run_id):
                 return
-            q.put_nowait(("agent_event", agent_ev, tap_ctx))
+            try:
+                q.put_nowait(("agent_event", agent_ev, tap_ctx))
+            except asyncio.QueueFull:
+                # 队列满时静默丢弃（fail-open）；UI events 不是审计真相源
+                pass
 
         self._register_agent_event_tap(_tap)
 

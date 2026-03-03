@@ -49,6 +49,34 @@ async def test_mock_handler_can_be_async() -> None:
     assert out.output["x"] == 1
 
 
+@pytest.mark.asyncio
+async def test_mock_handler_typeerror_inside_body_not_swallowed() -> None:
+    """问题 1：handler 内部的 TypeError 应该被捕获并返回 FAILED，而不是被吞掉。"""
+
+    def handler(_spec: AgentSpec, _input: Dict[str, Any]) -> Dict[str, Any]:
+        # 故意触发 TypeError
+        return {"result": len(None)}  # type: ignore[arg-type]
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.FAILED
+    assert "mock_handler error" in out.error
+    assert "TypeError" in out.error or "NoneType" in out.error
+
+
+@pytest.mark.asyncio
+async def test_mock_handler_two_param_works() -> None:
+    """问题 1：2 参数 handler 应该正常工作。"""
+
+    def handler(_spec: AgentSpec, input_dict: Dict[str, Any]) -> Dict[str, Any]:
+        return {"x": input_dict.get("x", 0) + 1}
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", input={"x": 10}, context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.output == {"x": 11}
+
+
 def test_build_task_includes_output_schema_and_skills_mentions() -> None:
     rt = _mk_runtime(
         cfg=RuntimeConfig(
@@ -104,6 +132,39 @@ def test_build_task_prefers_skills_mention_map_when_provided() -> None:
     )
     task = rt._agent_adapter._build_task(spec=spec, input={})  # type: ignore[attr-defined]
     assert "$[x:y].s1" in task
+
+
+def test_build_task_sections_use_constants() -> None:
+    """问题 5：_build_task 应使用模块级常量，而非硬编码字符串。"""
+    from capability_runtime.adapters import agent_adapter
+
+    # 验证常量存在且可访问
+    assert hasattr(agent_adapter, "_SECTION_SYSTEM")
+    assert hasattr(agent_adapter, "_SECTION_TASK")
+    assert hasattr(agent_adapter, "_SECTION_INPUT")
+    assert hasattr(agent_adapter, "_SECTION_OUTPUT_PREFIX")
+    assert hasattr(agent_adapter, "_SECTION_SKILLS")
+
+    # 验证常量值正确
+    assert agent_adapter._SECTION_SYSTEM == "## 系统指令"
+    assert agent_adapter._SECTION_TASK == "## 任务"
+    assert agent_adapter._SECTION_INPUT == "## 输入"
+    assert agent_adapter._SECTION_OUTPUT_PREFIX == "## 输出要求\n请严格按以下字段输出 JSON："
+    assert agent_adapter._SECTION_SKILLS == "## 使用以下 Skills"
+
+    # 验证 _build_task 使用了这些常量（通过 monkeypatch 替换验证）
+    original_section_task = agent_adapter._SECTION_TASK
+    try:
+        agent_adapter._SECTION_TASK = "## PATCHED_TASK"
+        rt = _mk_runtime(cfg=RuntimeConfig(mode="mock"))
+        spec = AgentSpec(
+            base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A", description="test desc")
+        )
+        task = rt._agent_adapter._build_task(spec=spec, input={})  # type: ignore[attr-defined]
+        assert "## PATCHED_TASK" in task
+        assert "test desc" in task
+    finally:
+        agent_adapter._SECTION_TASK = original_section_task
 
 
 @pytest.mark.asyncio
@@ -192,3 +253,101 @@ async def test_agent_adapter_can_run_in_sdk_native_mode_with_fake_runtime_servic
     assert terminal is not None
     assert terminal.status == CapabilityStatus.SUCCESS
     assert terminal.output == "ok"
+
+
+@pytest.mark.asyncio
+async def test_mock_handler_error_result_has_error_code_mock_handler_error() -> None:
+    """验证 mock_handler 抛异常时 error_code 为 MOCK_HANDLER_ERROR。"""
+
+    def handler(_spec: AgentSpec, _input: Dict[str, Any]) -> Dict[str, Any]:
+        raise ValueError("intentional error")
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.FAILED
+    assert "mock_handler error" in out.error
+    assert out.error_code == "MOCK_HANDLER_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_preflight_failure_result_has_error_code_preflight_failed() -> None:
+    """验证 preflight 失败时 error_code 为 PREFLIGHT_FAILED。"""
+    from skills_runtime.core.errors import FrameworkIssue
+
+    spec = AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"))
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="error")
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return [FrameworkIssue(code="TEST_ISSUE", message="test issue", details={})]
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            return {"status": status, "reason": reason}
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"code": issue.code, "message": issue.message}
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(spec=spec, input={}, context=ExecutionContext(run_id="r1")):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert "preflight failed" in terminal.error.lower()
+    assert terminal.error_code == "PREFLIGHT_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_engine_error_result_has_error_code_engine_error() -> None:
+    """验证 SDK Agent 执行异常时 error_code 为 ENGINE_ERROR。"""
+
+    spec = AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"))
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeSdkAgent:
+        async def run_stream_async(self, task: str, *, run_id: str, initial_history=None):  # type: ignore[no-untyped-def]
+            _ = (task, run_id, initial_history)
+            raise RuntimeError("engine crashed")
+            yield  # type: ignore[unreachable]
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, *, llm_config=None):  # type: ignore[no-untyped-def]
+            _ = llm_config
+            return _FakeSdkAgent()
+
+        def get_host_meta(self, *, context: ExecutionContext):  # type: ignore[no-untyped-def]
+            _ = context
+            return {}
+
+        def emit_agent_event_taps(self, *, ev, context: ExecutionContext, capability_id: str) -> None:  # type: ignore[no-untyped-def]
+            pass
+
+        def call_callback(self, cb, *args) -> None:  # type: ignore[no-untyped-def]
+            pass
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            return {"status": status, "reason": reason}
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(spec=spec, input={}, context=ExecutionContext(run_id="r1")):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert "engine crashed" in terminal.error
+    assert terminal.error_code == "ENGINE_ERROR"

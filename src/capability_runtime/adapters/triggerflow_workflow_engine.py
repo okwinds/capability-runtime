@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Dict, List, cast
 from agently import TriggerFlow
 
 from ..protocol.capability import CapabilityResult, CapabilityStatus
-from ..protocol.context import ExecutionContext
+from ..protocol.context import ExecutionContext, RecursionLimitError
 from ..protocol.workflow import (
     ConditionalStep,
     InputMapping,
@@ -285,7 +285,11 @@ class TriggerFlowWorkflowEngine:
                     timeout=step.timeout_s,
                 )
             except asyncio.TimeoutError:
-                result = CapabilityResult(status=CapabilityStatus.FAILED, error=f"step timeout: {step.id}")
+                result = CapabilityResult(
+                    status=CapabilityStatus.FAILED,
+                    error=f"step timeout: {step.id}",
+                    error_code="STEP_TIMEOUT",
+                )
         else:
             result = await services.execute_capability(spec=target_spec, input=step_input, context=context)
 
@@ -315,10 +319,16 @@ class TriggerFlowWorkflowEngine:
         target_spec = services.registry.get_or_raise(step.capability.id)
 
         async def execute_item(item: Any, _idx: int) -> CapabilityResult:
+            # 深度递增并检查是否超限
+            new_depth = context.depth + 1
+            if new_depth > context.max_depth:
+                raise RecursionLimitError(
+                    f"LoopStep '{step.id}' item[{_idx}]: 深度 {new_depth} 超过最大值 {context.max_depth}"
+                )
             item_context = ExecutionContext(
                 run_id=context.run_id,
                 parent_context=context,
-                depth=context.depth,
+                depth=new_depth,
                 max_depth=context.max_depth,
                 guards=context.guards,
                 cancel_token=context.cancel_token,
@@ -359,6 +369,7 @@ class TriggerFlowWorkflowEngine:
                 result = CapabilityResult(
                     status=CapabilityStatus.FAILED,
                     error=f"loop timeout: {step.id}",
+                    error_code="LOOP_TIMEOUT",
                     output=[],
                 )
         else:
@@ -382,11 +393,22 @@ class TriggerFlowWorkflowEngine:
     ) -> CapabilityResult:
         """执行并行步骤。"""
 
+        # 深度递增并检查是否超限
+        new_depth = context.depth + 1
+        if new_depth > context.max_depth:
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=(
+                    f"ParallelStep '{step.id}': 深度 {new_depth} 超过最大值 {context.max_depth}"
+                ),
+                metadata={"error_type": "recursion_limit"},
+            )
+
         branch_contexts = [
             ExecutionContext(
                 run_id=context.run_id,
                 parent_context=context,
-                depth=context.depth,
+                depth=new_depth,
                 max_depth=context.max_depth,
                 guards=context.guards,
                 cancel_token=context.cancel_token,

@@ -4,7 +4,7 @@ from __future__ import annotations
 统一运行时：声明 → 注册 → 校验 → 执行 → 报告。
 
 定位：
-- 对外只提供一个执行入口（Runtime），避免“双入口/双路径”导致的语义分叉；
+- 对外只提供一个执行入口（Runtime），避免"双入口/双路径"导致的语义分叉；
 - mock/bridge/sdk_native 通过 `RuntimeConfig.mode` 切换；
 - 控制面证据链以 `NodeReport` 为主（事件聚合），数据面输出保持生态兼容。
 """
@@ -54,6 +54,10 @@ class Runtime(RuntimeUIEventsMixin):
 
         参数：
         - config：运行时配置（含 mode 与桥接注入点）
+
+        注意：
+        - RuntimeConfig 为 frozen dataclass；内部可能通过 `replace()` 回填有效配置；
+        - 通过 `Runtime.config` 读取的配置可能与初始化时传入的实例不同。
         """
 
         self._config = config
@@ -81,13 +85,19 @@ class Runtime(RuntimeUIEventsMixin):
             self._sdk_state = self._sdk.state
             # 兼容：大部分调用方仅提供 sdk_config_paths（overlay），并不显式传 skills_config。
             # 为了让 Adapter/Engine 只依赖 RuntimeServices.config（而不读取内部 _sdk_state），
-            # 这里把“有效 skills_config”回填到对外暴露的 config 视图中（只读替换）。
+            # 这里把"有效 skills_config"回填到对外暴露的 config 视图中（只读替换）。
             if self._config.skills_config is None:
                 self._config = replace(self._config, skills_config=self._sdk_state.skills_config)
 
     @property
     def config(self) -> RuntimeConfig:
-        """运行时配置（只读）。"""
+        """
+        运行时配置（只读）。
+
+        注意：
+        - 返回的是运行时有效配置，可能与初始化时传入的 RuntimeConfig 实例不同；
+        - 内部可能通过 `replace()` 回填 skills_config 等字段。
+        """
 
         return self._config
 
@@ -174,7 +184,11 @@ class Runtime(RuntimeUIEventsMixin):
         约束：
         - mock 模式可能只产出终态 `CapabilityResult`（无中间事件）；
         - bridge/sdk_native 模式 MUST 转发上游 `AgentEvent`（如执行路径确实进入上游引擎）；
-        - 如果你需要“单一稳定事件协议 + 续传游标 + 最小披露”，请使用 `run_ui_events()` / `start_ui_events_session()`。
+        - 如果你需要"单一稳定事件协议 + 续传游标 + 最小披露"，请使用 `run_ui_events()` / `start_ui_events_session()`。
+
+        注意：
+        - 本方法为内部/进阶接口；消费方需自行 isinstance 分流三种类型；
+        - 推荐使用 `run_ui_events()` 或 `start_ui_events_session()` 获得统一事件协议。
         """
 
         spec = self._registry.get(capability_id)
@@ -182,6 +196,7 @@ class Runtime(RuntimeUIEventsMixin):
             yield CapabilityResult(
                 status=CapabilityStatus.FAILED,
                 error=f"Capability not found: {capability_id!r}",
+                error_code="CAPABILITY_NOT_FOUND",
             )
             return
 
@@ -210,12 +225,12 @@ class Runtime(RuntimeUIEventsMixin):
 
     async def _execute(self, *, spec: AnySpec, input: Dict[str, Any], context: ExecutionContext) -> CapabilityResult:
         """
-        内部执行：创建子 context 并分发到 Agent/Workflow 执行器。
+        内部执行: 创建子 context 并分发到 Agent/Workflow 执行器。
 
-        参数：
-        - spec：能力声明
-        - input：输入参数
-        - context：执行上下文
+        参数:
+        - spec: 能力声明
+        - input: 输入参数
+        - context: 执行上下文
         """
 
         base = _get_base(spec)
@@ -380,6 +395,12 @@ class Runtime(RuntimeUIEventsMixin):
 
     @property
     def last_node_report(self) -> Optional[NodeReport]:
-        """最近一次 bridge/sdk_native 执行产出的 NodeReport（可选便利属性）。"""
+        """
+        最近一次 bridge/sdk_native 执行产出的 NodeReport（可选便利属性）。
+
+        并发警告：
+        - 多个 `run()` / `run_stream()` 并发执行时，本属性将被最后一个完成的 run 覆盖；
+        - 如需 per-run 隔离报告，请从 `CapabilityResult.node_report` 读取。
+        """
 
         return self._last_node_report

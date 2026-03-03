@@ -171,6 +171,18 @@ class TestBagOverlay:
         assert over.step_outputs is ctx.step_outputs
         assert over.step_results is ctx.step_results
 
+    def test_with_bag_overlay_shares_step_outputs_reference(self):
+        """验证 with_bag_overlay 共享 step_outputs 引用（顺序执行设计）。"""
+        ctx = ExecutionContext(run_id="r1", bag={"a": 1})
+        over = ctx.with_bag_overlay(x=1)
+        assert over.step_outputs is ctx.step_outputs
+
+    def test_child_creates_fresh_step_outputs(self):
+        """验证 child() 创建独立的 step_outputs（并发隔离设计）。"""
+        ctx = ExecutionContext(run_id="r1")
+        child = ctx.child("cap")
+        assert child.step_outputs is not ctx.step_outputs
+
 
 class TestCancellationToken:
     def test_token_cancelled_flag(self):

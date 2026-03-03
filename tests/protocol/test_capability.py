@@ -79,3 +79,17 @@ def test_capability_result_failed():
     assert result.status == CapabilityStatus.FAILED
     assert result.error == "timeout"
     assert result.metadata["retry_count"] == 3
+
+
+def test_capability_result_error_code_default_none():
+    result = CapabilityResult(status=CapabilityStatus.SUCCESS, output="ok")
+    assert result.error_code is None
+
+
+def test_capability_result_error_code_can_be_set():
+    result = CapabilityResult(
+        status=CapabilityStatus.FAILED,
+        error="preflight failed",
+        error_code="PREFLIGHT_FAILED",
+    )
+    assert result.error_code == "PREFLIGHT_FAILED"

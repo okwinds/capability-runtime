@@ -79,6 +79,7 @@ class CapabilityResult:
     - status: 执行状态
     - output: 执行输出（类型由具体能力决定，通常是 dict 或 str）
     - error: 错误信息（仅 FAILED 时非 None）
+    - error_code: 机器可处理的错误码（SCREAMING_SNAKE_CASE，可选）
     - report: 执行报告（可选；历史字段，建议优先使用 node_report）
     - node_report: 控制面强结构报告（桥接模式下产出；Workflow/Host 编排优先读取）
     - artifacts: 产出的文件路径列表
@@ -89,6 +90,7 @@ class CapabilityResult:
     status: CapabilityStatus
     output: Any = None
     error: Optional[str] = None
+    error_code: Optional[str] = None
     report: Optional[Any] = None
     node_report: Optional[NodeReport] = None
     artifacts: List[str] = field(default_factory=list)

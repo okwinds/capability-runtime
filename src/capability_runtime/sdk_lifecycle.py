@@ -114,17 +114,16 @@ class SdkLifecycle:
             agent.register_tool(t.spec, t.handler, override=bool(t.override))
         return agent
 
-    def _init_state(self, *, mode: RuntimeMode) -> _SdkInitState:
+    def _load_sdk_config(self, config_paths: List[Path]) -> tuple[Any, List[FrameworkIssue]]:
         """
-        初始化 bridge/sdk_native 的共享资源（backend + SkillsManager）。
+        加载 SDK 配置文件并合并 overlays。
 
         参数：
-        - mode：bridge 或 sdk_native
+        - config_paths：配置文件路径列表
+
+        返回：
+        - (merged_config, overlay_issues)
         """
-
-        workspace_root = normalize_workspace_root(self._config.workspace_root)
-        config_paths = [Path(p).expanduser().resolve() for p in self._config.sdk_config_paths]
-
         from skills_runtime.config.defaults import load_default_config_dict
         from skills_runtime.config.loader import load_config_dicts
 
@@ -139,16 +138,37 @@ class SdkLifecycle:
             except Exception:
                 overlays.append({})
         cfg = load_config_dicts(overlays)
+        return cfg, overlay_issues
 
+    def _resolve_skills_config(self, cfg: Any) -> Any:
+        """
+        解析 skills 配置（优先使用 RuntimeConfig.skills_config，否则使用 SDK config）。
+
+        参数：
+        - cfg：已加载的 SDK 配置对象
+
+        返回：
+        - 归一化后的 skills_config
+        """
         if self._config.skills_config is not None:
-            skills_cfg = _normalize_skills_config_for_skills_runtime(self._config.skills_config)
+            return _normalize_skills_config_for_skills_runtime(self._config.skills_config)
         else:
-            skills_cfg = cfg.skills
+            return cfg.skills
 
-        backend: Any
+    def _build_backend(self, *, mode: RuntimeMode, cfg: Any) -> Any:
+        """
+        构建 ChatBackend 实例。
+
+        参数：
+        - mode：bridge 或 sdk_native
+        - cfg：已加载的 SDK 配置对象
+
+        返回：
+        - ChatBackend 实例
+        """
         if self._config.sdk_backend is not None:
             # 离线/测试注入：允许用 FakeChatBackend 等驱动真实 Agent loop，产出完整证据链。
-            backend = self._config.sdk_backend
+            return self._config.sdk_backend
         elif mode == "bridge":
             if self._config.agently_agent is None:
                 raise ValueError("RuntimeConfig.agently_agent is required when mode='bridge'")
@@ -159,17 +179,44 @@ class SdkLifecycle:
             )
 
             requester_factory = build_openai_compatible_requester_factory(agently_agent=self._config.agently_agent)
-            backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=requester_factory))
+            return AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=requester_factory))
         else:
             from skills_runtime.llm.openai_chat import OpenAIChatCompletionsBackend
 
-            backend = OpenAIChatCompletionsBackend(cfg.llm)
+            return OpenAIChatCompletionsBackend(cfg.llm)
 
-        shared_skills_manager = SkillsManager(
+    def _build_skills_manager(self, *, workspace_root: Path, skills_config: Any) -> SkillsManager:
+        """
+        构建 SkillsManager 实例。
+
+        参数：
+        - workspace_root：工作区根目录
+        - skills_config：归一化后的 skills 配置
+
+        返回：
+        - SkillsManager 实例
+        """
+        return SkillsManager(
             workspace_root=workspace_root,
-            skills_config=skills_cfg,
+            skills_config=skills_config,
             in_memory_registry=self._config.in_memory_skills or {},
         )
+
+    def _init_state(self, *, mode: RuntimeMode) -> _SdkInitState:
+        """
+        初始化 bridge/sdk_native 的共享资源（backend + SkillsManager）。
+
+        参数：
+        - mode：bridge 或 sdk_native
+        """
+
+        workspace_root = normalize_workspace_root(self._config.workspace_root)
+        config_paths = [Path(p).expanduser().resolve() for p in self._config.sdk_config_paths]
+
+        cfg, overlay_issues = self._load_sdk_config(config_paths)
+        skills_cfg = self._resolve_skills_config(cfg)
+        backend = self._build_backend(mode=mode, cfg=cfg)
+        shared_skills_manager = self._build_skills_manager(workspace_root=workspace_root, skills_config=skills_cfg)
 
         try:
             report = shared_skills_manager.scan()
@@ -302,10 +349,9 @@ class _ModelOverrideBackend:
                     except Exception:
                         forwarded = request
                 else:
-                    try:
-                        setattr(request, "model", self._model)
-                    except Exception:
-                        forwarded = request
+                    raise TypeError(
+                        "request 对象不支持 model 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
+                    )
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev
@@ -367,10 +413,9 @@ class _ToolChoiceOverrideBackend:
                     except Exception:
                         forwarded = request
                 else:
-                    try:
-                        setattr(request, "extra", extra)
-                    except Exception:
-                        forwarded = request
+                    raise TypeError(
+                        "request 对象不支持 extra 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
+                    )
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev

@@ -666,3 +666,63 @@ async def test_workflow_run_stream_pending_propagates_and_stops_next_steps() -> 
     assert not any(e.get("step_id") == "s3" for e in events)
     assert events[-1]["type"] == "workflow.finished"
     assert events[-1]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_loop_step_respects_max_depth():
+    """LoopStep 在 max_depth=0（当前 depth=0）时，execute_item 构造 depth=1 应触发 RecursionLimitError。"""
+
+    def mock_handler(spec, input_data):
+        return CapabilityResult(status=CapabilityStatus.SUCCESS, output=input_data)
+
+    rt = Runtime(RuntimeConfig(mode="mock", max_depth=0, mock_handler=mock_handler))
+
+    agent_spec = AgentSpec(
+        base=CapabilitySpec(id="agent-x", kind=CapabilityKind.AGENT, name="Agent X")
+    )
+    wf_spec = WorkflowSpec(
+        base=CapabilitySpec(id="wf-loop", kind=CapabilityKind.WORKFLOW, name="Loop WF"),
+        steps=[
+            LoopStep(
+                id="loop",
+                capability=CapabilityRef(id="agent-x"),
+                iterate_over="context.items",
+            )
+        ],
+    )
+    rt.register(agent_spec)
+    rt.register(wf_spec)
+
+    result = await rt.run("wf-loop", input={"items": ["a", "b"]})
+    assert result.status == CapabilityStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_parallel_step_increments_depth():
+    """ParallelStep 在 depth 超限时应返回 FAILED 而非继续执行。"""
+
+    def mock_handler(spec, input_data):
+        return CapabilityResult(status=CapabilityStatus.SUCCESS, output={})
+
+    rt = Runtime(RuntimeConfig(mode="mock", max_depth=0, mock_handler=mock_handler))
+
+    agent_spec = AgentSpec(
+        base=CapabilitySpec(id="agent-p", kind=CapabilityKind.AGENT, name="Agent P")
+    )
+    wf_spec = WorkflowSpec(
+        base=CapabilitySpec(id="wf-parallel", kind=CapabilityKind.WORKFLOW, name="Parallel WF"),
+        steps=[
+            ParallelStep(
+                id="par",
+                branches=[
+                    Step(id="b1", capability=CapabilityRef(id="agent-p")),
+                    Step(id="b2", capability=CapabilityRef(id="agent-p")),
+                ],
+            )
+        ],
+    )
+    rt.register(agent_spec)
+    rt.register(wf_spec)
+
+    result = await rt.run("wf-parallel", input={})
+    assert result.status == CapabilityStatus.FAILED

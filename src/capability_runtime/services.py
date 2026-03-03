@@ -75,7 +75,7 @@ class RuntimeServices(Protocol):
 
 def redact_issue(issue: FrameworkIssue) -> Dict[str, Any]:
     """
-    把 FrameworkIssue 归一为“可诊断但最小披露”的 dict。
+    把 FrameworkIssue 归一为"可诊断但最小披露"的 dict。
 
     说明：
     - 避免把 details 原样透传导致泄露或膨胀；
@@ -112,27 +112,41 @@ def get_host_meta(*, context: ExecutionContext) -> Dict[str, Any]:
 
 def call_callback(cb: Any, *args: Any) -> None:
     """
-    以“尽量兼容”的方式调用 callback。
+    以"尽量兼容"的方式调用 callback。
 
     说明：
-    - 支持 cb(a) 或 cb(a, b) 两种签名；
+    - 支持 VAR_POSITIONAL（*args）handler：全量传入；
+    - 统计 POSITIONAL_ONLY + POSITIONAL_OR_KEYWORD 类型参数（不含 KEYWORD_ONLY、VAR_KEYWORD）；
     - 若签名/调用失败，抛异常由调用方决定是否吞掉。
     """
 
     try:
         sig = inspect.signature(cb)
     except Exception:
-        sig = None
-
-    if sig is not None and len(sig.parameters) >= len(args):
+        # 无法获取签名时回退：尝试全量传入
         cb(*args)
         return
 
-    # 回退：尽量调用最短参数版本
-    if args:
-        cb(args[0])
+    # 检查是否有 VAR_POSITIONAL（*args）
+    has_var_positional = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in sig.parameters.values())
+    if has_var_positional:
+        cb(*args)
         return
-    cb()
+
+    # 统计 POSITIONAL 类型参数（POSITIONAL_ONLY + POSITIONAL_OR_KEYWORD）
+    positional_params = [
+        p
+        for p in sig.parameters.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+
+    # 根据 positional 参数数量决定传入参数
+    if len(positional_params) >= len(args):
+        cb(*args)
+    elif len(positional_params) > 0:
+        cb(*args[: len(positional_params)])
+    else:
+        cb()
 
 
 def map_node_status(report: NodeReport) -> CapabilityStatus:

@@ -9,6 +9,7 @@ AgentAdapter：AgentSpec 的执行适配器（统一 mock/bridge/sdk_native）�
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
@@ -20,6 +21,13 @@ from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
 from ..reporting.node_report import NodeReportBuilder
 from ..services import RuntimeServices, map_node_status
+
+# _build_task 使用的 prompt section 常量
+_SECTION_SYSTEM = "## 系统指令"
+_SECTION_TASK = "## 任务"
+_SECTION_INPUT = "## 输入"
+_SECTION_OUTPUT_PREFIX = "## 输出要求\n请严格按以下字段输出 JSON："
+_SECTION_SKILLS = "## 使用以下 Skills"
 
 
 class AgentAdapter:
@@ -80,10 +88,18 @@ class AgentAdapter:
             )
 
         try:
-            out = None
-            try:
+            # 用 inspect.signature 探测参数数量，避免 try/except TypeError 吞掉 handler 内部的 TypeError
+            sig = inspect.signature(handler)
+            params = sig.parameters
+            has_var_positional = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params.values())
+            positional_params = [
+                p for p in params.values()
+                if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            ]
+
+            if has_var_positional or len(positional_params) >= 3:
                 out = handler(spec, input, context)
-            except TypeError:
+            else:
                 out = handler(spec, input)
 
             if hasattr(out, "__await__"):
@@ -93,7 +109,11 @@ class AgentAdapter:
                 return out
             return CapabilityResult(status=CapabilityStatus.SUCCESS, output=out)
         except Exception as exc:
-            return CapabilityResult(status=CapabilityStatus.FAILED, error=f"mock_handler error: {exc}")
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"mock_handler error: {exc}",
+                error_code="MOCK_HANDLER_ERROR",
+            )
 
     async def _bridge_execute_stream(
         self, *, spec: AgentSpec, input: Dict[str, Any], context: ExecutionContext
@@ -123,6 +143,7 @@ class AgentAdapter:
             yield CapabilityResult(
                 status=CapabilityStatus.FAILED,
                 error="Skills preflight failed",
+                error_code="PREFLIGHT_FAILED",
                 report=report,
                 node_report=report,
                 metadata={"skill_issues": [self._services.redact_issue(i) for i in issues]},
@@ -162,7 +183,13 @@ class AgentAdapter:
                 completion_reason="engine_exception",
                 meta={"engine_exception": type(exc).__name__},
             )
-            yield CapabilityResult(status=CapabilityStatus.FAILED, error=str(exc), report=report, node_report=report)
+            yield CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=str(exc),
+                error_code="ENGINE_ERROR",
+                report=report,
+                node_report=report,
+            )
             return
 
         report = NodeReportBuilder().build(events=events)
@@ -214,10 +241,10 @@ class AgentAdapter:
         parts: List[str] = []
 
         if spec.system_prompt and str(spec.system_prompt).strip():
-            parts.append(f"## 系统指令\n{str(spec.system_prompt).strip()}")
+            parts.append(f"{_SECTION_SYSTEM}\n{str(spec.system_prompt).strip()}")
 
         if spec.base.description:
-            parts.append(f"## 任务\n{spec.base.description}")
+            parts.append(f"{_SECTION_TASK}\n{spec.base.description}")
 
         if input:
             lines: List[str] = []
@@ -226,16 +253,16 @@ class AgentAdapter:
                     lines.append(f"- {k}: {v}")
                 else:
                     lines.append(f"- {k}: {json.dumps(v, ensure_ascii=False)}")
-            parts.append("## 输入\n" + "\n".join(lines))
+            parts.append(f"{_SECTION_INPUT}\n" + "\n".join(lines))
 
         if spec.output_schema and spec.output_schema.fields:
             schema_lines = [f"- {name}: {typ}" for name, typ in spec.output_schema.fields.items()]
-            parts.append("## 输出要求\n请严格按以下字段输出 JSON：\n" + "\n".join(schema_lines))
+            parts.append(f"{_SECTION_OUTPUT_PREFIX}\n" + "\n".join(schema_lines))
 
         # skills mention（可选）
         mentions = self._build_skill_mentions(spec=spec)
         if mentions:
-            parts.append("## 使用以下 Skills\n" + "\n".join(mentions))
+            parts.append(f"{_SECTION_SKILLS}\n" + "\n".join(mentions))
 
         if spec.prompt_template:
             parts.append(str(spec.prompt_template))

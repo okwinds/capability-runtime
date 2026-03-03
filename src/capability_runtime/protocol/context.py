@@ -89,6 +89,10 @@ class ExecutionContext:
         - 用于 workflow_id/step_id/branch_id 等"临时 hint"注入；
         - 共享 step_outputs/step_results 引用，保证执行证据链可持续累积；
         - bag 为不可变映射，所有修改必须通过 overlay 创建新 context。
+
+        并发安全警告：
+        - 本方法共享 step_outputs 引用（顺序执行设计）；
+        - 并发分支（如 ParallelStep）必须用 `ExecutionContext(step_outputs=dict(...))` 显式创建副本。
         """
 
         base = dict(self.bag)
