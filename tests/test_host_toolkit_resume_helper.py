@@ -40,6 +40,15 @@ def test_resume_helper_builds_summary_without_leaking_tool_content(tmp_path: Pat
     assert secret_marker not in summary.model_dump_json()
 
 
+def test_load_agent_events_from_jsonl_rejects_wal_locator_with_clear_message():
+    with pytest.raises(ValueError, match="wal locator is not a filesystem path"):
+        load_agent_events_from_jsonl(events_path="wal://r1")
+
+    # 允许 `#fragment`，但仍应明确拒绝 `wal://...` 作为 filesystem path。
+    with pytest.raises(ValueError, match="wal locator is not a filesystem path"):
+        load_agent_events_from_jsonl(events_path="wal://r1#run_id=r1")
+
+
 @pytest.mark.integration
 def test_explicit_initial_history_disables_sdk_auto_resume(tmp_path: Path):
     """

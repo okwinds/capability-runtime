@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+"""
+离线回归：per-capability LLM model routing（AgentSpec.llm_config.model → SDK backend）。
+
+目标：
+- 当 AgentSpec.llm_config 包含 model 时：SDK backend 收到的 request.model 必须被覆写为该值。
+- 当 llm_config 缺失/不含 model 时：不得做覆写（保持 runtime 默认行为）。
+"""
+
+from pathlib import Path
+from typing import Any, AsyncIterator, Dict, List, Optional
+
+import pytest
+
+from skills_runtime.llm.chat_sse import ChatStreamEvent
+from skills_runtime.llm.protocol import ChatRequest
+
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+
+
+class _RecordingBackend:
+    """
+    测试用 ChatBackend：记录每次调用的 request.model，并返回一个最小可完成的流。
+
+    说明：
+    - 不依赖外网；
+    - 不引入 tool_calls，避免审批/工具链干扰本测试关注点。
+    """
+
+    def __init__(self) -> None:
+        self.models: List[Optional[str]] = []
+        self.extras: List[Optional[Dict[str, Any]]] = []
+
+    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        self.models.append(getattr(request, "model", None))
+        extra = getattr(request, "extra", None)
+        self.extras.append(extra if isinstance(extra, dict) else None)
+        yield ChatStreamEvent(type="text_delta", text="ok")
+        yield ChatStreamEvent(type="completed")
+
+
+def _agent_spec(*, agent_id: str, llm_config: Optional[dict]) -> AgentSpec:
+    return AgentSpec(
+        base=CapabilitySpec(
+            id=agent_id,
+            kind=CapabilityKind.AGENT,
+            name=agent_id,
+            description="Just say ok.",
+        ),
+        llm_config=llm_config,
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_spec_llm_config_model_overrides_backend_request_model(tmp_path: Path) -> None:
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(_agent_spec(agent_id="agent.a", llm_config={"model": "model-a"}))
+    rt.register(_agent_spec(agent_id="agent.b", llm_config={"model": "model-b"}))
+    assert rt.validate() == []
+
+    before = len(backend.models)
+    out_a = await rt.run("agent.a", input={})
+    assert out_a.node_report is not None
+    after = len(backend.models)
+    assert "model-a" in backend.models[before:after]
+
+    before = len(backend.models)
+    out_b = await rt.run("agent.b", input={})
+    assert out_b.node_report is not None
+    after = len(backend.models)
+    assert "model-b" in backend.models[before:after]
+
+
+@pytest.mark.asyncio
+async def test_agent_spec_llm_config_absent_does_not_override_backend_request_model(tmp_path: Path) -> None:
+    """
+    回归：llm_config 缺失时不得强行覆写 model（应保持 runtime 默认行为）。
+    """
+
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(_agent_spec(agent_id="agent.none", llm_config=None))
+    assert rt.validate() == []
+
+    before = len(backend.models)
+    out = await rt.run("agent.none", input={})
+    assert out.node_report is not None
+    after = len(backend.models)
+
+    # 选择一个极不可能成为默认值的 sentinel，避免测试依赖上游默认 model 名称。
+    sentinel = "caprt-test-model-override-sentinel"
+    assert sentinel not in backend.models[before:after]
+
+
+@pytest.mark.asyncio
+async def test_agent_spec_llm_config_tool_choice_overrides_backend_request_extra(tmp_path: Path) -> None:
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(_agent_spec(agent_id="agent.tc", llm_config={"tool_choice": "required"}))
+    assert rt.validate() == []
+
+    before = len(backend.extras)
+    out = await rt.run("agent.tc", input={})
+    assert out.node_report is not None
+    after = len(backend.extras)
+
+    observed = backend.extras[before:after]
+    assert any((isinstance(ex, dict) and ex.get("tool_choice") == "required") for ex in observed)

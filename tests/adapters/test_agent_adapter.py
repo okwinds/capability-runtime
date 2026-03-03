@@ -156,7 +156,8 @@ async def test_agent_adapter_can_run_in_sdk_native_mode_with_fake_runtime_servic
         def preflight(self):  # type: ignore[no-untyped-def]
             return []
 
-        def create_sdk_agent(self):  # type: ignore[no-untyped-def]
+        def create_sdk_agent(self, *, llm_config=None):  # type: ignore[no-untyped-def]
+            _ = llm_config
             return _FakeSdkAgent()
 
         def get_host_meta(self, *, context: ExecutionContext):  # type: ignore[no-untyped-def]

@@ -171,10 +171,13 @@ def test_ui_events_showcase_after_id_invalid_emits_diagnostic_event(monkeypatch:
         ) as resp:
             got = _read_jsonl_n(resp, 1)
         assert got
+        assert str(got[0].get("schema") or "") == "capability-runtime.runtime_event.v1"
         assert str(got[0].get("type") or "") == "error"
-        assert "after_id" in str((got[0].get("data") or {}).get("kind") or "") or "after" in str(
-            (got[0].get("data") or {}).get("message") or ""
-        )
+        data = got[0].get("data") or {}
+        assert str(data.get("kind") or "") == "after_id_expired"
+        assert str(data.get("after_id") or "") == "does_not_exist"
+        assert "known_min_id" in data
+        assert "known_max_id" in data
     finally:
         httpd.shutdown()
         httpd.server_close()
@@ -201,6 +204,112 @@ def test_ui_events_showcase_real_mode_is_fail_closed(monkeypatch: pytest.MonkeyP
         status, payload = _post_json(f"http://{host}:{port}/api/start?mode=real&level=ui")
         assert status == 403
         assert payload.get("error")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_ui_events_showcase_real_mode_fallback_uses_run_ui_events_and_rejects_after_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """
+    回归：当 runtime 不具备 `start_ui_events_session` 时，real 模式仍应可用：
+    - `/api/start?mode=real` 返回 run_id
+    - `/api/events` 通过 `run_ui_events()` streaming 输出事件
+    - fallback 下携带 `after_id` 必须输出 error(kind=after_id_unsupported) 并立即结束
+    """
+
+    from capability_runtime.protocol.context import ExecutionContext
+    from capability_runtime.ui_events.v1 import PathSegment, StreamLevel
+    from examples.apps.ui_events_showcase import run as showcase_run  # type: ignore
+
+    class _FakeRuntime:
+        def register(self, spec: Any) -> None:
+            _ = spec
+
+        def validate(self) -> List[str]:
+            return []
+
+        async def run_ui_events(
+            self,
+            capability_id: str,
+            *,
+            input: Any = None,
+            context: ExecutionContext | None = None,
+            level: Any = None,
+        ):
+            _ = (capability_id, input, level)
+            assert context is not None
+            yield RuntimeEvent(
+                schema="capability-runtime.runtime_event.v1",
+                type="run.status",
+                run_id=context.run_id,
+                seq=1,
+                ts_ms=0,
+                level=StreamLevel.UI,
+                path=[PathSegment(kind="run", id=context.run_id)],
+                data={"status": "running"},
+                rid="1",
+                evidence=None,
+            )
+            yield RuntimeEvent(
+                schema="capability-runtime.runtime_event.v1",
+                type="run.status",
+                run_id=context.run_id,
+                seq=2,
+                ts_ms=1,
+                level=StreamLevel.UI,
+                path=[PathSegment(kind="run", id=context.run_id)],
+                data={"status": "completed"},
+                rid="2",
+                evidence=None,
+            )
+
+    def _fake_builder(*args: Any, **kwargs: Any) -> _FakeRuntime:
+        _ = (args, kwargs)
+        return _FakeRuntime()
+
+    monkeypatch.setenv("CAPRT_TEST_E2E_BRIDGE", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "dummy")
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://example.invalid")
+    monkeypatch.setenv("MODEL_NAME", "dummy-model")
+    monkeypatch.setattr(showcase_run, "build_bridge_runtime_from_env", _fake_builder, raising=True)
+
+    httpd = showcase_run.create_server(host="127.0.0.1", port=0, mode="offline", workspace_root=tmp_path)
+    host_raw, port = httpd.server_address[0], int(httpd.server_address[1])
+    host = host_raw.decode("utf-8") if isinstance(host_raw, (bytes, bytearray)) else str(host_raw)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    try:
+        status, started = _post_json(f"http://{host}:{port}/api/start?mode=real&level=ui")
+        assert status == 200, started
+        session_id = str(started.get("session_id") or "")
+        assert session_id
+        run_id = str(started.get("run_id") or "")
+        assert run_id
+
+        with urlopen(
+            f"http://{host}:{port}/api/events?session_id={session_id}&transport=jsonl",
+            timeout=5,
+        ) as resp:
+            got = _read_jsonl_n(resp, 10)
+        assert len(got) >= 2
+        assert all(e.get("schema") == "capability-runtime.runtime_event.v1" for e in got[:2])
+        assert all(e.get("run_id") == run_id for e in got[:2])
+
+        with urlopen(
+            f"http://{host}:{port}/api/events?session_id={session_id}&transport=jsonl&after_id=rid_x",
+            timeout=5,
+        ) as resp2:
+            first = _read_jsonl_n(resp2, 1)
+            second = _read_jsonl_n(resp2, 1)
+        assert first
+        assert not second, "fallback after_id should close immediately after emitting one diagnostic event"
+        assert str(first[0].get("schema") or "") == "capability-runtime.runtime_event.v1"
+        assert str(first[0].get("type") or "") == "error"
+        data = first[0].get("data") or {}
+        assert str(data.get("kind") or "") == "after_id_unsupported"
+        assert str(data.get("after_id") or "") == "rid_x"
     finally:
         httpd.shutdown()
         httpd.server_close()

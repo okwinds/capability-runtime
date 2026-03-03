@@ -6,8 +6,11 @@ from __future__ import annotations
 注意：
 - 默认跳过（避免在离线回归环境中打外网/消耗额度）。
 - 启用时需要模型支持 tool calling，否则断言会失败。
+- 真实 provider 下，tool calling 往往会产生紧邻的多次 LLM 请求（tool_calls → tool_result → completion）。
+  为避免 burst 冲垮 API/触发限流，本文件在 approvals 链路中插入可配置 pause（见 `CAPRT_E2E_LLM_REQUEST_PAUSE_S`）。
 """
 
+import asyncio
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +35,34 @@ if not ENABLE:
     )
 
 REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
+
+
+def _load_repo_root_dotenv_if_needed() -> None:
+    """
+    best-effort：当启用真实 e2e 且环境变量缺失时，尝试加载仓库根目录 `.env`（不覆盖已有值）。
+
+    目的：避免“source .env 但未 export”导致本测试被 skip，或 provider 默认回退到非预期模型。
+    """
+
+    missing_now = [k for k in REQUIRED if not os.getenv(k)]
+    if not missing_now:
+        return
+
+    repo_root = Path(__file__).resolve().parents[2]
+    dotenv_path = repo_root / ".env"
+    if not dotenv_path.exists():
+        return
+
+    for raw in dotenv_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_repo_root_dotenv_if_needed()
+
 missing = [k for k in REQUIRED if not os.getenv(k)]
 if missing:
     pytest.skip(
@@ -40,15 +71,38 @@ if missing:
     )
 
 
+def _get_llm_request_pause_s() -> float:
+    """读取 E2E real 冒烟的 LLM 请求节流 pause 秒数（float）。
+
+    Env：
+    - `CAPRT_E2E_LLM_REQUEST_PAUSE_S`：默认 `1.0`；`0` 表示禁用；负数或不可解析按默认值处理。
+    """
+
+    raw = os.getenv("CAPRT_E2E_LLM_REQUEST_PAUSE_S", "1.0")
+    try:
+        pause_s = float(raw)
+    except ValueError:
+        return 1.0
+    if pause_s < 0:
+        return 1.0
+    return pause_s
+
+
 @dataclass
 class AutoApproveProvider(ApprovalProvider):
-    """集成冒烟用：永远批准（仅用于验证 approvals 事件链路）。"""
+    """集成冒烟用：永远批准（仅用于验证 approvals 事件链路）。
+
+    额外约束：为避免真实 provider 下连续 LLM 请求形成 burst，在 approvals 阶段插入 pause。
+    """
 
     async def request_approval(
         self, *, request: ApprovalRequest, timeout_ms: Optional[int] = None
     ) -> ApprovalDecision:
         _ = request
         _ = timeout_ms
+        pause_s = _get_llm_request_pause_s()
+        if pause_s > 0:
+            await asyncio.sleep(pause_s)
         return ApprovalDecision.APPROVED
 
 
@@ -123,10 +177,17 @@ async def test_e2e_bridge_smoke_tool_call_and_node_report(tmp_path: Path) -> Non
                 kind=CapabilityKind.AGENT,
                 name="E2E",
                 description=(
-                    "请调用 tool `file_write` 写入一个 Python 文件，然后用一句话说明你写了什么。\\n"
-                    "要求：写入 artifacts/hello.py，内容是一个可运行的 hello world。"
+                    "你必须调用 tool `file_write` 写入一个 Python 文件。\\n"
+                    "要求：写入 artifacts/hello.py，内容是一个可运行的 hello world。\\n"
+                    "约束：禁止直接输出代码块；必须通过 tool 写入文件后，再用一句话说明你写了什么。"
                 ),
-            )
+            ),
+            llm_config={
+                "model": os.environ["MODEL_NAME"],
+                "temperature": 0,
+                # 更稳：显式要求选择唯一工具，避免 real provider 下 tool_calls 偶发缺失。
+                "tool_choice": {"type": "function", "function": {"name": "file_write"}},
+            },
         )
     )
     assert rt.validate() == []
