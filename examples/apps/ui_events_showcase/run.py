@@ -20,7 +20,7 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -33,6 +33,7 @@ from capability_runtime.ui_events.transport import encode_json_line
 from capability_runtime.ui_events.v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
 
 from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime
+from capability_runtime import ExecutionContext
 from examples.apps._shared.app_support import AutoApprovalProvider, build_bridge_runtime_from_env, load_env_file, write_overlay_for_app
 
 
@@ -130,10 +131,75 @@ def _make_after_id_error_event(*, run_id: str, level: StreamLevel, after_id: str
         ts_ms=_now_ms(),
         level=level,
         path=[PathSegment(kind="run", id=str(run_id))],
-        data={"kind": "after_id_expired", "message": msg, "known_min_id": known_min_id, "known_max_id": known_max_id},
+        data={
+            "kind": "after_id_expired",
+            "message": msg,
+            "after_id": str(after_id),
+            "known_min_id": known_min_id,
+            "known_max_id": known_max_id,
+        },
         rid="err_" + uuid.uuid4().hex[:12],
         evidence=None,
     )
+
+
+def _make_after_id_unsupported_event(*, run_id: str, level: StreamLevel, after_id: str) -> RuntimeEvent:
+    msg = f"after_id is not supported by fallback session (requested: {after_id!r})"
+    return RuntimeEvent(
+        schema="capability-runtime.runtime_event.v1",
+        type="error",
+        run_id=str(run_id),
+        seq=0,
+        ts_ms=_now_ms(),
+        level=level,
+        path=[PathSegment(kind="run", id=str(run_id))],
+        data={"kind": "after_id_unsupported", "message": msg, "after_id": str(after_id)},
+        rid="err_" + uuid.uuid4().hex[:12],
+        evidence=None,
+    )
+
+
+class _RunUiEventsFallbackSession:
+    """
+    best-effort fallback：
+    当 `Runtime.start_ui_events_session()` 不可用时，退化为 `Runtime.run_ui_events()`。
+
+    注意：
+    - 该 fallback **不支持 after_id 断线续传**（因为缺少 store 与多订阅者语义）。
+    - 仅用于 examples 的兼容形态，不应作为生产方案。
+    """
+
+    def __init__(
+        self,
+        *,
+        runtime: Runtime,
+        capability_id: str,
+        input: Dict[str, Any],
+        context: ExecutionContext,
+        level: StreamLevel,
+    ) -> None:
+        self._runtime = runtime
+        self._capability_id = str(capability_id)
+        self._input = dict(input or {})
+        self._context = context
+        self._level = level
+
+    @property
+    def run_id(self) -> str:
+        return str(self._context.run_id)
+
+    async def subscribe(self, *, after_id: Optional[str]) -> AsyncIterator[RuntimeEvent]:
+        if after_id:
+            yield _make_after_id_unsupported_event(run_id=self.run_id, level=self._level, after_id=str(after_id))
+            return
+        async for ev in self._runtime.run_ui_events(
+            self._capability_id,
+            input=self._input,
+            context=self._context,
+            level=self._level,
+        ):
+            if isinstance(ev, RuntimeEvent):
+                yield ev
 
 
 class _OfflineSession:
@@ -200,12 +266,11 @@ class _AppState:
         app_dir = self.app_dir
 
         dotenv_path = app_dir / ".env"
-        if not dotenv_path.exists():
-            raise RuntimeError("missing .env for real mode (cp .env.example .env)")
-
-        load_env_file(dotenv_path)
         required = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
         missing = [k for k in required if not str(os.environ.get(k, "")).strip()]
+        if missing and dotenv_path.exists():
+            load_env_file(dotenv_path)
+            missing = [k for k in required if not str(os.environ.get(k, "")).strip()]
         if missing:
             raise RuntimeError("missing env vars for real mode: " + ", ".join(missing))
 
@@ -247,8 +312,28 @@ class _AppState:
         if errs:
             raise RuntimeError("runtime.validate failed: " + str(errs))
 
-        session = runtime.start_ui_events_session(cap_id, input={"topic": "Capability Runtime 的 UI Events v1 是什么？"}, level=level)
-        out = {"kind": "real", "session_id": session_id, "runtime": runtime, "session": session, "level": level, "run_id": session.run_id}
+        try:
+            session = runtime.start_ui_events_session(
+                cap_id, input={"topic": "Capability Runtime 的 UI Events v1 是什么？"}, level=level
+            )
+        except Exception:
+            # best-effort fallback：不支持 after_id（通过 error(kind=after_id_unsupported) 明确告知客户端）
+            session = _RunUiEventsFallbackSession(
+                runtime=runtime,
+                capability_id=cap_id,
+                input={"topic": "Capability Runtime 的 UI Events v1 是什么？"},
+                context=ExecutionContext(run_id="run_" + uuid.uuid4().hex, max_depth=32),
+                level=level,
+            )
+        kind = "real_fallback" if isinstance(session, _RunUiEventsFallbackSession) else "real"
+        out = {
+            "kind": kind,
+            "session_id": session_id,
+            "runtime": runtime,
+            "session": session,
+            "level": level,
+            "run_id": session.run_id,
+        }
         self.sessions[session_id] = out
         return out
 

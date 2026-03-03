@@ -43,14 +43,15 @@
   const copyNodeReportSchemaBtn = $("copyNodeReportSchemaBtn");
   const rawEvent = $("rawEvent");
 
-  const layout = $("main");
+	  const layout = $("main");
 
-  let abort = null;
-  let sessionId = null;
-  let runId = null;
-  let level = "ui";
-  let transport = "sse";
-  let lastRid = null;
+	  let abort = null;
+	  let eventSource = null;
+	  let sessionId = null;
+	  let runId = null;
+	  let level = "ui";
+	  let transport = "sse";
+	  let lastRid = null;
   let selectedPathPrefix = null;
   let selectedCallId = null;
   let selectedRid = null;
@@ -62,14 +63,18 @@
   let sawItemDelta = false;
   let appendedFinalSummary = false;
 
-  let events = [];
-  let ridSeen = new Set();
-  let seqSeen = new Set();
-  let diagnostics = { invalidJson: 0 };
+	  let events = [];
+	  let ridSeen = new Set();
+	  let seqSeen = new Set();
+	  let diagnostics = { invalidJson: 0 };
+	  let themeMode = "auto"; // auto | dark | light
+	  let themeAutoMql = null;
 
-  function setStatus(text, kind) {
-    statusPill.textContent = text;
-    statusPill.classList.remove("pill--ok", "pill--bad");
+	  const THEME_STORAGE_KEY = "ui_events_theme";
+
+	  function setStatus(text, kind) {
+	    statusPill.textContent = text;
+	    statusPill.classList.remove("pill--ok", "pill--bad");
     if (kind === "ok") statusPill.classList.add("pill--ok");
     if (kind === "bad") statusPill.classList.add("pill--bad");
   }
@@ -96,11 +101,11 @@
     chatLog.scrollTop = chatLog.scrollHeight;
   }
 
-  async function copyText(s) {
-    const text = String(s || "");
-    if (!text) return false;
-    try {
-      await navigator.clipboard.writeText(text);
+	  async function copyText(s) {
+	    const text = String(s || "");
+	    if (!text) return false;
+	    try {
+	      await navigator.clipboard.writeText(text);
       return true;
     } catch (_) {
       return false;
@@ -117,32 +122,112 @@
     return String(pathKey).startsWith(String(prefixKey));
   }
 
-  function getCallId(ev) {
-    if (ev && ev.evidence && ev.evidence.call_id) return String(ev.evidence.call_id);
-    if (Array.isArray(ev.path)) {
-      const seg = ev.path.find((p) => p && p.kind === "call");
+	  function getCallId(ev) {
+	    if (ev && ev.evidence && ev.evidence.call_id) return String(ev.evidence.call_id);
+	    if (Array.isArray(ev.path)) {
+	      const seg = ev.path.find((p) => p && p.kind === "call");
       if (seg && seg.id) return String(seg.id);
     }
     if (ev && ev.data && ev.data.call_id) return String(ev.data.call_id);
-    return null;
-  }
+	    return null;
+	  }
 
-  function setSelectedEvidenceFromEvent(ev) {
-    const evidence = ev && ev.evidence ? ev.evidence : null;
-    const eventsPath = evidence && evidence.events_path ? String(evidence.events_path) : "";
-    const walLocator =
+	  function getCurrentLocator() {
+	    const wal = walLocatorText.textContent && walLocatorText.textContent !== "-" ? String(walLocatorText.textContent) : "";
+	    const ep = eventsPathText.textContent && eventsPathText.textContent !== "-" ? String(eventsPathText.textContent) : "";
+	    return wal || ep || "";
+	  }
+
+	  function refreshCopyLocatorState() {
+	    const locator = getCurrentLocator();
+	    const ok = Boolean(locator);
+	    copyLocatorBtn.disabled = !ok;
+	    copyLocatorBtn.setAttribute("aria-disabled", ok ? "false" : "true");
+	  }
+
+	  function updateThemeButton() {
+	    const label =
+	      themeMode === "auto" ? "主题：自动" : themeMode === "dark" ? "主题：深色" : themeMode === "light" ? "主题：浅色" : "主题";
+	    themeBtn.textContent = label;
+	    themeBtn.setAttribute("aria-label", `切换主题（当前：${label.replace("主题：", "")}）`);
+	  }
+
+	  function applyTheme() {
+	    const root = document.documentElement;
+	    const resolved =
+	      themeMode === "auto"
+	        ? themeAutoMql && themeAutoMql.matches
+	          ? "dark"
+	          : "light"
+	        : themeMode === "dark"
+	          ? "dark"
+	          : "light";
+	    root.setAttribute("data-theme", resolved);
+	  }
+
+	  function setThemeMode(nextMode, { persist }) {
+	    const m = String(nextMode || "").trim();
+	    if (!["auto", "dark", "light"].includes(m)) return;
+	    themeMode = m;
+	    if (persist) {
+	      try {
+	        localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+	      } catch (_) {}
+	    }
+	    applyTheme();
+	    updateThemeButton();
+	  }
+
+	  function initTheme() {
+	    try {
+	      themeAutoMql = window.matchMedia("(prefers-color-scheme: dark)");
+	    } catch (_) {
+	      themeAutoMql = null;
+	    }
+	    let stored = "auto";
+	    try {
+	      stored = localStorage.getItem(THEME_STORAGE_KEY) || "auto";
+	    } catch (_) {}
+	    setThemeMode(stored, { persist: false });
+
+	    if (themeAutoMql) {
+	      const onChange = () => {
+	        if (themeMode === "auto") applyTheme();
+	      };
+	      try {
+	        themeAutoMql.addEventListener("change", onChange);
+	      } catch (_) {
+	        try {
+	          themeAutoMql.addListener(onChange);
+	        } catch (_) {}
+	      }
+	    }
+	  }
+
+	  function cycleThemeMode() {
+	    const order = ["auto", "dark", "light"];
+	    const idx = order.indexOf(themeMode);
+	    const next = order[(idx >= 0 ? idx + 1 : 0) % order.length];
+	    setThemeMode(next, { persist: true });
+	  }
+
+	  function setSelectedEvidenceFromEvent(ev) {
+	    const evidence = ev && ev.evidence ? ev.evidence : null;
+	    const eventsPath = evidence && evidence.events_path ? String(evidence.events_path) : "";
+	    const walLocator =
       evidence && evidence.wal_locator
         ? String(evidence.wal_locator)
         : eventsPath
           ? String(eventsPath)
           : "";
 
-    eventsPathText.textContent = eventsPath || "-";
-    walLocatorText.textContent = walLocator || "-";
-    callIdText.textContent = evidence && evidence.call_id ? String(evidence.call_id) : "-";
-    nodeReportSchemaText.textContent = evidence && evidence.node_report_schema ? String(evidence.node_report_schema) : "-";
-    rawEvent.textContent = ev ? JSON.stringify(ev, null, 2) : "";
-  }
+	    eventsPathText.textContent = eventsPath || "-";
+	    walLocatorText.textContent = walLocator || "-";
+	    callIdText.textContent = evidence && evidence.call_id ? String(evidence.call_id) : "-";
+	    nodeReportSchemaText.textContent = evidence && evidence.node_report_schema ? String(evidence.node_report_schema) : "-";
+	    rawEvent.textContent = ev ? JSON.stringify(ev, null, 2) : "";
+	    refreshCopyLocatorState();
+	  }
 
   function renderWorkflowTree() {
     // Build unique path keys and counts
@@ -227,17 +312,12 @@
     return data;
   }
 
-  function resetStateForNewRun() {
-    if (abort) {
-      try {
-        abort.abort();
-      } catch (_) {}
-      abort = null;
-    }
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
+	  function resetStateForNewRun() {
+	    closeTransport();
+	    if (reconnectTimer) {
+	      clearTimeout(reconnectTimer);
+	      reconnectTimer = null;
+	    }
     events = [];
     ridSeen = new Set();
     seqSeen = new Set();
@@ -382,17 +462,50 @@
     }
   }
 
-  function renderAll() {
-    renderWorkflowTree();
-    renderToolsAndApprovals();
-    renderTimeline();
-  }
+	  function renderAll() {
+	    renderWorkflowTree();
+	    renderToolsAndApprovals();
+	    renderTimeline();
+	  }
 
-  function onRuntimeEvent(ev) {
-    if (!ev || typeof ev !== "object") return;
-    if (ev.schema !== "capability-runtime.runtime_event.v1") return;
-    if (ev.rid && ridSeen.has(String(ev.rid))) return;
-    if (ev.rid) ridSeen.add(String(ev.rid));
+	  function buildEventsUrl({ afterId }) {
+	    const qs = new URLSearchParams();
+	    qs.set("session_id", sessionId);
+	    qs.set("transport", transport);
+	    if (afterId) qs.set("after_id", String(afterId));
+	    return `/api/events?${qs.toString()}`;
+	  }
+
+	  function closeTransport() {
+	    if (eventSource) {
+	      try {
+	        eventSource.close();
+	      } catch (_) {}
+	      eventSource = null;
+	    }
+	    if (abort) {
+	      try {
+	        abort.abort();
+	      } catch (_) {}
+	      abort = null;
+	    }
+	  }
+
+	  function maybeAutoStopTransportOnDone(ev) {
+	    if (!ev || typeof ev !== "object") return;
+	    if (ev.type !== "run.status") return;
+	    const st = ev.data && ev.data.status ? String(ev.data.status) : "";
+	    if (st && st !== "running") {
+	      // 终态后服务端通常会关闭连接；这里主动关闭 transport，避免 SSE/EventSource 将“正常关闭”误当作断线并触发重连。
+	      closeTransport();
+	    }
+	  }
+
+	  function onRuntimeEvent(ev) {
+	    if (!ev || typeof ev !== "object") return;
+	    if (ev.schema !== "capability-runtime.runtime_event.v1") return;
+	    if (ev.rid && ridSeen.has(String(ev.rid))) return;
+	    if (ev.rid) ridSeen.add(String(ev.rid));
     if (!ev.rid && ev.seq != null) {
       const s = String(ev.seq);
       if (seqSeen.has(s)) return;
@@ -425,41 +538,38 @@
         }
       }
     }
-    if (ev.type === "run.status" && ev.data && ev.data.status) {
-      const st = String(ev.data.status);
-      setStatus(`run.status: ${st}`, st === "completed" ? "ok" : st === "failed" ? "bad" : "ok");
-      if (st !== "running") {
-        done = true;
-        if (!sawItemDelta && !appendedFinalSummary) {
+	    if (ev.type === "run.status" && ev.data && ev.data.status) {
+	      const st = String(ev.data.status);
+	      setStatus(`run.status: ${st}`, st === "completed" ? "ok" : st === "failed" ? "bad" : "ok");
+	      if (st !== "running") {
+	        done = true;
+	        if (!sawItemDelta && !appendedFinalSummary) {
           appendedFinalSummary = true;
           const ep = (ev.evidence && ev.evidence.events_path) || "";
           appendChat(
             `终态：${st}。你可以在右侧 Evidence 中复制 locator（events_path / wal_locator）去追溯 NodeReport/WAL。${ep ? ` events_path=${ep}` : ""}`,
             "final"
           );
-        }
-      }
-    }
+	        }
+	      }
+	    }
 
-    // Evidence: prefer terminal or selected; keep last event for evidence panel
-    if (!selectedRid) {
-      setSelectedEvidenceFromEvent(ev);
-    }
-    renderAll();
-  }
+	    // Evidence: prefer terminal or selected; keep last event for evidence panel
+	    if (!selectedRid) {
+	      setSelectedEvidenceFromEvent(ev);
+	    }
+	    maybeAutoStopTransportOnDone(ev);
+	    renderAll();
+	  }
 
-  async function streamEvents({ afterId, attempt }) {
-    if (!sessionId) return;
-    const qs = new URLSearchParams();
-    qs.set("session_id", sessionId);
-    qs.set("transport", transport);
-    if (afterId) qs.set("after_id", String(afterId));
-    const url = `/api/events?${qs.toString()}`;
-    abort = new AbortController();
+	  async function streamEventsJsonlFetch({ afterId, attempt }) {
+	    if (!sessionId) return;
+	    const url = buildEventsUrl({ afterId });
+	    abort = new AbortController();
 
-    if (attempt > 0) {
-      setStatus(`重连中… (after_id=${afterId || "-"})`, "ok");
-    } else {
+	    if (attempt > 0) {
+	      setStatus(`重连中… (after_id=${afterId || "-"})`, "ok");
+	    } else {
       setStatus(`已连接（${transport}）`, "ok");
     }
 
@@ -512,15 +622,70 @@
       if (done) break;
     }
 
-    if (!done && !userDisconnected && !resumeExpired) {
-      scheduleReconnect();
-    }
-  }
+	    if (!done && !userDisconnected && !resumeExpired) {
+	      scheduleReconnect();
+	    }
+	  }
 
-  function scheduleReconnect() {
-    if (reconnectTimer) return;
-    if (userDisconnected) return;
-    if (resumeExpired) return;
+	  function streamEventsSseEventSource({ afterId, attempt }) {
+	    if (!sessionId) return;
+	    const url = buildEventsUrl({ afterId });
+
+	    // EventSource 必须重建以携带新的 after_id（其内建重连 URL 不会变）
+	    if (eventSource) {
+	      try {
+	        eventSource.close();
+	      } catch (_) {}
+	      eventSource = null;
+	    }
+	    if (abort) {
+	      try {
+	        abort.abort();
+	      } catch (_) {}
+	      abort = null;
+	    }
+
+	    if (attempt > 0) {
+	      setStatus(`重连中… (after_id=${afterId || "-"})`, "ok");
+	    } else {
+	      setStatus(`已连接（${transport}）`, "ok");
+	    }
+
+	    eventSource = new EventSource(url);
+	    eventSource.onmessage = (e) => {
+	      const payload = e && typeof e.data === "string" ? e.data : "";
+	      if (!payload) return;
+	      try {
+	        const ev = JSON.parse(payload);
+	        onRuntimeEvent(ev);
+	      } catch (err) {
+	        diagnostics.invalidJson += 1;
+	        appendChat(`invalid SSE data (#${diagnostics.invalidJson}): ${String(err)}`, "warn");
+	      }
+	    };
+	    eventSource.onerror = () => {
+	      if (done || userDisconnected || resumeExpired) {
+	        closeTransport();
+	        return;
+	      }
+	      setStatus("连接失败（网络/中断）", "bad");
+	      closeTransport();
+	      scheduleReconnect();
+	    };
+	  }
+
+	  async function streamEvents({ afterId, attempt }) {
+	    if (transport === "sse") {
+	      streamEventsSseEventSource({ afterId, attempt });
+	      return;
+	    }
+	    await streamEventsJsonlFetch({ afterId, attempt });
+	  }
+
+	  function scheduleReconnect() {
+	    if (reconnectTimer) return;
+	    if (userDisconnected) return;
+	    if (resumeExpired) return;
     const delay = 400;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
@@ -531,25 +696,30 @@
     }, delay);
   }
 
-  function disconnect() {
-    userDisconnected = true;
-    if (abort) {
-      try {
-        abort.abort();
-      } catch (_) {}
-      abort = null;
-    }
-    setStatus("已断开（用户）", "bad");
-  }
+	  function disconnect() {
+	    userDisconnected = true;
+	    closeTransport();
+	    setStatus("已断开（用户）", "bad");
+	  }
 
-  function simulateBreak() {
-    if (!sessionId) return;
-    if (!abort) return;
-    setStatus("模拟断线：准备重连…", "bad");
-    try {
-      abort.abort();
-    } catch (_) {}
-  }
+	  function simulateBreak() {
+	    if (!sessionId) return;
+	    setStatus("模拟断线：准备重连…", "bad");
+	    if (transport === "sse") {
+	      if (eventSource) {
+	        try {
+	          eventSource.close();
+	        } catch (_) {}
+	        eventSource = null;
+	        scheduleReconnect();
+	      }
+	      return;
+	    }
+	    if (!abort) return;
+	    try {
+	      abort.abort();
+	    } catch (_) {}
+	  }
 
   connectBtn.addEventListener("click", async () => {
     resetStateForNewRun();
@@ -625,11 +795,12 @@
     pauseBtn.textContent = paused ? "继续" : "暂停";
   });
 
-  copyLocatorBtn.addEventListener("click", async () => {
-    const locator = eventsPathText.textContent && eventsPathText.textContent !== "-" ? eventsPathText.textContent : "";
-    const ok = await copyText(locator);
-    appendChat(ok ? "已复制 locator" : "复制失败（浏览器权限）", ok ? "info" : "warn");
-  });
+	  copyLocatorBtn.addEventListener("click", async () => {
+	    const locator = getCurrentLocator();
+	    if (!locator) return;
+	    const ok = await copyText(locator);
+	    appendChat(ok ? "已复制 locator" : "复制失败（浏览器权限）", ok ? "info" : "warn");
+	  });
   copyEventsPathBtn.addEventListener("click", async () => {
     const ok = await copyText(eventsPathText.textContent);
     appendChat(ok ? "已复制 events_path" : "复制失败（浏览器权限）", ok ? "info" : "warn");
@@ -647,17 +818,15 @@
     appendChat(ok ? "已复制 node_report_schema" : "复制失败（浏览器权限）", ok ? "info" : "warn");
   });
 
-  themeBtn.addEventListener("click", () => {
-    const root = document.documentElement;
-    const cur = root.getAttribute("data-theme") || "dark";
-    root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
-  });
+	  themeBtn.addEventListener("click", () => {
+	    cycleThemeMode();
+	  });
 
-  // auto-connect offline for convenience
-  window.addEventListener("load", () => {
-    document.documentElement.setAttribute("data-theme", "dark");
-    setModePill("offline");
-    levelText.textContent = levelSelect.value;
-    connectBtn.click();
-  });
+	  // auto-connect offline for convenience
+	  window.addEventListener("load", () => {
+	    initTheme();
+	    setModePill("offline");
+	    levelText.textContent = levelSelect.value;
+	    connectBtn.click();
+	  });
 })();
