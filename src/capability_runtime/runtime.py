@@ -366,12 +366,17 @@ class Runtime(RuntimeUIEventsMixin):
             return []
         return self._sdk.preflight()
 
-    def create_sdk_agent(self) -> Any:
-        """RuntimeServices 协议方法：创建 per-run SDK Agent。"""
+    def create_sdk_agent(self, *, llm_config: Optional[Dict[str, Any]] = None) -> Any:
+        """
+        RuntimeServices 协议方法：创建 per-run SDK Agent。
+
+        参数：
+        - llm_config：可选 LLM 覆写配置（当前仅支持 `model` 字段覆写）
+        """
 
         if self._sdk is None:
             raise RuntimeError("SDK lifecycle is not initialized")
-        return self._sdk.create_agent(custom_tools=list(self._config.custom_tools))
+        return self._sdk.create_agent(custom_tools=list(self._config.custom_tools), llm_config=llm_config)
 
     @property
     def last_node_report(self) -> Optional[NodeReport]:

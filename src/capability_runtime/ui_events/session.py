@@ -16,8 +16,8 @@ from .v1 import RuntimeEvent, StreamLevel
 @dataclass(frozen=True)
 class ResumeErrorInfo:
     after_id: str
-    min_rid: Optional[str]
-    max_rid: Optional[str]
+    known_min_id: Optional[str]
+    known_max_id: Optional[str]
 
 
 class RuntimeUIEventsSession:
@@ -41,6 +41,8 @@ class RuntimeUIEventsSession:
         level: StreamLevel,
         store: RuntimeEventStore,
         heartbeat_interval_s: float,
+        input_queue_maxsize: int = 4096,
+        subscriber_queue_maxsize: int = 1024,
     ) -> None:
         self._runtime = runtime
         self._capability_id = str(capability_id)
@@ -49,9 +51,15 @@ class RuntimeUIEventsSession:
         self._level = level
         self._store = store
         self._heartbeat_interval_s = float(heartbeat_interval_s)
+        if int(input_queue_maxsize) <= 0:
+            raise ValueError("input_queue_maxsize must be > 0")
+        if int(subscriber_queue_maxsize) <= 0:
+            raise ValueError("subscriber_queue_maxsize must be > 0")
+        self._input_queue_maxsize = int(input_queue_maxsize)
+        self._subscriber_queue_maxsize = int(subscriber_queue_maxsize)
 
         self._projector = RuntimeUIEventProjector(run_id=self._context.run_id, level=self._level)
-        self._in_q: asyncio.Queue = asyncio.Queue()
+        self._in_q: asyncio.Queue = asyncio.Queue(maxsize=self._input_queue_maxsize)
         self._subs: Set[asyncio.Queue] = set()
         self._started = False
         self._done = asyncio.Event()
@@ -64,20 +72,53 @@ class RuntimeUIEventsSession:
     def store(self) -> RuntimeEventStore:
         return self._store
 
+    def _emit_subscriber_lagged(self, *, q: asyncio.Queue) -> RuntimeEvent:
+        err = self._projector.error(
+            kind="subscriber_lagged",
+            message="subscriber queue overflow; policy=disconnect",
+            data={"queue_maxsize": int(getattr(q, "maxsize", 0) or 0), "policy": "disconnect"},
+        )
+        # 该错误是“订阅者局部诊断信号”，不进入 store；避免客户端误用其 rid 作为 after_id 续传游标。
+        return err.model_copy(update={"rid": None})
+
+    def _cut_off_subscriber(self, *, q: asyncio.Queue) -> None:
+        self._subs.discard(q)
+        try:
+            while True:
+                q.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            q.put_nowait(self._emit_subscriber_lagged(q=q))
+        except Exception:
+            # fail-open：断开慢订阅者必须不影响主事件流
+            pass
+
     def _publish_nowait(self, ev: RuntimeEvent) -> None:
         self._store.append(ev)
         for q in list(self._subs):
             try:
                 q.put_nowait(ev)
+            except asyncio.QueueFull:
+                self._cut_off_subscriber(q=q)
             except Exception:
+                # fail-open：单个订阅者的异常不得影响主事件流
                 pass
 
     def _emit_resume_error(self, *, info: ResumeErrorInfo) -> RuntimeEvent:
         msg = (
             f"after_id expired or not found: {info.after_id!r} "
-            f"(available: {info.min_rid!r}..{info.max_rid!r})"
+            f"(available: {info.known_min_id!r}..{info.known_max_id!r})"
         )
-        return self._projector.error(kind="after_id_expired", message=msg)
+        return self._projector.error(
+            kind="after_id_expired",
+            message=msg,
+            data={
+                "after_id": info.after_id,
+                "known_min_id": info.known_min_id,
+                "known_max_id": info.known_max_id,
+            },
+        )
 
     async def _ensure_started(self) -> None:
         if self._started:
@@ -85,7 +126,21 @@ class RuntimeUIEventsSession:
         self._started = True
 
         def _tap(agent_ev: AgentEvent, tap_ctx: Dict[str, Any]) -> None:
-            self._in_q.put_nowait(("agent_event", agent_ev, tap_ctx))
+            try:
+                expected_run_id = self._context.run_id
+                ctx_run_id = tap_ctx.get("run_id")
+                if isinstance(ctx_run_id, str) and ctx_run_id != expected_run_id:
+                    return
+                ev_run_id = getattr(agent_ev, "run_id", None)
+                if isinstance(ev_run_id, str) and ev_run_id != expected_run_id:
+                    return
+                self._in_q.put_nowait(("agent_event", agent_ev, tap_ctx))
+            except asyncio.QueueFull:
+                # fail-open：旁路 tap 不得影响主流程；输入队列背压时丢弃旁路事件
+                pass
+            except Exception:
+                # fail-open：旁路 tap 过滤/入队异常不得影响主流程
+                pass
 
         self._runtime._register_agent_event_tap(_tap)
 
@@ -126,8 +181,12 @@ class RuntimeUIEventsSession:
                             run_id=str(tap_ctx.get("run_id") or self._context.run_id),
                             capability_id=str(tap_ctx.get("capability_id") or ""),
                             workflow_id=str(tap_ctx.get("workflow_id")) if isinstance(tap_ctx.get("workflow_id"), str) else None,
+                            workflow_instance_id=str(tap_ctx.get("workflow_instance_id"))
+                            if isinstance(tap_ctx.get("workflow_instance_id"), str)
+                            else None,
                             step_id=str(tap_ctx.get("step_id")) if isinstance(tap_ctx.get("step_id"), str) else None,
                             branch_id=str(tap_ctx.get("branch_id")) if isinstance(tap_ctx.get("branch_id"), str) else None,
+                            wf_frames=list(tap_ctx.get("wf_frames")) if isinstance(tap_ctx.get("wf_frames"), list) else None,
                         )
                         for out_ev in self._projector.on_agent_event(agent_ev, ctx=agent_ctx):
                             self._publish_nowait(out_ev)
@@ -155,16 +214,15 @@ class RuntimeUIEventsSession:
 
     async def subscribe(self, *, after_id: Optional[str]) -> AsyncIterator[RuntimeEvent]:
         await self._ensure_started()
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=self._subscriber_queue_maxsize)
         self._subs.add(q)
         try:
             try:
                 replay = list(self._store.read_after(after_id=after_id))
             except AfterIdExpiredError as exc:
                 err = self._emit_resume_error(
-                    info=ResumeErrorInfo(after_id=exc.after_id, min_rid=exc.min_rid, max_rid=exc.max_rid)
+                    info=ResumeErrorInfo(after_id=exc.after_id, known_min_id=exc.min_rid, known_max_id=exc.max_rid)
                 )
-                self._publish_nowait(err)
                 yield err
                 return
 
@@ -178,6 +236,9 @@ class RuntimeUIEventsSession:
                 if self._done.is_set() and q.empty():
                     return
                 ev = await q.get()
+                if ev.type == "error" and ev.data.get("kind") == "subscriber_lagged":
+                    yield ev
+                    return
                 if ev.seq <= last_seq:
                     continue
                 last_seq = ev.seq

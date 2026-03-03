@@ -101,6 +101,47 @@ class RuntimeUIEventProjector:
         self._skill_name_to_locator: Dict[str, str] = {}
         # call_id -> origin path（用于“哪来哪去”，避免 tool/approval 生命周期事件归属漂移）
         self._call_origin_path: Dict[str, List[PathSegment]] = {}
+        # approvals 可能缺 call_id：best-effort 用 step_id 恢复归属（见 docs/specs/runtime-ui-events-v1.md）
+        self._step_scope_to_call_id: Dict[str, str] = {}
+        self._step_scope_tool_to_call_id: Dict[tuple[str, str], str] = {}
+
+    def _step_scope_key(self, *, ctx: _AgentCtx) -> Optional[str]:
+        """
+        生成“step 作用域键”（best-effort 消歧）。
+
+        说明：
+        - approvals 的 step_id 关联是 best-effort：仅在 run 内临时使用；
+        - 为避免多个 workflow/agent 复用相同 step_id 造成互相污染，这里把 workflow/branch/agent 信息纳入 key；
+        - 若 ctx 无 step_id，返回 None。
+        """
+
+        step_id = str(ctx.step_id or "").strip()
+        if not step_id:
+            return None
+        workflow_scope = str(ctx.workflow_instance_id or ctx.workflow_id or "").strip()
+        branch_scope = str(ctx.branch_id or "").strip()
+        agent_scope = str(ctx.capability_id or "").strip()
+        return f"{workflow_scope}::{branch_scope}::{agent_scope}::{step_id}"
+
+    def _best_effort_call_id_from_step(self, *, ctx: _AgentCtx, tool: str) -> Optional[str]:
+        """
+        best-effort 通过 step_id（可选加 tool）恢复 call_id。
+
+        说明：
+        - 优先用 `(step_id, tool)` 精确匹配；
+        - 再回退到 `step_id` 的最近一次 call_id；
+        - 若 ctx 无 step_id 或未命中，返回 None。
+        """
+
+        step_scope_key = self._step_scope_key(ctx=ctx)
+        if step_scope_key is None:
+            return None
+        tool = str(tool or "").strip()
+        if tool:
+            call_id = self._step_scope_tool_to_call_id.get((step_scope_key, tool))
+            if call_id:
+                return call_id
+        return self._step_scope_to_call_id.get(step_scope_key)
 
     def _next_seq(self) -> int:
         self._seq += 1
@@ -176,8 +217,14 @@ class RuntimeUIEventProjector:
     def heartbeat(self) -> RuntimeEvent:
         return self._emit(type="heartbeat", path=self._base_path(), data={})
 
-    def error(self, *, kind: str, message: str) -> RuntimeEvent:
-        return self._emit(type="error", path=self._base_path(), data={"kind": str(kind), "message": str(message)})
+    def error(self, *, kind: str, message: str, data: Optional[Dict[str, Any]] = None) -> RuntimeEvent:
+        payload: Dict[str, Any] = {"kind": str(kind), "message": str(message)}
+        if data:
+            for k, v in dict(data).items():
+                if k in {"kind", "message"}:
+                    continue
+                payload[k] = v
+        return self._emit(type="error", path=self._base_path(), data=payload)
 
     def on_workflow_event(self, ev: Dict[str, Any]) -> List[RuntimeEvent]:
         typ = str(ev.get("type") or "")
@@ -381,6 +428,12 @@ class RuntimeUIEventProjector:
                 path.append(PathSegment(kind="call", id=call_id))
                 # 绑定 call origin：后续 finished/approval 必须复用该归属（哪来哪去）
                 self._call_origin_path.setdefault(call_id, list(path))
+                # 记录 step_id -> call_id（approvals 事件可能缺 call_id）
+                step_scope_key = self._step_scope_key(ctx=ctx)
+                if step_scope_key:
+                    self._step_scope_to_call_id[step_scope_key] = call_id
+                    if tool:
+                        self._step_scope_tool_to_call_id[(step_scope_key, tool)] = call_id
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
             data = {"tool": tool, "call_id": call_id}
             if args_summary is not None:
@@ -392,6 +445,14 @@ class RuntimeUIEventProjector:
             tool = str(ev.payload.get("tool") or "").strip()
             call_id = str(ev.payload.get("call_id") or "").strip()
             approval_key = ev.payload.get("approval_key")
+            unresolved = False
+            if not call_id:
+                recovered = self._best_effort_call_id_from_step(ctx=ctx, tool=tool)
+                if recovered:
+                    call_id = recovered
+                else:
+                    unresolved = True
+
             origin = self._call_origin_path.get(call_id) if call_id else None
             path = list(origin) if origin is not None else list(base_path)
             if origin is None:
@@ -399,6 +460,8 @@ class RuntimeUIEventProjector:
                     path.append(PathSegment(kind="tool", id=tool))
                 if call_id:
                     path.append(PathSegment(kind="call", id=call_id))
+                    # best-effort：即便 tool.requested 缺失，也先绑定 origin，避免后续归属漂移
+                    self._call_origin_path.setdefault(call_id, list(path))
             path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "WAITING_APPROVAL"}))
             data = {"tool": tool}
@@ -406,7 +469,23 @@ class RuntimeUIEventProjector:
                 data["call_id"] = call_id
             if approval_key is not None:
                 data["approval_key"] = str(approval_key)
-            out.append(self._emit(type="approval.requested", path=path, data=data, evidence=Evidence(call_id=call_id)))
+            if unresolved:
+                # 按 D4 的最小可诊断信号：fail-open，但不得静默
+                data["correlation"] = "missing_call_id"
+                data["correlation_error"] = {
+                    "kind": "missing_call_id",
+                    "strategy": "step_id",
+                    "step_id": str(ctx.step_id or ""),
+                    "tool": tool,
+                }
+            out.append(
+                self._emit(
+                    type="approval.requested",
+                    path=path,
+                    data=data,
+                    evidence=Evidence(call_id=call_id) if call_id else None,
+                )
+            )
             return out
 
         if ev.type == "approval_decided":
@@ -415,6 +494,14 @@ class RuntimeUIEventProjector:
             decision = str(ev.payload.get("decision") or "").strip()
             reason = ev.payload.get("reason")
             approval_key = ev.payload.get("approval_key")
+            unresolved = False
+            if not call_id:
+                recovered = self._best_effort_call_id_from_step(ctx=ctx, tool=tool)
+                if recovered:
+                    call_id = recovered
+                else:
+                    unresolved = True
+
             origin = self._call_origin_path.get(call_id) if call_id else None
             path = list(origin) if origin is not None else list(base_path)
             if origin is None:
@@ -422,6 +509,8 @@ class RuntimeUIEventProjector:
                     path.append(PathSegment(kind="tool", id=tool))
                 if call_id:
                     path.append(PathSegment(kind="call", id=call_id))
+                    # best-effort：即便 tool.requested 缺失，也先绑定 origin，避免后续归属漂移
+                    self._call_origin_path.setdefault(call_id, list(path))
             path.append(PathSegment(kind="approval", id=str(approval_key or call_id or "approval")))
             out.append(self._emit(type="node.phase", path=base_path, data={"phase": "TOOL_RUNNING"}))
             data = {"tool": tool, "decision": decision or "unknown"}
@@ -429,7 +518,22 @@ class RuntimeUIEventProjector:
                 data["call_id"] = call_id
             if reason is not None:
                 data["reason"] = str(reason)
-            out.append(self._emit(type="approval.decided", path=path, data=data, evidence=Evidence(call_id=call_id)))
+            if unresolved:
+                data["correlation"] = "missing_call_id"
+                data["correlation_error"] = {
+                    "kind": "missing_call_id",
+                    "strategy": "step_id",
+                    "step_id": str(ctx.step_id or ""),
+                    "tool": tool,
+                }
+            out.append(
+                self._emit(
+                    type="approval.decided",
+                    path=path,
+                    data=data,
+                    evidence=Evidence(call_id=call_id) if call_id else None,
+                )
+            )
             return out
 
         if ev.type == "tool_call_finished":

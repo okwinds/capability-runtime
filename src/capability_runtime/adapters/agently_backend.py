@@ -96,6 +96,9 @@ class AgentlyChatBackend(ChatBackend):
         request_data.request_options["stream"] = True
         request_data.stream = True
 
+        tool_specs: List[ToolSpec] = list(request.tools or [])
+        tool_choice_target_tool_name: Optional[str] = None
+
         if request.temperature is not None:
             request_data.request_options["temperature"] = float(request.temperature)
         if request.max_tokens is not None:
@@ -129,15 +132,38 @@ class AgentlyChatBackend(ChatBackend):
                     return False
 
             for k, v in request.extra.items():
+                # 过滤明显的非 wire 字段（以及所有不可 JSON 序列化值）
+                if k == "on_retry":
+                    continue
+                if callable(v) or not _is_jsonable(v):
+                    continue
+
+                # 覆写优先级（spec 要求）：
+                # - per-run llm_config 会写入 request.extra["tool_choice"]
+                # - 即使底层 requester/backend 已预置 tool_choice（例如默认 "auto"），也必须被本覆写覆盖
+                if k == "tool_choice":
+                    if isinstance(v, dict):
+                        # OpenAI 新格式：{"type":"function","function":{"name":"..."}}
+                        # 某些 OpenAICompatible server 不支持 tool_choice.function，会直接 400；
+                        # 兼容策略：归一化为 tool_choice="required"，并（若可定位）过滤 tools 以避免选错工具。
+                        function = v.get("function") if isinstance(v.get("function"), dict) else None
+                        if function is not None:
+                            name = function.get("name")
+                            if isinstance(name, str) and name:
+                                tool_choice_target_tool_name = name
+                        request_data.request_options[k] = "required"
+                    else:
+                        request_data.request_options[k] = v
+                    continue
+
                 if k not in request_data.request_options:
-                    # 过滤明显的非 wire 字段（以及所有不可 JSON 序列化值）
-                    if k == "on_retry":
-                        continue
-                    if callable(v) or not _is_jsonable(v):
-                        continue
                     request_data.request_options[k] = v
 
-        tool_specs = request.tools or []
+        if tool_choice_target_tool_name:
+            matched = [spec for spec in tool_specs if spec.name == tool_choice_target_tool_name]
+            if matched:
+                tool_specs = matched
+
         tools_wire = [tool_spec_to_openai_tool(spec) for spec in tool_specs]
         if tools_wire:
             request_data.request_options["tools"] = tools_wire
@@ -147,7 +173,8 @@ class AgentlyChatBackend(ChatBackend):
             request_data.request_options.pop("tools", None)
 
         parser = ChatCompletionsSseParser()
-        saw_done = False
+        done_sentinel_seen = False
+        deferred_completed: Optional[ChatStreamEvent] = None
 
         # 兼容：不同版本/实现的 requester 可能返回：
         # - async iterator（可直接 async for）
@@ -170,17 +197,38 @@ class AgentlyChatBackend(ChatBackend):
                 continue
 
             for ev in parser.feed_data(data):
+                # 关键不变量：
+                # 某些 OpenAICompatible server 的 SSE 序列可能是：
+                # - delta.tool_calls ...（累计中）
+                # - finish_reason="stop" → parser 先 emit completed
+                # - [DONE] → parser 才 flush tool_calls
+                #
+                # 若我们把 completed 立即 yield，上游消费端可能在 completed 后停止消费，
+                # 从而错过后续 tool_calls，最终表现为 NodeReport.tool_calls 为空。
+                #
+                # 因此：completed 事件必须延迟到“确认不会再有 tool_calls”后再产出。
                 if ev.type == "completed":
-                    saw_done = True
+                    deferred_completed = ev
+                    continue
                 yield ev
 
             if data.strip() in ("[DONE]", "DONE"):
-                saw_done = True
+                done_sentinel_seen = True
                 break
 
-        if not saw_done:
-            for ev in parser.finish():
-                yield ev
+        # 注意：即使已看到 [DONE]，也必须调用 parser.finish()：
+        # - 某些实现可能不会在 feed_data("[DONE]") 时 flush tool_calls；
+        # - 若跳过 finish()，会出现“tool_calls 丢失/NodeReport.tool_calls 为空”的假阴性。
+        for ev in parser.finish():
+            if ev.type == "completed":
+                # 不用 finish() 的 eof 覆盖真实 stop（若已看到 stop completed）
+                if deferred_completed is None:
+                    deferred_completed = ev
+                continue
+            yield ev
+
+        if deferred_completed is not None:
+            yield deferred_completed
 
 
 def build_openai_compatible_requester_factory(*, agently_agent: Any) -> AgentlyRequesterFactory:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from skills_runtime.core.errors import FrameworkError, FrameworkIssue
 from skills_runtime.skills.manager import SkillsManager
@@ -74,21 +74,31 @@ class SdkLifecycle:
                 )
             ]
 
-    def create_agent(self, *, custom_tools: List[CustomTool]) -> Any:
+    def create_agent(self, *, custom_tools: List[CustomTool], llm_config: Optional[Dict[str, Any]] = None) -> Any:
         """
         创建 per-run SDK Agent 实例（避免跨 run 共享可变状态）。
 
         参数：
         - custom_tools：每次创建 Agent 时要注册的自定义工具列表
+        - llm_config：可选 LLM 覆写配置（当前支持 `model` 与 `tool_choice` 字段覆写）
         """
 
         from skills_runtime.core.agent import Agent
+
+        backend: Any = self._state.backend
+        override_model = _extract_model_override(llm_config)
+        if override_model is not None:
+            backend = _ModelOverrideBackend(backend=backend, model=override_model)
+
+        override_tool_choice = _extract_tool_choice_override(llm_config)
+        if override_tool_choice is not None:
+            backend = _ToolChoiceOverrideBackend(backend=backend, tool_choice=override_tool_choice)
 
         kwargs: Dict[str, Any] = {
             "workspace_root": self._state.workspace_root,
             "config_paths": list(self._state.config_paths),
             "env_vars": dict(self._config.env_vars),
-            "backend": self._state.backend,
+            "backend": backend,
             "human_io": self._config.human_io,
             "approval_provider": self._config.approval_provider,
             "cancel_checker": self._config.cancel_checker,
@@ -181,6 +191,189 @@ class SdkLifecycle:
             backend=backend,
             shared_skills_manager=shared_skills_manager,
         )
+
+
+def _extract_model_override(llm_config: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    从 llm_config 中提取 model 覆写值。
+
+    约束：
+    - 本期仅识别 `model` 字段；
+    - 空字符串/全空白视为“未设置”。
+    """
+
+    if not isinstance(llm_config, dict):
+        return None
+    raw = llm_config.get("model")
+    if not isinstance(raw, str):
+        return None
+    model = raw.strip()
+    return model or None
+
+
+def _extract_tool_choice_override(llm_config: Optional[Dict[str, Any]]) -> Optional[Any]:
+    """
+    从 llm_config 中提取 tool_choice 覆写值。
+
+    约束：
+    - 仅识别 `tool_choice` 字段；
+    - 值必须为 string 或 dict；
+    - 必须可 JSON 序列化（JSON-able），否则 fail-closed 抛异常。
+    """
+
+    if not isinstance(llm_config, dict):
+        return None
+
+    raw = llm_config.get("tool_choice")
+    if raw is None:
+        return None
+
+    tool_choice: Any
+    if isinstance(raw, str):
+        v = raw.strip()
+        tool_choice = v or None
+    elif isinstance(raw, dict):
+        tool_choice = raw
+    else:
+        return None
+
+    if tool_choice is None:
+        return None
+
+    import json
+
+    try:
+        json.dumps(tool_choice)
+    except TypeError as exc:
+        raise ValueError("llm_config.tool_choice must be JSON-serializable") from exc
+
+    return tool_choice
+
+
+class _ModelOverrideBackend:
+    """
+    ChatBackend 薄代理：仅覆写 request.model，然后委托给底层 backend。
+
+    说明：
+    - 该包装仅在 per-run 创建 Agent 时生效（不修改 runtime-wide backend 实例）；
+    - 不强依赖 request 的具体实现（pydantic v1/v2 / dict / 普通对象 best-effort 兼容）。
+    """
+
+    def __init__(self, *, backend: Any, model: str) -> None:
+        self._backend = backend
+        self._model = model
+
+    async def stream_chat(self, request: Any) -> AsyncIterator[Any]:
+        """
+        覆写 request.model 并转发 `stream_chat`。
+
+        参数：
+        - request：上游 SDK 生成的 ChatRequest（或兼容对象）
+        """
+
+        forwarded = request
+
+        if isinstance(request, dict):
+            forwarded = dict(request)
+            forwarded["model"] = self._model
+        else:
+            # dataclass（frozen=True）兼容：`skills_runtime.llm.protocol.ChatRequest` 是 frozen dataclass，
+            # 需要通过 dataclasses.replace 复制并覆写字段。
+            replaced = False
+            try:
+                import dataclasses
+
+                if dataclasses.is_dataclass(request):
+                    forwarded = dataclasses.replace(request, model=self._model)
+                    replaced = True
+            except Exception:
+                replaced = False
+
+            if not replaced:
+                # pydantic v2: model_copy；pydantic v1: copy
+                if hasattr(request, "model_copy"):
+                    try:
+                        forwarded = request.model_copy(update={"model": self._model})
+                    except Exception:
+                        forwarded = request
+                elif hasattr(request, "copy"):
+                    try:
+                        forwarded = request.copy(update={"model": self._model})
+                    except Exception:
+                        forwarded = request
+                else:
+                    try:
+                        setattr(request, "model", self._model)
+                    except Exception:
+                        forwarded = request
+
+        async for ev in self._backend.stream_chat(forwarded):
+            yield ev
+
+
+class _ToolChoiceOverrideBackend:
+    """
+    ChatBackend 薄代理：仅覆写 request.extra["tool_choice"]，然后委托给底层 backend。
+
+    说明：
+    - 覆写以“拷贝 + 更新”为主，避免修改上游 request 对象的原始 extra 引用；
+    - 不强依赖 request 的具体实现（pydantic v1/v2 / dict / 普通对象 best-effort 兼容）。
+    """
+
+    def __init__(self, *, backend: Any, tool_choice: Any) -> None:
+        self._backend = backend
+        self._tool_choice = tool_choice
+
+    async def stream_chat(self, request: Any) -> AsyncIterator[Any]:
+        """
+        覆写 request.extra["tool_choice"] 并转发 `stream_chat`。
+
+        参数：
+        - request：上游 SDK 生成的 ChatRequest（或兼容对象）
+        """
+
+        forwarded = request
+
+        if isinstance(request, dict):
+            forwarded = dict(request)
+            raw_extra = forwarded.get("extra")
+            extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+            extra["tool_choice"] = self._tool_choice
+            forwarded["extra"] = extra
+        else:
+            raw_extra = getattr(request, "extra", None)
+            extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+            extra["tool_choice"] = self._tool_choice
+
+            replaced = False
+            try:
+                import dataclasses
+
+                if dataclasses.is_dataclass(request):
+                    forwarded = dataclasses.replace(request, extra=extra)
+                    replaced = True
+            except Exception:
+                replaced = False
+
+            if not replaced:
+                if hasattr(request, "model_copy"):
+                    try:
+                        forwarded = request.model_copy(update={"extra": extra})
+                    except Exception:
+                        forwarded = request
+                elif hasattr(request, "copy"):
+                    try:
+                        forwarded = request.copy(update={"extra": extra})
+                    except Exception:
+                        forwarded = request
+                else:
+                    try:
+                        setattr(request, "extra", extra)
+                    except Exception:
+                        forwarded = request
+
+        async for ev in self._backend.stream_chat(forwarded):
+            yield ev
 
 
 def _load_yaml_dict(path: Path) -> Dict[str, Any]:

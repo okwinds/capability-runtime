@@ -149,6 +149,10 @@ class RuntimeUIEventsMixin:
         done = False
 
         def _tap(agent_ev: AgentEvent, tap_ctx: Dict[str, Any]) -> None:
+            # run_ui_events 仅服务于单一 run：必须在入队前过滤其它 run 的旁路 AgentEvent，
+            # 避免无关事件进入队列导致堆积/背压（参见 docs/specs/runtime-ui-events-v1.md）。
+            if str(tap_ctx.get("run_id") or "") != str(ctx.run_id):
+                return
             q.put_nowait(("agent_event", agent_ev, tap_ctx))
 
         self._register_agent_event_tap(_tap)

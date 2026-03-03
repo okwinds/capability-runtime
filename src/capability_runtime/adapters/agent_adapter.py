@@ -130,7 +130,7 @@ class AgentAdapter:
             return
 
         task = self._build_task(spec=spec, input=input)
-        agent = self._services.create_sdk_agent()
+        agent = self._services.create_sdk_agent(llm_config=spec.llm_config)
 
         events: List[AgentEvent] = []
         host_meta = self._services.get_host_meta(context=context)
