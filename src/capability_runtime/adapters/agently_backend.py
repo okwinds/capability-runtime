@@ -8,7 +8,8 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 - 解析阶段复用 SDK `ChatCompletionsSseParser`，确保 tool_calls delta 拼接口径不分叉。
 
 对齐规格：
-- `openspec/specs/upstream-bridge/spec.md`
+- `docs/specs/agently-backend-stream-event-ordering-v1.md`
+- `docs/specs/per-capability-llm-config-v1.md`
 """
 
 from __future__ import annotations
@@ -16,9 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol, cast
 
-from skills_runtime.core.agent import ChatBackend
 from skills_runtime.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
-from skills_runtime.llm.protocol import ChatRequest
+from skills_runtime.llm.protocol import ChatBackend, ChatRequest
 from skills_runtime.tools.protocol import ToolSpec, tool_spec_to_openai_tool
 
 

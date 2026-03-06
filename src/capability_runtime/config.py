@@ -13,8 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from skills_runtime.core.agent import ChatBackend
 from skills_runtime.core.exec_sessions import ExecSessionsProvider
+from skills_runtime.llm.protocol import ChatBackend
 from skills_runtime.safety.approvals import ApprovalProvider
 from skills_runtime.state.wal_protocol import WalBackend
 from skills_runtime.tools.protocol import HumanIOProvider, ToolSpec

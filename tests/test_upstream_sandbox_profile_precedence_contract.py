@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 """
-升级护栏（skills-runtime-sdk==0.1.7）：
-- 上游 `sandbox.profile` preset 在 0.1.7 调整为 baseline defaults（仅填缺省，不覆盖显式字段）；
+升级护栏（skills-runtime-sdk==0.1.8）：
+- 上游 `sandbox.profile` preset 在 0.1.7 调整为 baseline defaults（仅填缺省，不覆盖显式字段），且该语义在 0.1.8 不得回归；
 - 本仓需要用离线回归把该语义固化，避免后续升级导致沙箱默认策略“意外变宽/变窄”。
 """
 
