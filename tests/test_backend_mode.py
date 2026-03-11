@@ -102,4 +102,5 @@ async def test_sdk_native_mode_passes_openai_backend_to_agent(monkeypatch: pytes
     assert agent is not None
     backend = agent.kwargs.get("backend")
     assert backend is not None
-    assert backend.__class__.__name__ == "OpenAIChatCompletionsBackend"
+    assert backend.__class__.__name__ == "_UsageTapBackend"
+    assert getattr(backend, "_backend").__class__.__name__ == "OpenAIChatCompletionsBackend"

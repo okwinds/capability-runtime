@@ -1,6 +1,6 @@
 [project]
 name = "capability-runtime"
-version = "0.0.3"
+version = "0.0.4"
 description = "Bridge/glue layer that composes Agently (LLM/TriggerFlow) with skills-runtime-sdk (skills/tools/WAL/events)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,7 +9,7 @@ dependencies = [
   "PyYAML>=6",
   "pydantic>=2,<3",
   "agently==4.0.8",
-  "skills-runtime-sdk==0.1.8",
+  "skills-runtime-sdk==0.1.9",
 ]
 
 [project.optional-dependencies]

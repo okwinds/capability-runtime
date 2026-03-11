@@ -44,6 +44,7 @@ SPEC_MAPPING: dict[str, list[str]] = {
         "upgrade-skills-runtime-sdk-0.1.6.md",
         "upgrade-skills-runtime-sdk-0.1.7.md",
         "upgrade-skills-runtime-sdk-0.1.8.md",
+        "upgrade-skills-runtime-sdk-0.1.9.md",
     ],
     # Phase 3 补齐
     "sdk_lifecycle": ["sdk-lifecycle-v1.md"],

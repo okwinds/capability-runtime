@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from skills_runtime.core.contracts import AgentEvent
 
-from ..types import NodeReport, NodeToolCallReport
+from ..types import NodeReport, NodeToolCallReport, NodeUsageReport
 
 
 def _get_skills_runtime_version() -> Optional[str]:
@@ -55,6 +55,57 @@ def _get_first_dist_version(dist_names: List[str]) -> Optional[str]:
         if v:
             return v
     return None
+
+
+def _usage_int(value: Any) -> Optional[int]:
+    """把 usage 数值归一为非负 int；无法识别时返回 None。"""
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _extract_llm_usage_summary(payload: Any) -> Dict[str, Optional[Any]]:
+    """
+    从 `AgentEvent(type="llm_usage")` payload 中提取 usage 摘要。
+
+    兼容：
+    - 本仓规范字段：`input_tokens/output_tokens/total_tokens`
+    - OpenAI 风格字段：`prompt_tokens/completion_tokens/total_tokens`
+    - 可选嵌套：`payload["usage"]`
+    """
+
+    if not isinstance(payload, dict):
+        return {"model": None, "input_tokens": None, "output_tokens": None, "total_tokens": None}
+
+    usage_dict = payload.get("usage") if isinstance(payload.get("usage"), dict) else payload
+    model = payload.get("model")
+    if not isinstance(model, str) or not model.strip():
+        model = usage_dict.get("model")
+    model_text = model.strip() if isinstance(model, str) and model.strip() else None
+
+    input_tokens = _usage_int(usage_dict.get("input_tokens"))
+    if input_tokens is None:
+        input_tokens = _usage_int(usage_dict.get("prompt_tokens"))
+
+    output_tokens = _usage_int(usage_dict.get("output_tokens"))
+    if output_tokens is None:
+        output_tokens = _usage_int(usage_dict.get("completion_tokens"))
+
+    total_tokens = _usage_int(usage_dict.get("total_tokens"))
+
+    return {
+        "model": model_text,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
 
 
 @dataclass
@@ -142,6 +193,14 @@ class NodeReportBuilder:
         final_error_kind: Optional[str] = None
         final_message: Optional[str] = None
 
+        usage_model: Optional[str] = None
+        usage_input_total = 0
+        usage_output_total = 0
+        usage_total_total = 0
+        usage_input_seen = False
+        usage_output_seen = False
+        usage_total_seen = False
+
         def _ensure_tool(call_id: str, *, name: str) -> Dict[str, Any]:
             """获取/初始化工具调用聚合槽位（以 call_id 为主键）。"""
 
@@ -169,6 +228,27 @@ class NodeReportBuilder:
                 if skill_name and skill_name not in seen_skills:
                     activated_skills.append(skill_name)
                     seen_skills.add(skill_name)
+
+            if ev.type == "llm_usage":
+                usage_summary = _extract_llm_usage_summary(ev.payload)
+                model_name = usage_summary.get("model")
+                if isinstance(model_name, str) and model_name.strip():
+                    usage_model = model_name.strip()
+
+                input_tokens = usage_summary.get("input_tokens")
+                if isinstance(input_tokens, int):
+                    usage_input_total += input_tokens
+                    usage_input_seen = True
+
+                output_tokens = usage_summary.get("output_tokens")
+                if isinstance(output_tokens, int):
+                    usage_output_total += output_tokens
+                    usage_output_seen = True
+
+                total_tokens = usage_summary.get("total_tokens")
+                if isinstance(total_tokens, int):
+                    usage_total_total += total_tokens
+                    usage_total_seen = True
 
             if ev.type == "tool_call_requested":
                 call_id = str(ev.payload.get("call_id") or "").strip()
@@ -307,6 +387,14 @@ class NodeReportBuilder:
         tool_reports = [
             NodeToolCallReport.model_validate(item) for item in tool_calls.values() if isinstance(item, dict)
         ]
+        usage_report: Optional[NodeUsageReport] = None
+        if usage_model is not None or usage_input_seen or usage_output_seen or usage_total_seen:
+            usage_report = NodeUsageReport(
+                model=usage_model,
+                input_tokens=usage_input_total if usage_input_seen else None,
+                output_tokens=usage_output_total if usage_output_seen else None,
+                total_tokens=usage_total_total if usage_total_seen else None,
+            )
 
         report = NodeReport(
             status=status,  # type: ignore[arg-type]
@@ -322,6 +410,7 @@ class NodeReportBuilder:
             run_id=run_id,
             turn_id=turn_id,
             events_path=events_path,
+            usage=usage_report,
             activated_skills=activated_skills,
             tool_calls=tool_reports,
             artifacts=artifacts,
@@ -401,6 +490,7 @@ def build_fail_closed_report(
         run_id=run_id,
         turn_id=None,
         events_path=None,
+        usage=None,
         activated_skills=[],
         tool_calls=[],
         artifacts=[],

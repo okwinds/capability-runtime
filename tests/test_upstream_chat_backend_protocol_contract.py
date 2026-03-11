@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-升级护栏（skills-runtime-sdk==0.1.8）：
+升级护栏（skills-runtime-sdk==0.1.9）：
 - 上游将 `ChatBackend` 协议显式收敛到 `skills_runtime.llm.protocol`，并对
   `stream_chat(request: ChatRequest)` 做 fail-fast 校验；
 - 本仓 `AgentlyChatBackend` 必须继续满足该协议，避免升级后在 Agent 初始化期直接崩溃。

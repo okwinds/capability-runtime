@@ -40,6 +40,21 @@ def test_report_collects_activated_skills_unique_and_ordered():
     assert rep.activated_skills == ["a", "b"]
 
 
+def test_report_aggregates_llm_usage_summary() -> None:
+    events = [
+        _ev("run_started"),
+        _ev("llm_usage", payload={"model": "gpt-4.1-mini", "input_tokens": 11, "output_tokens": 7, "total_tokens": 18}),
+        _ev("llm_usage", payload={"model": "gpt-4.1-mini", "prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
+    ]
+    rep = NodeReportBuilder().build(events=events)
+    assert rep.usage is not None
+    assert rep.usage.model == "gpt-4.1-mini"
+    assert rep.usage.input_tokens == 13
+    assert rep.usage.output_tokens == 10
+    assert rep.usage.total_tokens == 23
+
+
 def test_report_collects_artifacts_from_run_completed_payload():
     events = [
         _ev("run_started"),

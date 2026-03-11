@@ -42,6 +42,23 @@ class NodeToolCallReport(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
+class NodeUsageReport(BaseModel):
+    """
+    NodeReport.usage 的最小摘要。
+
+    字段说明：
+    - `model`：best-effort 记录本次运行最后一次可识别的模型名。
+    - token 字段缺失时保持 None，禁止伪造 0。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+
+
 class NodeReport(BaseModel):
     """NodeReport（控制面强结构，schema v1）。"""
 
@@ -59,6 +76,7 @@ class NodeReport(BaseModel):
     turn_id: Optional[str] = None
     events_path: Optional[str] = None
 
+    usage: Optional[NodeUsageReport] = None
     activated_skills: List[str] = Field(default_factory=list)
     tool_calls: List[NodeToolCallReport] = Field(default_factory=list)
     artifacts: List[str] = Field(default_factory=list)

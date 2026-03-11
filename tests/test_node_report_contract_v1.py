@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from skills_runtime.core.contracts import AgentEvent
 
 from capability_runtime.reporting.node_report import NodeReportBuilder
-from capability_runtime.types import NodeReport, NodeToolCallReport
+from capability_runtime.types import NodeReport, NodeToolCallReport, NodeUsageReport
 
 
 def _ev(t: str, *, run_id: str = "r1", turn_id: str = "t1", step_id: str | None = None, payload=None) -> AgentEvent:
@@ -32,6 +32,7 @@ def test_node_report_schema_alias_is_schema() -> None:
         run_id="r1",
         turn_id=None,
         events_path=None,
+        usage=None,
         activated_skills=[],
         tool_calls=[],
         artifacts=[],
@@ -48,6 +49,7 @@ def test_node_report_schema_alias_is_schema() -> None:
         "run_id",
         "turn_id",
         "events_path",
+        "usage",
         "activated_skills",
         "tool_calls",
         "artifacts",
@@ -81,6 +83,11 @@ def test_node_tool_call_report_extra_fields_are_rejected() -> None:
         "error_kind",
         "data",
     }
+
+
+def test_node_usage_report_extra_fields_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        NodeUsageReport.model_validate({"model": "m", "total_tokens": 1, "unexpected": True})
 
 
 def test_events_path_must_come_from_terminal_run_event() -> None:

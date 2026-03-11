@@ -2,11 +2,13 @@ from __future__ import annotations
 
 """SDK 生命周期组件：初始化、预检与 per-run Agent 创建。"""
 
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from skills_runtime.core.errors import FrameworkError, FrameworkIssue
+from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.skills.manager import SkillsManager
 
 from .config import CustomTool, RuntimeConfig, RuntimeMode, normalize_workspace_root
@@ -93,6 +95,8 @@ class SdkLifecycle:
         override_tool_choice = _extract_tool_choice_override(llm_config)
         if override_tool_choice is not None:
             backend = _ToolChoiceOverrideBackend(backend=backend, tool_choice=override_tool_choice)
+        usage_bridge_backend = _UsageTapBackend(backend=backend)
+        backend = usage_bridge_backend
 
         kwargs: Dict[str, Any] = {
             "workspace_root": self._state.workspace_root,
@@ -112,7 +116,7 @@ class SdkLifecycle:
         agent = Agent(**kwargs)
         for t in custom_tools:
             agent.register_tool(t.spec, t.handler, override=bool(t.override))
-        return agent
+        return _AgentUsageEventBridge(agent=agent, usage_bridge_backend=usage_bridge_backend)
 
     def _load_sdk_config(self, config_paths: List[Path]) -> tuple[Any, List[FrameworkIssue]]:
         """
@@ -419,6 +423,165 @@ class _ToolChoiceOverrideBackend:
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev
+
+
+class _UsageTapBackend:
+    """
+    ChatBackend 薄代理：通过 request.extra 注入 usage sink，best-effort 收集 bridge usage。
+
+    说明：
+    - 不修改上游 SDK/Agently；
+    - request.extra 中的回调不会透传到 wire payload（Agently backend 会过滤 callable）；
+    - 若底层 backend 自己能产出 `llm_usage` ChatStreamEvent，本层也会被动收集。
+    """
+
+    def __init__(self, *, backend: Any) -> None:
+        self._backend = backend
+        self._usage_payloads: List[Dict[str, Any]] = []
+
+    def _capture_usage(self, payload: Any) -> None:
+        """记录一次 usage 摘要（fail-open；仅保留 dict 载荷）。"""
+
+        if isinstance(payload, dict):
+            self._usage_payloads.append(dict(payload))
+
+    def drain_usage_payloads(self) -> List[Dict[str, Any]]:
+        """取出并清空当前 run 累积的 usage 载荷。"""
+
+        out = list(self._usage_payloads)
+        self._usage_payloads.clear()
+        return out
+
+    async def stream_chat(self, request: Any) -> AsyncIterator[Any]:
+        """注入 `_caprt_usage_sink` 后转发到底层 backend。"""
+
+        forwarded = _clone_request_with_extra(
+            request,
+            lambda extra: _merge_usage_sink(extra=extra, sink=self._capture_usage),
+        )
+        async for ev in self._backend.stream_chat(forwarded):
+            if getattr(ev, "type", None) == "llm_usage":
+                payload = getattr(ev, "payload", None)
+                if isinstance(payload, dict):
+                    self._capture_usage(payload)
+            yield ev
+
+
+class _AgentUsageEventBridge:
+    """
+    Agent 薄代理：在底层未主动发出 `llm_usage` 时，补发 bridge 收集到的 usage AgentEvent。
+    """
+
+    def __init__(self, *, agent: Any, usage_bridge_backend: _UsageTapBackend) -> None:
+        self._agent = agent
+        self._usage_bridge_backend = usage_bridge_backend
+
+    async def run_stream_async(
+        self,
+        task: str,
+        *,
+        run_id: Optional[str] = None,
+        initial_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """
+        转发 SDK Agent 事件流；若未见上游 `llm_usage`，在流结束后补发 bridge usage 事件。
+        """
+
+        saw_llm_usage = False
+        last_run_id = run_id or ""
+        last_turn_id: Optional[str] = None
+
+        async for ev in self._agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
+            if ev.type == "llm_usage":
+                saw_llm_usage = True
+            if isinstance(ev.run_id, str) and ev.run_id:
+                last_run_id = ev.run_id
+            if isinstance(ev.turn_id, str) and ev.turn_id:
+                last_turn_id = ev.turn_id
+            yield ev
+
+        if saw_llm_usage:
+            self._usage_bridge_backend.drain_usage_payloads()
+            return
+
+        for payload in self._usage_bridge_backend.drain_usage_payloads():
+            yield AgentEvent(
+                type="llm_usage",
+                timestamp=_now_rfc3339(),
+                run_id=last_run_id,
+                turn_id=last_turn_id,
+                payload=dict(payload),
+            )
+
+
+def _now_rfc3339() -> str:
+    """生成 UTC RFC3339 时间戳（秒级 suffices for synthetic llm_usage events）。"""
+
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _merge_usage_sink(*, extra: Dict[str, Any], sink: Any) -> Dict[str, Any]:
+    """
+    合并 `_caprt_usage_sink` 回调，保留已有 sink 并保证两者都被调用。
+    """
+
+    merged = dict(extra or {})
+    previous = merged.get("_caprt_usage_sink")
+
+    def _combined(payload: Any) -> None:
+        sink(payload)
+        if callable(previous):
+            previous(payload)
+
+    merged["_caprt_usage_sink"] = _combined
+    return merged
+
+
+def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
+    """
+    以“拷贝 + 覆写 extra”的方式构造转发 request（兼容 dict/dataclass/pydantic）。
+    """
+
+    if isinstance(request, dict):
+        forwarded = dict(request)
+        raw_extra = forwarded.get("extra")
+        extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+        forwarded["extra"] = update_extra(extra)
+        return forwarded
+
+    raw_extra = getattr(request, "extra", None)
+    extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+    updated_extra = update_extra(extra)
+
+    replaced = False
+    forwarded = request
+    try:
+        import dataclasses
+
+        if dataclasses.is_dataclass(request):
+            forwarded = dataclasses.replace(request, extra=updated_extra)
+            replaced = True
+    except Exception:
+        replaced = False
+
+    if not replaced:
+        if hasattr(request, "model_copy"):
+            try:
+                forwarded = request.model_copy(update={"extra": updated_extra})
+                replaced = True
+            except Exception:
+                replaced = False
+        elif hasattr(request, "copy"):
+            try:
+                forwarded = request.copy(update={"extra": updated_extra})
+                replaced = True
+            except Exception:
+                replaced = False
+
+    if not replaced:
+        raise TypeError("request 对象不支持 extra 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy")
+
+    return forwarded
 
 
 def _load_yaml_dict(path: Path) -> Dict[str, Any]:

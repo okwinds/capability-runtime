@@ -14,6 +14,7 @@ Agently → Skills Runtime SDK 的 LLM backend 适配器。
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol, cast
 
@@ -63,6 +64,72 @@ class AgentlyBackendConfig:
     requester_factory: AgentlyRequesterFactory
 
 
+def _usage_int(value: Any) -> Optional[int]:
+    """把 usage 数值归一为非负 int；无法识别时返回 None。"""
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _normalize_usage_payload(*, usage: Any, model: Any = None) -> Optional[Dict[str, Any]]:
+    """
+    把 provider usage 归一为 capability-runtime 的 `llm_usage` payload 形状。
+
+    返回：
+    - `None`：无法提取任何有效 usage 字段
+    - `dict`：`model/input_tokens/output_tokens/total_tokens`
+    """
+
+    if not isinstance(usage, dict):
+        return None
+
+    model_text = model.strip() if isinstance(model, str) and model.strip() else None
+    input_tokens = _usage_int(usage.get("input_tokens"))
+    if input_tokens is None:
+        input_tokens = _usage_int(usage.get("prompt_tokens"))
+
+    output_tokens = _usage_int(usage.get("output_tokens"))
+    if output_tokens is None:
+        output_tokens = _usage_int(usage.get("completion_tokens"))
+
+    total_tokens = _usage_int(usage.get("total_tokens"))
+    payload = {
+        "model": model_text,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+    return payload if any(value is not None for value in payload.values()) else None
+
+
+def _extract_usage_payload_from_sse_data(data: str) -> Optional[Dict[str, Any]]:
+    """
+    从原始 SSE `data` 字符串中提取 usage 摘要。
+
+    说明：
+    - bridge 模式仅做 best-effort；
+    - 解析失败/无 usage 时返回 None，不影响主链。
+    """
+
+    raw = str(data or "").strip()
+    if not raw or raw in ("[DONE]", "DONE"):
+        return None
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    return _normalize_usage_payload(usage=obj.get("usage"), model=obj.get("model"))
+
+
 class AgentlyChatBackend(ChatBackend):
     """
     SDK `ChatBackend` 的 Agently 适配实现。
@@ -87,6 +154,11 @@ class AgentlyChatBackend(ChatBackend):
 
         requester = self._config.requester_factory()
         request_data = requester.generate_request_data()
+        usage_sink = None
+        if isinstance(getattr(request, "extra", None), dict):
+            candidate_sink = request.extra.get("_caprt_usage_sink")
+            if callable(candidate_sink):
+                usage_sink = candidate_sink
 
         if not isinstance(request.messages, list):
             raise TypeError("messages must be a list[dict]")
@@ -114,8 +186,6 @@ class AgentlyChatBackend(ChatBackend):
         # - request.extra 可能包含“运行时回调/非 JSON 值”（例如 on_retry=function），它们不属于 wire payload；
         # - 这些值若被透传到 requester，可能导致 JSON 序列化失败并让 real 模式不可用。
         if isinstance(request.extra, dict) and request.extra:
-            import json
-
             def _is_jsonable(value: Any) -> bool:
                 """
                 判断 value 是否可 JSON 序列化（最小、保守）。
@@ -195,6 +265,13 @@ class AgentlyChatBackend(ChatBackend):
             # OpenAICompatible requester 通常 yield ("message", <sse.data>)
             if not isinstance(data, str):
                 continue
+
+            usage_payload = _extract_usage_payload_from_sse_data(data)
+            if usage_payload is not None and usage_sink is not None:
+                try:
+                    usage_sink(dict(usage_payload))
+                except Exception:
+                    pass
 
             for ev in parser.feed_data(data):
                 # 关键不变量：

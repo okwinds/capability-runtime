@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import List, Optional
+from typing import AsyncIterator, List, Optional
 
 import pytest
 
@@ -18,6 +18,21 @@ class _ApproveAll(ApprovalProvider):
     async def request_approval(self, *, request: ApprovalRequest, timeout_ms: Optional[int] = None) -> ApprovalDecision:
         _ = (request, timeout_ms)
         return ApprovalDecision.APPROVED
+
+
+class _UsageAwareBackend:
+    """测试用 backend：通过 bridge usage sink 上抬 usage，再返回最小完成流。"""
+
+    async def stream_chat(self, request) -> AsyncIterator[ChatStreamEvent]:  # type: ignore[override]
+        sink = None
+        if isinstance(getattr(request, "extra", None), dict):
+            candidate = request.extra.get("_caprt_usage_sink")
+            if callable(candidate):
+                sink = candidate
+        if sink is not None:
+            sink({"model": "usage-test-model", "input_tokens": 11, "output_tokens": 7, "total_tokens": 18})
+        yield ChatStreamEvent(type="text_delta", text="done")
+        yield ChatStreamEvent(type="completed", finish_reason="stop")
 
 
 @pytest.mark.asyncio
@@ -86,3 +101,43 @@ async def test_run_ui_events_agent_emits_tool_and_approval_summaries_without_sec
     assert "sha256" in tool_req.data["args_summary"]
     assert "secret" not in (tool_req.data.get("args") or {})
     assert "TOPSECRET" not in str(tool_req.model_dump(by_alias=True))
+
+
+@pytest.mark.asyncio
+async def test_run_ui_events_agent_emits_metrics_when_bridge_usage_available(tmp_path: Path) -> None:
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            sdk_config_paths=[],
+            preflight_mode="off",
+            sdk_backend=_UsageAwareBackend(),
+        )
+    )
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(id="agent.metrics", kind=CapabilityKind.AGENT, name="AgentMetrics", description="离线：usage bridge。"),
+        )
+    )
+
+    terminal = await rt.run("agent.metrics", input={})
+    assert terminal.node_report is not None
+    assert terminal.node_report.usage is not None
+    assert terminal.node_report.usage.model == "usage-test-model"
+    assert terminal.node_report.usage.input_tokens == 11
+    assert terminal.node_report.usage.output_tokens == 7
+    assert terminal.node_report.usage.total_tokens == 18
+
+    out: List = []
+    async for ev in rt.run_ui_events("agent.metrics", input={}, level=StreamLevel.UI):
+        out.append(ev)
+        if ev.type == "run.status" and ev.data.get("status") in {"completed", "failed", "cancelled", "pending"}:
+            break
+
+    metrics = next(e for e in out if e.type == "metrics")
+    assert metrics.data == {
+        "model": "usage-test-model",
+        "input_tokens": 11,
+        "output_tokens": 7,
+        "total_tokens": 18,
+    }
