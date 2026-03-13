@@ -19,6 +19,15 @@ from skills_runtime.core.contracts import AgentEvent
 
 from .config import RuntimeConfig
 from .guards import ExecutionGuards
+from .host_protocol import (
+    ApprovalTicket,
+    HostRunSnapshot,
+    ResumeIntent,
+    build_approval_ticket_from_report,
+    build_resume_intent as build_host_resume_intent,
+    summarize_host_run_result,
+)
+from .manifest import CapabilityDescriptor, CapabilityManifestEntry, CapabilityVisibility, build_manifest_entry_from_spec
 from .output_validator import OutputValidator
 from .protocol.agent import AgentSpec
 from .protocol.capability import CapabilityKind, CapabilityResult, CapabilityStatus
@@ -31,10 +40,21 @@ from .sdk_lifecycle import (
     _normalize_skills_config_for_skills_runtime,
 )
 from .services import call_callback, get_host_meta, redact_issue
+from .structured_output import (
+    finalize_structured_result,
+    parse_json_object_snapshot,
+    validate_structured_output,
+)
+from .structured_stream import StructuredStreamEvent, diff_top_level_fields
 from .types import NodeReport
 from .adapters.workflow_engine import WorkflowStreamEvent
 from .adapters.triggerflow_workflow_engine import TriggerFlowWorkflowEngine
 from .runtime_ui_events_mixin import RuntimeUIEventsMixin
+from .workflow_runtime import (
+    WorkflowReplayRequest,
+    WorkflowRunSnapshot,
+    summarize_workflow_items,
+)
 
 
 class Runtime(RuntimeUIEventsMixin):
@@ -109,13 +129,52 @@ class Runtime(RuntimeUIEventsMixin):
         - spec：AgentSpec 或 WorkflowSpec
         """
 
-        self._registry.register(spec)
+        self._registry.register_with_manifest(
+            spec,
+            entry=build_manifest_entry_from_spec(spec, source="runtime.register"),
+        )
 
     def register_many(self, specs: List[AnySpec]) -> None:
         """批量注册能力。"""
 
         for s in specs:
-            self._registry.register(s)
+            self._registry.register_with_manifest(
+                s,
+                entry=build_manifest_entry_from_spec(s, source="runtime.register_many"),
+            )
+
+    def register_manifest_entry(self, entry: CapabilityManifestEntry) -> CapabilityManifestEntry:
+        """
+        仅注册 manifest entry（允许先于 spec）。
+
+        参数：
+        - entry：宿主定义的 manifest 元数据
+
+        返回：
+        - 已注册的 manifest entry
+        """
+
+        return self._registry.register_manifest_entry(entry)
+
+    def register_with_manifest(
+        self,
+        spec: AnySpec,
+        *,
+        entry: CapabilityManifestEntry | None = None,
+    ) -> CapabilityManifestEntry:
+        """
+        注册能力并同步 manifest entry。
+
+        参数：
+        - spec：AgentSpec 或 WorkflowSpec
+        - entry：可选显式 manifest entry
+
+        返回：
+        - 实际注册的 manifest entry
+        """
+
+        manifest_entry = entry or build_manifest_entry_from_spec(spec, source="runtime.register_with_manifest")
+        return self._registry.register_with_manifest(spec, entry=manifest_entry)
 
     @property
     def registry(self) -> CapabilityRegistry:
@@ -138,6 +197,92 @@ class Runtime(RuntimeUIEventsMixin):
         """
 
         return self._registry.validate_dependencies()
+
+    def describe_capability(self, capability_id: str) -> CapabilityDescriptor | None:
+        """
+        返回宿主可消费的 capability descriptor。
+
+        参数：
+        - capability_id：能力 ID
+        """
+
+        return self._registry.get_descriptor(capability_id)
+
+    def list_capabilities(
+        self,
+        *,
+        visibility: CapabilityVisibility | None = None,
+        exposed_only: bool = False,
+    ) -> list[CapabilityDescriptor]:
+        """
+        列出 capability descriptors。
+
+        参数：
+        - visibility：可选可见性过滤
+        - exposed_only：仅返回 `entry.expose=True` 的能力
+        """
+
+        return self._registry.list_descriptors(visibility=visibility, exposed_only=exposed_only)
+
+    def build_approval_ticket(
+        self,
+        result: CapabilityResult,
+        *,
+        capability_id: str,
+    ) -> ApprovalTicket | None:
+        """
+        从 terminal result 构造宿主 ApprovalTicket。
+
+        参数：
+        - result：终态 CapabilityResult
+        - capability_id：能力 ID
+        """
+
+        return build_approval_ticket_from_report(result.node_report, capability_id=capability_id)
+
+    def summarize_host_run(
+        self,
+        result: CapabilityResult,
+        *,
+        capability_id: str,
+    ) -> HostRunSnapshot:
+        """
+        把 terminal result 收敛为宿主运行摘要。
+
+        参数：
+        - result：终态 CapabilityResult
+        - capability_id：能力 ID
+        """
+
+        return summarize_host_run_result(result, capability_id=capability_id)
+
+    def build_resume_intent(
+        self,
+        *,
+        run_id: str,
+        approval_key: str | None = None,
+        decision: str | None = None,
+        session_id: str | None = None,
+        host_turn_id: str | None = None,
+    ) -> ResumeIntent:
+        """
+        构造宿主续跑意图。
+
+        参数：
+        - run_id：运行 ID
+        - approval_key：可选审批键
+        - decision：可选审批决定
+        - session_id：可选会话 ID
+        - host_turn_id：可选宿主 turn ID
+        """
+
+        return build_host_resume_intent(
+            run_id=run_id,
+            approval_key=approval_key,
+            decision=decision,
+            session_id=session_id,
+            host_turn_id=host_turn_id,
+        )
 
     async def run(
         self,
@@ -165,6 +310,184 @@ class Runtime(RuntimeUIEventsMixin):
                 error="Runtime.run_stream produced no terminal CapabilityResult",
             )
         return result
+
+    async def run_structured(
+        self,
+        capability_id: str,
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+    ) -> CapabilityResult:
+        """
+        强结构输出入口：成功时返回 `dict` 输出。
+
+        约束：
+        - 仅支持带 `output_schema` 的 Agent capability；
+        - 不改变 `run()` 的既有语义，而是在其之上做强结构收口。
+        """
+
+        spec = self._registry.get(capability_id)
+        if spec is None:
+            return await self.run(capability_id, input=input, context=context)
+        if not isinstance(spec, AgentSpec):
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"Structured output is only supported for Agent capability: {capability_id!r}",
+                error_code="STRUCTURED_OUTPUT_UNSUPPORTED_KIND",
+            )
+        if spec.output_schema is None or not spec.output_schema.fields:
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"Structured output schema is missing for capability: {capability_id!r}",
+                error_code="STRUCTURED_OUTPUT_SCHEMA_MISSING",
+            )
+
+        result = await self.run(capability_id, input=input, context=context)
+        if result.status != CapabilityStatus.SUCCESS:
+            return result
+
+        validation = validate_structured_output(
+            final_output=result.output,
+            output_schema=spec.output_schema,
+            capability_id=capability_id,
+            mode="error",
+        )
+        return finalize_structured_result(result=result, validation=validation, fail_on_error=True)
+
+    async def run_structured_stream(
+        self,
+        capability_id: str,
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+    ) -> AsyncIterator[StructuredStreamEvent]:
+        """
+        结构化输出流式消费入口。
+
+        说明：
+        - 面向业务代码，不透传 mixed stream / UI events 的全部细节；
+        - 仅在观察到 `llm_response_delta(text)` 时产出中途快照与字段更新。
+        """
+
+        spec = self._registry.get(capability_id)
+        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth)
+        yield StructuredStreamEvent(type="started", run_id=ctx.run_id, capability_id=capability_id)
+
+        if spec is None:
+            yield StructuredStreamEvent(
+                type="terminal",
+                run_id=ctx.run_id,
+                capability_id=capability_id,
+                status=CapabilityStatus.FAILED.value,
+                error=f"Capability not found: {capability_id!r}",
+                error_code="CAPABILITY_NOT_FOUND",
+            )
+            return
+        if not isinstance(spec, AgentSpec):
+            yield StructuredStreamEvent(
+                type="terminal",
+                run_id=ctx.run_id,
+                capability_id=capability_id,
+                status=CapabilityStatus.FAILED.value,
+                error=f"Structured output is only supported for Agent capability: {capability_id!r}",
+                error_code="STRUCTURED_OUTPUT_UNSUPPORTED_KIND",
+            )
+            return
+        if spec.output_schema is None or not spec.output_schema.fields:
+            yield StructuredStreamEvent(
+                type="terminal",
+                run_id=ctx.run_id,
+                capability_id=capability_id,
+                status=CapabilityStatus.FAILED.value,
+                error=f"Structured output schema is missing for capability: {capability_id!r}",
+                error_code="STRUCTURED_OUTPUT_SCHEMA_MISSING",
+            )
+            return
+
+        accumulated_text = ""
+        previous_snapshot: Optional[Dict[str, Any]] = None
+        terminal: Optional[CapabilityResult] = None
+
+        async for item in self.run_stream(capability_id, input=input, context=ctx):
+            if isinstance(item, CapabilityResult):
+                terminal = item
+                continue
+            if not isinstance(item, AgentEvent):
+                continue
+            if item.type != "llm_response_delta":
+                continue
+            if str(item.payload.get("delta_type") or "") != "text":
+                continue
+
+            text = str(item.payload.get("text") or "")
+            if not text:
+                continue
+            accumulated_text += text
+            yield StructuredStreamEvent(
+                type="text_delta",
+                run_id=ctx.run_id,
+                capability_id=capability_id,
+                text=text,
+            )
+
+            snapshot = parse_json_object_snapshot(accumulated_text)
+            if snapshot is None or snapshot == previous_snapshot:
+                continue
+
+            yield StructuredStreamEvent(
+                type="object_snapshot",
+                run_id=ctx.run_id,
+                capability_id=capability_id,
+                snapshot=dict(snapshot),
+            )
+            for field, value in diff_top_level_fields(previous_snapshot, snapshot):
+                yield StructuredStreamEvent(
+                    type="field_updated",
+                    run_id=ctx.run_id,
+                    capability_id=capability_id,
+                    field=field,
+                    value=value,
+                )
+            previous_snapshot = dict(snapshot)
+
+        if terminal is None:
+            terminal = CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error="Runtime.run_stream produced no terminal CapabilityResult",
+                error_code="STRUCTURED_OUTPUT_MISSING_TERMINAL",
+            )
+
+        structured_terminal = terminal
+        if terminal.status == CapabilityStatus.SUCCESS:
+            validation = validate_structured_output(
+                final_output=terminal.output,
+                output_schema=spec.output_schema,
+                capability_id=capability_id,
+                mode="error",
+            )
+            structured_terminal = finalize_structured_result(
+                result=terminal,
+                validation=validation,
+                fail_on_error=True,
+            )
+
+        raw_output = structured_terminal.metadata.get("raw_output")
+        if not isinstance(raw_output, str):
+            if isinstance(terminal.output, str):
+                raw_output = terminal.output
+            else:
+                raw_output = None
+
+        yield StructuredStreamEvent(
+            type="terminal",
+            run_id=ctx.run_id,
+            capability_id=capability_id,
+            status=structured_terminal.status.value,
+            output=structured_terminal.output if isinstance(structured_terminal.output, dict) else None,
+            raw_output=raw_output,
+            error=structured_terminal.error,
+            error_code=structured_terminal.error_code,
+        )
 
     async def run_stream(
         self,
@@ -222,6 +545,62 @@ class Runtime(RuntimeUIEventsMixin):
                 x.duration_ms = (time.monotonic() - started) * 1000
             yield x
         return
+
+    async def run_workflow_observable(
+        self,
+        workflow_id: str,
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+    ) -> AsyncIterator[Union[WorkflowStreamEvent, CapabilityResult]]:
+        """
+        workflow host-facing observable surface。
+
+        参数：
+        - workflow_id：workflow ID
+        - input：可选输入
+        - context：可选执行上下文
+        """
+
+        async for item in self.run_stream(workflow_id, input=input, context=context):
+            if isinstance(item, AgentEvent):
+                continue
+            yield item
+
+    def summarize_workflow_run(
+        self,
+        *,
+        workflow_id: str,
+        items: list[Any],
+        terminal: CapabilityResult | None = None,
+    ) -> WorkflowRunSnapshot:
+        """
+        收敛 workflow 运行摘要。
+
+        参数：
+        - workflow_id：workflow ID
+        - items：workflow 轻量事件列表
+        - terminal：可选终态结果
+        """
+
+        return summarize_workflow_items(workflow_id=workflow_id, items=items, terminal=terminal)
+
+    async def replay_workflow(
+        self,
+        request: WorkflowReplayRequest,
+        *,
+        context: Optional[ExecutionContext] = None,
+    ) -> CapabilityResult:
+        """
+        基于 host request 重放 workflow。
+
+        参数：
+        - request：workflow replay 请求
+        - context：可选执行上下文；为空时使用 request.run_id 新建
+        """
+
+        ctx = context or ExecutionContext(run_id=request.run_id, max_depth=self._config.max_depth)
+        return await self.run(request.workflow_id, input=request.current_input or {}, context=ctx)
 
     async def _execute(self, *, spec: AnySpec, input: Dict[str, Any], context: ExecutionContext) -> CapabilityResult:
         """
@@ -349,15 +728,21 @@ class Runtime(RuntimeUIEventsMixin):
     def apply_output_validation(
         self,
         *,
-        final_output: str,
+        final_output: Any,
         report: NodeReport,
         context: Dict[str, Any],
+        output_schema: Optional[Any] = None,
     ) -> None:
         """
         RuntimeServices 协议方法：执行输出校验并写入 NodeReport.meta。
         """
 
-        self._output_validator.validate(final_output=final_output, report=report, context=context)
+        self._output_validator.validate(
+            final_output=final_output,
+            report=report,
+            context=context,
+            output_schema=output_schema,
+        )
 
     def redact_issue(self, issue: Any) -> Dict[str, Any]:
         """RuntimeServices 协议方法：issue 最小披露归一。"""

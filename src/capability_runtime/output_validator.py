@@ -7,6 +7,7 @@ import json
 from typing import Any, Callable, Dict, Optional
 
 from .config import OutputValidationMode
+from .structured_output import apply_structured_output_summary, validate_structured_output
 from .types import NodeReport
 
 
@@ -25,7 +26,14 @@ class OutputValidator:
         self._mode = mode
         self._validator = validator
 
-    def validate(self, *, final_output: str, report: NodeReport, context: Dict[str, Any]) -> None:
+    def validate(
+        self,
+        *,
+        final_output: Any,
+        report: NodeReport,
+        context: Dict[str, Any],
+        output_schema: Optional[Any] = None,
+    ) -> None:
         """
         调用 output_validator 并把“最小披露”摘要写入 NodeReport.meta。
 
@@ -34,6 +42,20 @@ class OutputValidator:
         - mode=warn：记录摘要但不覆盖状态
         - mode=error：validator 返回 ok=False 时覆盖为 failed（可回归护栏）
         """
+
+        capability_id = str(context.get("capability_id") or "")
+        if output_schema is not None and getattr(output_schema, "fields", None):
+            validation = validate_structured_output(
+                final_output=final_output,
+                output_schema=output_schema,
+                capability_id=capability_id,
+                mode=self._mode,
+            )
+            apply_structured_output_summary(
+                report=report,
+                validation=validation,
+                fail_on_error=self._mode == "error",
+            )
 
         if self._mode == "off" or self._validator is None:
             return

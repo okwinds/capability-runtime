@@ -69,7 +69,14 @@ class RuntimeServices(Protocol):
     def emit_agent_event_taps(self, *, ev: Any, context: ExecutionContext, capability_id: str) -> None:
         """分发 AgentEvent taps。"""
 
-    def apply_output_validation(self, *, final_output: str, report: NodeReport, context: Dict[str, Any]) -> None:
+    def apply_output_validation(
+        self,
+        *,
+        final_output: Any,
+        report: NodeReport,
+        context: Dict[str, Any],
+        output_schema: Optional[Any] = None,
+    ) -> None:
         """执行输出校验并写入 NodeReport.meta。"""
 
 

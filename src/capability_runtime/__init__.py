@@ -4,12 +4,16 @@ from __future__ import annotations
 # === 统一入口 ===
 from .config import CustomTool, RuntimeConfig
 from .runtime import Runtime
+from .service_facade import RuntimeServiceFacade, RuntimeServiceHandle, RuntimeServiceRequest, RuntimeSession
+from .structured_stream import StructuredStreamEvent
 
 # === 报告类型 ===
 from .types import NodeReport, NodeResult
 
 # === Host toolkit（精选公共导出）===
 from .host_toolkit import InvokeCapabilityAllowlist, make_invoke_capability_tool
+from .host_protocol import ApprovalTicket, HostRunSnapshot, HostRunStatus, ResumeIntent
+from .manifest import CapabilityDescriptor, CapabilityManifestEntry, CapabilityVisibility
 
 # === Protocol 导出 ===
 from .protocol.agent import AgentIOSchema, AgentSpec
@@ -30,6 +34,7 @@ from .protocol.workflow import (
     WorkflowSpec,
 )
 from .services import RuntimeServices
+from .workflow_runtime import WorkflowReplayRequest, WorkflowRunSnapshot, WorkflowRunStatus, WorkflowStepSnapshot
 
 # === 错误导出 ===
 from .errors import CapabilityNotFoundError, RuntimeFrameworkError
@@ -39,6 +44,7 @@ __all__ = [
     "Runtime",
     "RuntimeConfig",
     "CustomTool",
+    "StructuredStreamEvent",
     # Reports
     "NodeReport",
     "NodeResult",
@@ -51,6 +57,21 @@ __all__ = [
     "CapabilitySpec",
     "CapabilityStatus",
     "CapabilityResult",
+    "CapabilityManifestEntry",
+    "CapabilityDescriptor",
+    "CapabilityVisibility",
+    "HostRunStatus",
+    "ApprovalTicket",
+    "ResumeIntent",
+    "HostRunSnapshot",
+    "WorkflowRunStatus",
+    "WorkflowStepSnapshot",
+    "WorkflowRunSnapshot",
+    "WorkflowReplayRequest",
+    "RuntimeSession",
+    "RuntimeServiceRequest",
+    "RuntimeServiceHandle",
+    "RuntimeServiceFacade",
     "AgentSpec",
     "AgentIOSchema",
     "WorkflowSpec",

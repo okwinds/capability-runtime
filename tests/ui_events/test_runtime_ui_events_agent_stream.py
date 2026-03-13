@@ -10,7 +10,7 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import AgentIOSchema, AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
 from capability_runtime.ui_events.v1 import StreamLevel
 
 
@@ -141,3 +141,48 @@ async def test_run_ui_events_agent_emits_metrics_when_bridge_usage_available(tmp
         "output_tokens": 7,
         "total_tokens": 18,
     }
+
+
+@pytest.mark.asyncio
+async def test_run_ui_events_terminal_exposes_structured_output_summary_when_present(tmp_path: Path) -> None:
+    backend = FakeChatBackend(
+        calls=[FakeChatCall(events=[ChatStreamEvent(type="text_delta", text='{"title":"A","summary":"B"}'), ChatStreamEvent(type="completed")])]
+    )
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            sdk_config_paths=[],
+            preflight_mode="off",
+            sdk_backend=backend,
+            output_validation_mode="warn",
+        )
+    )
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(
+                id="agent.structured-ui",
+                kind=CapabilityKind.AGENT,
+                name="AgentStructuredUI",
+                description="离线：输出结构化 JSON。",
+            ),
+            output_schema=AgentIOSchema(
+                fields={"title": "str", "summary": "str"},
+                required=["title", "summary"],
+            ),
+        )
+    )
+
+    terminal = None
+    async for ev in rt.run_ui_events("agent.structured-ui", input={}, level=StreamLevel.UI):
+        if ev.type == "run.status" and ev.data.get("status") in {"completed", "failed", "cancelled", "pending"}:
+            terminal = ev
+            break
+
+    assert terminal is not None
+    so = terminal.data.get("structured_output")
+    assert isinstance(so, dict), terminal
+    assert so.get("ok") is True
+    assert so.get("schema_id") == "capability-runtime.agent_output_schema.v1:agent.structured-ui"
+    assert so.get("required") == ["title", "summary"]

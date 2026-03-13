@@ -60,6 +60,25 @@ class ResumeReplaySummary(BaseModel):
     approvals: dict
 
 
+class HostResumeState(BaseModel):
+    """
+    宿主续跑状态摘要。
+
+    字段说明：
+    - `run_id`：本轮运行 ID
+    - `approvals`：最小审批统计
+    - `last_terminal_type`：最近终态事件类型
+    - `waiting_approval_key`：尚未决议的审批键
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    approvals: dict
+    last_terminal_type: Optional[str] = None
+    waiting_approval_key: Optional[str] = None
+
+
 def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeReplayState, ResumeReplaySummary]:
     """
     基于 events 回放得到 resume state，并生成诊断摘要。
@@ -88,3 +107,48 @@ def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeRepl
         },
     )
     return st, summary
+
+
+def build_host_resume_state(*, events: List[AgentEvent]) -> HostResumeState:
+    """
+    基于 events 回放得到面向宿主的续跑状态。
+
+    参数：
+    - events：AgentEvent 列表
+
+    返回：
+    - HostResumeState（不暴露 tool 输出明文）
+    """
+
+    st, summary = build_resume_replay_summary(events=events)
+    requested_keys: List[str] = []
+    resolved_keys: set[str] = set()
+    run_id = ""
+
+    for ev in events:
+        if not run_id and isinstance(ev.run_id, str):
+            run_id = ev.run_id
+        approval_key = ev.payload.get("approval_key")
+        if not isinstance(approval_key, str) or not approval_key.strip():
+            continue
+        approval_key = approval_key.strip()
+        if ev.type == "approval_requested":
+            requested_keys.append(approval_key)
+        elif ev.type == "approval_decided":
+            resolved_keys.add(approval_key)
+
+    waiting_approval_key = None
+    for approval_key in reversed(requested_keys):
+        if approval_key not in resolved_keys:
+            waiting_approval_key = approval_key
+            break
+
+    return HostResumeState(
+        run_id=run_id,
+        approvals={
+            **summary.approvals,
+            "pending_approval_keys_count": len([key for key in requested_keys if key not in resolved_keys]),
+        },
+        last_terminal_type=summary.last_terminal_type,
+        waiting_approval_key=waiting_approval_key,
+    )

@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Dict, List, cast
 
 from agently import TriggerFlow
 
+from ..host_protocol import build_approval_ticket_from_report
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext, RecursionLimitError
 from ..protocol.workflow import (
@@ -156,6 +157,7 @@ class TriggerFlowWorkflowEngine:
                         "workflow_id": spec.base.id,
                         "workflow_instance_id": workflow_instance_id,
                         "step_id": step_id,
+                        "capability_id": self._step_capability_id(bound_step),
                     }
                 )
 
@@ -164,6 +166,7 @@ class TriggerFlowWorkflowEngine:
                 if isinstance(bound_step, LoopStep) and result.status == CapabilityStatus.SUCCESS and bound_step.collect_as:
                     context = context.with_bag_overlay(**{str(bound_step.collect_as): result.output})
 
+                approval_ticket = build_approval_ticket_from_report(result.node_report, capability_id=spec.base.id)
                 await emit(
                     {
                         "type": "workflow.step.finished",
@@ -171,8 +174,10 @@ class TriggerFlowWorkflowEngine:
                         "workflow_id": spec.base.id,
                         "workflow_instance_id": workflow_instance_id,
                         "step_id": step_id,
+                        "capability_id": self._step_capability_id(bound_step),
                         "status": getattr(result.status, "value", str(result.status)),
                         "error": result.error,
+                        "waiting_approval_key": approval_ticket.approval_key if approval_ticket is not None else None,
                     }
                 )
 
@@ -266,6 +271,18 @@ class TriggerFlowWorkflowEngine:
             status=CapabilityStatus.FAILED,
             error=f"Unknown step type: {type(step).__name__}",
         )
+
+    def _step_capability_id(self, step: Any) -> str | None:
+        """
+        提取 workflow step 绑定的 capability ID。
+
+        参数：
+        - step：WorkflowStep
+        """
+
+        capability = getattr(step, "capability", None)
+        capability_id = getattr(capability, "id", None)
+        return capability_id if isinstance(capability_id, str) and capability_id.strip() else None
 
     async def _execute_basic_step(
         self,

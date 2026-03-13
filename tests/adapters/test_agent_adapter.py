@@ -123,6 +123,24 @@ def test_build_task_includes_output_schema_and_skills_mentions() -> None:
     assert "$[acct:dm].topic-scorer" in task
 
 
+def test_build_task_structured_output_contract_mentions_json_object_and_required_fields() -> None:
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock"))
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A", description="输出结构化结果"),
+        output_schema=AgentIOSchema(
+            fields={"title": "str", "summary": "str", "score": "int"},
+            required=["title", "summary"],
+        ),
+    )
+
+    task = rt._agent_adapter._build_task(spec=spec, input={"topic": "x"})  # type: ignore[attr-defined]
+    assert "JSON object" in task
+    assert "不要 Markdown" in task
+    assert "必填字段" in task
+    assert "title" in task
+    assert "summary" in task
+
+
 def test_build_task_prefers_skills_mention_map_when_provided() -> None:
     rt = _mk_runtime(cfg=RuntimeConfig(mode="sdk_native", workspace_root=Path("."), preflight_mode="off"))
     spec = AgentSpec(
@@ -149,7 +167,7 @@ def test_build_task_sections_use_constants() -> None:
     assert agent_adapter._SECTION_SYSTEM == "## 系统指令"
     assert agent_adapter._SECTION_TASK == "## 任务"
     assert agent_adapter._SECTION_INPUT == "## 输入"
-    assert agent_adapter._SECTION_OUTPUT_PREFIX == "## 输出要求\n请严格按以下字段输出 JSON："
+    assert agent_adapter._SECTION_OUTPUT_PREFIX == "## 输出要求"
     assert agent_adapter._SECTION_SKILLS == "## 使用以下 Skills"
 
     # 验证 _build_task 使用了这些常量（通过 monkeypatch 替换验证）
@@ -232,8 +250,15 @@ async def test_agent_adapter_can_run_in_sdk_native_mode_with_fake_runtime_servic
         def call_callback(self, cb, *args) -> None:  # type: ignore[no-untyped-def]
             _ = (cb, args)
 
-        def apply_output_validation(self, *, final_output: str, report, context: Dict[str, Any]) -> None:  # type: ignore[no-untyped-def]
-            _ = (final_output, report, context)
+        def apply_output_validation(  # type: ignore[no-untyped-def]
+            self,
+            *,
+            final_output: str,
+            report,
+            context: Dict[str, Any],
+            output_schema=None,
+        ) -> None:
+            _ = (final_output, report, context, output_schema)
 
         def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
             raise AssertionError("not expected in preflight_mode=off path")

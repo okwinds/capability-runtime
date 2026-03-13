@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 
 from skills_runtime.core.contracts import AgentEvent
 
+from ..host_protocol import project_host_runtime_data
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..types import NodeReport
 from .v1 import Evidence, PathSegment, RuntimeEvent, StreamLevel
@@ -616,11 +617,22 @@ class RuntimeUIEventProjector:
     def on_terminal(self, result: CapabilityResult) -> List[RuntimeEvent]:
         terminal_status = _normalize_terminal_status(result.status)
         evidence = self._evidence_from_node_report(result.node_report)
+        data: Dict[str, Any] = {"status": terminal_status}
+        if result.node_report is not None:
+            structured_output = result.node_report.meta.get("structured_output")
+            if isinstance(structured_output, dict):
+                data["structured_output"] = dict(structured_output)
+            output_validation = result.node_report.meta.get("output_validation")
+            if isinstance(output_validation, dict):
+                data["output_validation"] = dict(output_validation)
+        host_runtime = project_host_runtime_data(result)
+        if isinstance(host_runtime, dict):
+            data["host_runtime"] = host_runtime
         return [
             self._emit(
                 type="run.status",
                 path=self._base_path(),
-                data={"status": terminal_status},
+                data=data,
                 evidence=evidence,
             )
         ]

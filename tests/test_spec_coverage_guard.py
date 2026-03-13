@@ -25,6 +25,8 @@ SPEC_MAPPING: dict[str, list[str]] = {
     "runtime": [
         "runtime-run-stream-semantics-v1.md",
         "runtime-structural-refactor-2026-03-01.md",
+        "structured-output-bridge-v1.md",
+        "structured-stream-consumption-v1.md",
     ],
     "reporting/node_report": ["node-report-v1.md"],
     "adapters/agently_backend": [
@@ -58,8 +60,13 @@ SPEC_MAPPING: dict[str, list[str]] = {
     "host_toolkit/turn_delta": ["host-toolkit-v1.md"],
     "guards": ["runtime-support-modules-v1.md"],
     "registry": ["runtime-support-modules-v1.md"],
+    "manifest": ["runtime-capability-manifest-v1.md"],
+    "host_protocol": ["runtime-hitl-host-protocol-v1.md"],
+    "workflow_runtime": ["workflow-host-runtime-surface-v1.md"],
+    "service_facade": ["runtime-service-session-bridge-v1.md"],
     "services": ["runtime-support-modules-v1.md"],
     "output_validator": ["runtime-support-modules-v1.md"],
+    "structured_output": ["structured-output-bridge-v1.md"],
     "protocol/agent": ["protocol-types-v1.md"],
     "protocol/workflow": ["protocol-types-v1.md"],
 }

@@ -26,7 +26,7 @@ from ..services import RuntimeServices, map_node_status
 _SECTION_SYSTEM = "## 系统指令"
 _SECTION_TASK = "## 任务"
 _SECTION_INPUT = "## 输入"
-_SECTION_OUTPUT_PREFIX = "## 输出要求\n请严格按以下字段输出 JSON："
+_SECTION_OUTPUT_PREFIX = "## 输出要求"
 _SECTION_SKILLS = "## 使用以下 Skills"
 
 
@@ -217,6 +217,7 @@ class AgentAdapter:
             final_output=final_output,
             report=report,
             context={"run_id": context.run_id, "capability_id": spec.base.id, "bag": dict(context.bag)},
+            output_schema=spec.output_schema,
         )
 
         status = map_node_status(report)
@@ -256,8 +257,7 @@ class AgentAdapter:
             parts.append(f"{_SECTION_INPUT}\n" + "\n".join(lines))
 
         if spec.output_schema and spec.output_schema.fields:
-            schema_lines = [f"- {name}: {typ}" for name, typ in spec.output_schema.fields.items()]
-            parts.append(f"{_SECTION_OUTPUT_PREFIX}\n" + "\n".join(schema_lines))
+            parts.append(self._build_output_contract(spec=spec))
 
         # skills mention（可选）
         mentions = self._build_skill_mentions(spec=spec)
@@ -268,6 +268,32 @@ class AgentAdapter:
             parts.append(str(spec.prompt_template))
 
         return "\n\n".join(parts)
+
+    def _build_output_contract(self, *, spec: AgentSpec) -> str:
+        """
+        构造结构化输出约束段。
+
+        说明：
+        - 这里仍属于提示层约束，但要明确“只返回 JSON object”；
+        - 真正的收口由 Runtime 的结构化输出校验负责。
+        """
+
+        if spec.output_schema is None:
+            return ""
+
+        lines = [
+            _SECTION_OUTPUT_PREFIX,
+            "请只返回 JSON object，不要 Markdown code fence，不要解释性前后缀。",
+            "字段要求：",
+        ]
+        lines.extend([f"- {name}: {typ}" for name, typ in spec.output_schema.fields.items()])
+
+        required = [str(name) for name in list(spec.output_schema.required or []) if str(name)]
+        if required:
+            lines.append("必填字段：")
+            lines.extend([f"- {name}" for name in required])
+
+        return "\n".join(lines)
 
     def _build_skill_mentions(self, *, spec: AgentSpec) -> List[str]:
         """
