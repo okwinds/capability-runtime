@@ -4,7 +4,7 @@ from __future__ import annotations
 Atomic 示例：09_multiseg_namespace_mention
 
 演示内容：
-- skills-runtime-sdk==0.1.9：skills.spaces schema 使用 namespace（可多段）
+- skills-runtime-sdk==0.1.9.post1：skills.spaces schema 使用 namespace（可多段）
 - strict mention：$[namespace].skill_name（namespace ≥ 3 segments）
 - 可观察证据：
   - stdout 打印 namespace + expected mention
