@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from skills_runtime.core.contracts import AgentEvent
 
 from ..types import NodeReport, NodeToolCallReport, NodeUsageReport
+from ..utils.usage import extract_usage_metrics
 
 
 def _get_skills_runtime_version() -> Optional[str]:
@@ -55,57 +56,6 @@ def _get_first_dist_version(dist_names: List[str]) -> Optional[str]:
         if v:
             return v
     return None
-
-
-def _usage_int(value: Any) -> Optional[int]:
-    """把 usage 数值归一为非负 int；无法识别时返回 None。"""
-
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value >= 0 else None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed >= 0 else None
-
-
-def _extract_llm_usage_summary(payload: Any) -> Dict[str, Optional[Any]]:
-    """
-    从 `AgentEvent(type="llm_usage")` payload 中提取 usage 摘要。
-
-    兼容：
-    - 本仓规范字段：`input_tokens/output_tokens/total_tokens`
-    - OpenAI 风格字段：`prompt_tokens/completion_tokens/total_tokens`
-    - 可选嵌套：`payload["usage"]`
-    """
-
-    if not isinstance(payload, dict):
-        return {"model": None, "input_tokens": None, "output_tokens": None, "total_tokens": None}
-
-    usage_dict = payload.get("usage") if isinstance(payload.get("usage"), dict) else payload
-    model = payload.get("model")
-    if not isinstance(model, str) or not model.strip():
-        model = usage_dict.get("model")
-    model_text = model.strip() if isinstance(model, str) and model.strip() else None
-
-    input_tokens = _usage_int(usage_dict.get("input_tokens"))
-    if input_tokens is None:
-        input_tokens = _usage_int(usage_dict.get("prompt_tokens"))
-
-    output_tokens = _usage_int(usage_dict.get("output_tokens"))
-    if output_tokens is None:
-        output_tokens = _usage_int(usage_dict.get("completion_tokens"))
-
-    total_tokens = _usage_int(usage_dict.get("total_tokens"))
-
-    return {
-        "model": model_text,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens,
-    }
 
 
 @dataclass
@@ -230,7 +180,7 @@ class NodeReportBuilder:
                     seen_skills.add(skill_name)
 
             if ev.type == "llm_usage":
-                usage_summary = _extract_llm_usage_summary(ev.payload)
+                usage_summary = extract_usage_metrics(ev.payload)
                 model_name = usage_summary.get("model")
                 if isinstance(model_name, str) and model_name.strip():
                     usage_model = model_name.strip()

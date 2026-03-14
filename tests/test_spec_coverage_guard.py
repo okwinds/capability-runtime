@@ -77,6 +77,7 @@ SPEC_EXEMPTIONS: dict[str, str] = {
     "errors": "极小模块（20 行），暂免",
     "types": "类型别名模块（85 行），暂免",
     "adapters/workflow_engine": "ABC，极小模块（43 行）",
+    "utils/usage": "工具函数模块（65 行），抽取自 node_report/projector，行为隐含在 runtime-ui-events-v1 和 node-report-v1",
 }
 
 

@@ -47,6 +47,7 @@ from .structured_output import (
 )
 from .structured_stream import StructuredStreamEvent, diff_top_level_fields
 from .types import NodeReport
+from .adapters.agent_adapter import AgentAdapter
 from .adapters.workflow_engine import WorkflowStreamEvent
 from .adapters.triggerflow_workflow_engine import TriggerFlowWorkflowEngine
 from .runtime_ui_events_mixin import RuntimeUIEventsMixin
@@ -94,8 +95,6 @@ class Runtime(RuntimeUIEventsMixin):
         # UI events taps：用于把 SDK AgentEvent（含 workflow 内 nested agent 事件）
         # 旁路投影为 RuntimeEvent v1，不影响 NodeReport/WAL 真相源。
         self._agent_event_taps: List[Any] = []
-        from .adapters.agent_adapter import AgentAdapter
-
         self._agent_adapter = AgentAdapter(services=self)
         injected_engine = getattr(config, "workflow_engine", None)
         self._workflow_engine = injected_engine if injected_engine is not None else TriggerFlowWorkflowEngine()

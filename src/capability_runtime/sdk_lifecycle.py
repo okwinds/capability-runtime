@@ -335,7 +335,7 @@ class _ModelOverrideBackend:
                 import dataclasses
 
                 if dataclasses.is_dataclass(request):
-                    forwarded = dataclasses.replace(request, model=self._model)
+                    forwarded = dataclasses.replace(request, model=self._model)  # type: ignore[type-var]
                     replaced = True
             except Exception:
                 replaced = False
@@ -400,7 +400,7 @@ class _ToolChoiceOverrideBackend:
                 import dataclasses
 
                 if dataclasses.is_dataclass(request):
-                    forwarded = dataclasses.replace(request, extra=extra)
+                    forwarded = dataclasses.replace(request, extra=extra)  # type: ignore[type-var]
                     replaced = True
             except Exception:
                 replaced = False
@@ -559,7 +559,7 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
         import dataclasses
 
         if dataclasses.is_dataclass(request):
-            forwarded = dataclasses.replace(request, extra=updated_extra)
+            forwarded = dataclasses.replace(request, extra=updated_extra)  # type: ignore[type-var,assignment]
             replaced = True
     except Exception:
         replaced = False
