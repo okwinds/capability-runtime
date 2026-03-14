@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 from skills_runtime.core.contracts import AgentEvent
 
+from .logging_utils import log_suppressed_exception
 from .protocol.capability import CapabilityResult, CapabilityStatus
 from .protocol.context import ExecutionContext
 
@@ -116,9 +117,15 @@ class RuntimeUIEventsMixin:
         for t in list(self._agent_event_taps):
             try:
                 t(ev, tap_ctx)
-            except Exception:
+            except Exception as exc:
                 # 旁路 tap 不得影响主流程（fail-open）
-                pass
+                log_suppressed_exception(
+                    context="agent_event_tap",
+                    exc=exc,
+                    run_id=context.run_id if context else None,
+                    capability_id=capability_id,
+                    extra={"event_type": getattr(ev, "type", None)},
+                )
 
     async def run_ui_events(
         self,

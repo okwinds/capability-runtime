@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Dict, Optional, Set
 
 from skills_runtime.core.contracts import AgentEvent
 
+from ..logging_utils import log_suppressed_exception
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
 from .projector import RuntimeUIEventProjector, _AgentCtx
@@ -90,9 +91,13 @@ class RuntimeUIEventsSession:
             pass
         try:
             q.put_nowait(self._emit_subscriber_lagged(q=q))
-        except Exception:
+        except Exception as exc:
             # fail-open：断开慢订阅者必须不影响主事件流
-            pass
+            log_suppressed_exception(
+                context="cut_off_subscriber_emit_lagged",
+                exc=exc,
+                run_id=self._context.run_id if self._context else None,
+            )
 
     def _publish_nowait(self, ev: RuntimeEvent) -> None:
         self._store.append(ev)
@@ -101,9 +106,13 @@ class RuntimeUIEventsSession:
                 q.put_nowait(ev)
             except asyncio.QueueFull:
                 self._cut_off_subscriber(q=q)
-            except Exception:
+            except Exception as exc:
                 # fail-open：单个订阅者的异常不得影响主事件流
-                pass
+                log_suppressed_exception(
+                    context="publish_to_subscriber",
+                    exc=exc,
+                    extra={"event_type": getattr(ev, "type", None)},
+                )
 
     def _emit_resume_error(self, *, info: ResumeErrorInfo) -> RuntimeEvent:
         msg = (
@@ -138,9 +147,14 @@ class RuntimeUIEventsSession:
             except asyncio.QueueFull:
                 # fail-open：旁路 tap 不得影响主流程；输入队列背压时丢弃旁路事件
                 pass
-            except Exception:
+            except Exception as exc:
                 # fail-open：旁路 tap 过滤/入队异常不得影响主流程
-                pass
+                log_suppressed_exception(
+                    context="ui_events_tap",
+                    exc=exc,
+                    run_id=self._context.run_id if self._context else None,
+                    extra={"event_type": getattr(agent_ev, "type", None)},
+                )
 
         self._runtime._register_agent_event_tap(_tap)
 

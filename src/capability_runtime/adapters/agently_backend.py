@@ -22,6 +22,8 @@ from skills_runtime.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEven
 from skills_runtime.llm.protocol import ChatBackend, ChatRequest
 from skills_runtime.tools.protocol import ToolSpec, tool_spec_to_openai_tool
 
+from ..logging_utils import log_suppressed_exception
+
 
 class AgentlyRequester(Protocol):
     """
@@ -123,7 +125,12 @@ def _extract_usage_payload_from_sse_data(data: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         obj = json.loads(raw)
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="parse_usage_payload_json",
+            exc=exc,
+            extra={"raw_len": len(raw)},
+        )
         return None
     if not isinstance(obj, dict):
         return None
@@ -270,8 +277,12 @@ class AgentlyChatBackend(ChatBackend):
             if usage_payload is not None and usage_sink is not None:
                 try:
                     usage_sink(dict(usage_payload))
-                except Exception:
-                    pass
+                except Exception as sink_exc:
+                    log_suppressed_exception(
+                        context="usage_sink_callback",
+                        exc=sink_exc,
+                        extra={"source": "agently_backend"},
+                    )
 
             for ev in parser.feed_data(data):
                 # 关键不变量：

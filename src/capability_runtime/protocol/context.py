@@ -110,6 +110,31 @@ class ExecutionContext:
             call_chain=self.call_chain,
         )
 
+    def with_guards(self, guards: Any) -> ExecutionContext:
+        """
+        返回带有新 guards 的 ExecutionContext 副本。
+
+        设计目标：
+        - 确保 per-run guards 隔离，避免计数器跨 run 串扰；
+        - 复制可变容器（step_outputs/step_results/call_chain），避免共享引用。
+
+        参数：
+        - guards：新的 ExecutionGuards 实例
+        """
+
+        return ExecutionContext(
+            run_id=self.run_id,
+            parent_context=self.parent_context,
+            depth=self.depth,
+            max_depth=self.max_depth,
+            guards=guards,
+            cancel_token=self.cancel_token,
+            bag=self.bag,
+            step_outputs=dict(self.step_outputs),
+            step_results=dict(self.step_results),
+            call_chain=list(self.call_chain),
+        )
+
     def child(self, capability_id: str) -> ExecutionContext:
         """
         创建子上下文。

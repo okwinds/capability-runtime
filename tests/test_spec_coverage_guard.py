@@ -28,6 +28,7 @@ SPEC_MAPPING: dict[str, list[str]] = {
         "structured-output-bridge-v1.md",
         "structured-stream-consumption-v1.md",
     ],
+    "logging_utils": ["runtime-error-observability-v1.md"],
     "reporting/node_report": ["node-report-v1.md"],
     "adapters/agently_backend": [
         "agently-backend-stream-event-ordering-v1.md",

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from skills_runtime.core.contracts import AgentEvent
 
 from ..host_protocol import project_host_runtime_data
+from ..logging_utils import log_suppressed_exception
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..types import NodeReport
 from ..utils.usage import extract_usage_metrics
@@ -55,7 +56,12 @@ def _summarize_dict(obj: Any) -> Optional[Dict[str, Any]]:
         return None
     try:
         raw = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="summarize_dict_json_encode",
+            exc=exc,
+            extra={"obj_type": type(obj).__name__},
+        )
         raw = "{}"
     return {
         "top_keys": sorted([str(k) for k in obj.keys()])[:50],

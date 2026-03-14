@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, AsyncIterator, Dict, List, cast
 
@@ -28,6 +29,20 @@ _WF_WORKFLOW_ID_KEY = "__wf_workflow_id"
 _WF_WORKFLOW_INSTANCE_ID_KEY = "__wf_workflow_instance_id"
 _WF_STEP_ID_KEY = "__wf_step_id"
 _WF_BRANCH_ID_KEY = "__wf_branch_id"
+
+
+@dataclass
+class _WorkflowContextHolder:
+    """
+    可变 context 容器（消除 nonlocal 语义歧义）。
+
+    说明：
+    - ExecutionContext 字段语义上应被视为不可变；
+    - LoopStep.collect_as 需要更新 context.bag；
+    - 通过持有可变引用来传递更新，而非使用 nonlocal 重绑定。
+    """
+
+    context: ExecutionContext
 
 
 def _to_step_result_dict(result: CapabilityResult) -> Dict[str, Any]:
@@ -94,6 +109,8 @@ class TriggerFlowWorkflowEngine:
                 _WF_WORKFLOW_INSTANCE_ID_KEY: str(workflow_instance_id),
             }
         )
+        # 使用 _WorkflowContextHolder 替代 nonlocal context，消除闭包状态语义歧义
+        context_holder = _WorkflowContextHolder(context=context)
         event_queue: asyncio.Queue[WorkflowStreamEvent | object] = asyncio.Queue()
         terminal_holder: Dict[str, CapabilityResult] = {}
         queue_stop = object()
@@ -129,7 +146,6 @@ class TriggerFlowWorkflowEngine:
                 bound_step: WorkflowStep = step,
                 bound_index: int = index,
             ) -> Dict[str, Any]:
-                nonlocal context
                 payload_raw = getattr(data, "value", None)
                 payload: Dict[str, Any] = dict(payload_raw) if isinstance(payload_raw, dict) else {}
                 terminal = payload.get("__terminal_result__")
@@ -138,11 +154,11 @@ class TriggerFlowWorkflowEngine:
                     return payload
 
                 step_id = getattr(bound_step, "id", f"step_{bound_index}")
-                step_context = context.with_bag_overlay(**{_WF_STEP_ID_KEY: str(step_id)})
+                step_context = context_holder.context.with_bag_overlay(**{_WF_STEP_ID_KEY: str(step_id)})
 
                 # 取消语义（协作式）：
                 # - 当前 step 执行中取消：不强制中断，由 _execute_step 内部与下一个 step 边界决定；
-                # - 下一步开始前已取消：不得发出 step.started（避免误导为“已开始执行”）。
+                # - 下一步开始前已取消：不得发出 step.started（避免误导为"已开始执行"）。
                 if step_context.cancel_token is not None and step_context.cancel_token.is_cancelled:
                     payload["__terminal_result__"] = CapabilityResult(
                         status=CapabilityStatus.CANCELLED,
@@ -153,7 +169,7 @@ class TriggerFlowWorkflowEngine:
                 await emit(
                     {
                         "type": "workflow.step.started",
-                        "run_id": context.run_id,
+                        "run_id": context_holder.context.run_id,
                         "workflow_id": spec.base.id,
                         "workflow_instance_id": workflow_instance_id,
                         "step_id": step_id,
@@ -163,14 +179,17 @@ class TriggerFlowWorkflowEngine:
 
                 result = await self._execute_step(cast(Any, bound_step), context=step_context, services=services)
                 # 顶层 LoopStep.collect_as 需要把结果写回 workflow 级 bag，供后续步骤使用。
+                # 使用 _WorkflowContextHolder 显式更新，而非 nonlocal 重绑定
                 if isinstance(bound_step, LoopStep) and result.status == CapabilityStatus.SUCCESS and bound_step.collect_as:
-                    context = context.with_bag_overlay(**{str(bound_step.collect_as): result.output})
+                    context_holder.context = context_holder.context.with_bag_overlay(
+                        **{str(bound_step.collect_as): result.output}
+                    )
 
                 approval_ticket = build_approval_ticket_from_report(result.node_report, capability_id=spec.base.id)
                 await emit(
                     {
                         "type": "workflow.step.finished",
-                        "run_id": context.run_id,
+                        "run_id": context_holder.context.run_id,
                         "workflow_id": spec.base.id,
                         "workflow_instance_id": workflow_instance_id,
                         "step_id": step_id,
@@ -196,16 +215,16 @@ class TriggerFlowWorkflowEngine:
             if isinstance(terminal, CapabilityResult):
                 result = terminal
             else:
-                output = self._resolve_output_mappings(spec.output_mappings, context)
+                output = self._resolve_output_mappings(spec.output_mappings, context_holder.context)
                 if output is None:
-                    output = dict(context.step_outputs)
+                    output = dict(context_holder.context.step_outputs)
                 result = CapabilityResult(status=CapabilityStatus.SUCCESS, output=output)
 
             terminal_holder["result"] = result
             await emit(
                 {
                     "type": "workflow.finished",
-                    "run_id": context.run_id,
+                    "run_id": context_holder.context.run_id,
                     "workflow_id": spec.base.id,
                     "workflow_instance_id": workflow_instance_id,
                     "status": getattr(result.status, "value", str(result.status)),

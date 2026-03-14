@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 from skills_runtime.core.errors import FrameworkIssue
 
 from .config import RuntimeConfig
+from .logging_utils import log_suppressed_exception
 from .protocol.capability import CapabilityResult, CapabilityStatus
 from .protocol.context import ExecutionContext
 from .registry import CapabilityRegistry
@@ -129,8 +130,13 @@ def call_callback(cb: Any, *args: Any) -> None:
 
     try:
         sig = inspect.signature(cb)
-    except Exception:
+    except Exception as exc:
         # 无法获取签名时回退：尝试全量传入
+        log_suppressed_exception(
+            context="callback_signature_inspection",
+            exc=exc,
+            extra={"callback": getattr(cb, "__name__", repr(cb))},
+        )
         cb(*args)
         return
 

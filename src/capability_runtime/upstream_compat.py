@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+from .logging_utils import log_suppressed_exception
+
 
 SkillsSpaceSchema = Literal["account_domain", "namespace"]
 
@@ -35,8 +37,13 @@ def detect_skills_space_schema() -> SkillsSpaceSchema:
             fields = getattr(space, "model_fields", None)
             if isinstance(fields, dict) and "namespace" in fields:
                 return "namespace"
-    except Exception:
+    except Exception as exc:
         # 探测失败时保持保守：沿用历史 schema，避免误判导致初始化期直接崩。
+        log_suppressed_exception(
+            context="detect_skills_space_schema_loader",
+            exc=exc,
+            extra={"method": "AgentSdkSkillsConfig.Space"},
+        )
         return "account_domain"
 
     # fallback：通过 mentions API 特性推断（v0.1.5 引入 is_valid_namespace）
@@ -45,7 +52,12 @@ def detect_skills_space_schema() -> SkillsSpaceSchema:
 
         if hasattr(mentions, "is_valid_namespace"):
             return "namespace"
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="detect_skills_space_schema_mentions",
+            exc=exc,
+            extra={"method": "mentions.is_valid_namespace"},
+        )
         return "account_domain"
 
     return "account_domain"

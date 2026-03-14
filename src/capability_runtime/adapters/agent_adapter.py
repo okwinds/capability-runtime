@@ -16,6 +16,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Union
 from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.core.errors import FrameworkIssue
 
+from ..logging_utils import log_suppressed_exception
 from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
@@ -163,8 +164,14 @@ class AgentAdapter:
                 # 内部旁路：UI events v1 投影（不改变对外 AgentEvent 语义）
                 try:
                     self._services.emit_agent_event_taps(ev=ev, context=context, capability_id=spec.base.id)
-                except Exception:
-                    pass
+                except Exception as tap_exc:
+                    log_suppressed_exception(
+                        context="emit_agent_event_taps",
+                        exc=tap_exc,
+                        run_id=context.run_id,
+                        capability_id=spec.base.id,
+                        extra={"event_type": getattr(ev, "type", None)},
+                    )
                 if getattr(self._services.config, "on_event", None) is not None:
                     try:
                         self._services.call_callback(
@@ -172,8 +179,14 @@ class AgentAdapter:
                             ev,
                             {"run_id": context.run_id, "capability_id": spec.base.id},
                         )
-                    except Exception:
-                        pass
+                    except Exception as cb_exc:
+                        log_suppressed_exception(
+                            context="on_event_callback",
+                            exc=cb_exc,
+                            run_id=context.run_id,
+                            capability_id=spec.base.id,
+                            extra={"event_type": getattr(ev, "type", None)},
+                        )
                 yield ev
         except Exception as exc:
             report = self._services.build_fail_closed_report(

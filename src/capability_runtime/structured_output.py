@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from .config import OutputValidationMode
+from .logging_utils import log_suppressed_exception
 from .protocol.agent import AgentIOSchema
 from .protocol.capability import CapabilityResult, CapabilityStatus
 from .types import NodeReport
@@ -40,7 +41,12 @@ def parse_json_object_snapshot(text: str) -> Optional[Dict[str, Any]]:
 
     try:
         payload = json.loads(str(text or ""))
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="parse_structured_output_json",
+            exc=exc,
+            extra={"text_len": len(str(text or ""))},
+        )
         return None
     return dict(payload) if isinstance(payload, dict) else None
 
@@ -88,7 +94,12 @@ def validate_structured_output(
         raw_output = "" if final_output is None else str(final_output)
         try:
             parsed = json.loads(raw_output)
-        except Exception:
+        except Exception as exc:
+            log_suppressed_exception(
+                context="validate_structured_output_parse",
+                exc=exc,
+                extra={"raw_output_len": len(raw_output)},
+            )
             summary["errors"] = [
                 {
                     "path": "$",

@@ -5,13 +5,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, List, Optional
 
 from skills_runtime.core.errors import FrameworkError, FrameworkIssue
 from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.skills.manager import SkillsManager
 
 from .config import CustomTool, RuntimeConfig, RuntimeMode, normalize_workspace_root
+from .logging_utils import log_suppressed_exception
+from .protocol.chat_backend import ChatBackendProtocol
 
 
 @dataclass(frozen=True)
@@ -139,7 +141,12 @@ class SdkLifecycle:
                 sanitized, issues = _sanitize_sdk_overlay_dict_for_loader(raw)
                 overlays.append(sanitized)
                 overlay_issues.extend(issues)
-            except Exception:
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="load_sdk_config_overlay",
+                    exc=exc,
+                    extra={"config_path": str(p)},
+                )
                 overlays.append({})
         cfg = load_config_dicts(overlays)
         return cfg, overlay_issues
@@ -224,7 +231,12 @@ class SdkLifecycle:
 
         try:
             report = shared_skills_manager.scan()
-        except Exception:
+        except Exception as exc:
+            log_suppressed_exception(
+                context="skills_manager_scan",
+                exc=exc,
+                extra={"workspace_root": str(workspace_root)},
+            )
             report = None
 
         if report is not None and getattr(report, "errors", None) and self._config.preflight_mode == "error":
@@ -250,7 +262,7 @@ def _extract_model_override(llm_config: Optional[Dict[str, Any]]) -> Optional[st
 
     约束：
     - 本期仅识别 `model` 字段；
-    - 空字符串/全空白视为“未设置”。
+    - 空字符串/全空白视为"未设置"。
     """
 
     if not isinstance(llm_config, dict):
@@ -310,11 +322,11 @@ class _ModelOverrideBackend:
     - 不强依赖 request 的具体实现（pydantic v1/v2 / dict / 普通对象 best-effort 兼容）。
     """
 
-    def __init__(self, *, backend: Any, model: str) -> None:
-        self._backend = backend
-        self._model = model
+    def __init__(self, *, backend: ChatBackendProtocol, model: str) -> None:
+        self._backend: ChatBackendProtocol = backend
+        self._model: str = model
 
-    async def stream_chat(self, request: Any) -> AsyncIterator[Any]:
+    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
         """
         覆写 request.model 并转发 `stream_chat`。
 
@@ -337,7 +349,12 @@ class _ModelOverrideBackend:
                 if dataclasses.is_dataclass(request):
                     forwarded = dataclasses.replace(request, model=self._model)  # type: ignore[type-var]
                     replaced = True
-            except Exception:
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="model_override_dataclasses_replace",
+                    exc=exc,
+                    extra={"target_field": "model"},
+                )
                 replaced = False
 
             if not replaced:
@@ -345,12 +362,22 @@ class _ModelOverrideBackend:
                 if hasattr(request, "model_copy"):
                     try:
                         forwarded = request.model_copy(update={"model": self._model})
-                    except Exception:
+                    except Exception as copy_exc:
+                        log_suppressed_exception(
+                            context="model_copy_override",
+                            exc=copy_exc,
+                            extra={"method": "model_copy", "target_field": "model"},
+                        )
                         forwarded = request
                 elif hasattr(request, "copy"):
                     try:
                         forwarded = request.copy(update={"model": self._model})
-                    except Exception:
+                    except Exception as copy_exc:
+                        log_suppressed_exception(
+                            context="model_copy_override",
+                            exc=copy_exc,
+                            extra={"method": "copy", "target_field": "model"},
+                        )
                         forwarded = request
                 else:
                     raise TypeError(
@@ -366,15 +393,15 @@ class _ToolChoiceOverrideBackend:
     ChatBackend 薄代理：仅覆写 request.extra["tool_choice"]，然后委托给底层 backend。
 
     说明：
-    - 覆写以“拷贝 + 更新”为主，避免修改上游 request 对象的原始 extra 引用；
+    - 覆写以"拷贝 + 更新"为主，避免修改上游 request 对象的原始 extra 引用；
     - 不强依赖 request 的具体实现（pydantic v1/v2 / dict / 普通对象 best-effort 兼容）。
     """
 
-    def __init__(self, *, backend: Any, tool_choice: Any) -> None:
-        self._backend = backend
-        self._tool_choice = tool_choice
+    def __init__(self, *, backend: ChatBackendProtocol, tool_choice: Any) -> None:
+        self._backend: ChatBackendProtocol = backend
+        self._tool_choice: Any = tool_choice
 
-    async def stream_chat(self, request: Any) -> AsyncIterator[Any]:
+    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
         """
         覆写 request.extra["tool_choice"] 并转发 `stream_chat`。
 
@@ -402,19 +429,34 @@ class _ToolChoiceOverrideBackend:
                 if dataclasses.is_dataclass(request):
                     forwarded = dataclasses.replace(request, extra=extra)  # type: ignore[type-var]
                     replaced = True
-            except Exception:
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="tool_choice_override_dataclasses_replace",
+                    exc=exc,
+                    extra={"target_field": "extra"},
+                )
                 replaced = False
 
             if not replaced:
                 if hasattr(request, "model_copy"):
                     try:
                         forwarded = request.model_copy(update={"extra": extra})
-                    except Exception:
+                    except Exception as copy_exc:
+                        log_suppressed_exception(
+                            context="tool_choice_override",
+                            exc=copy_exc,
+                            extra={"method": "model_copy", "target_field": "extra"},
+                        )
                         forwarded = request
                 elif hasattr(request, "copy"):
                     try:
                         forwarded = request.copy(update={"extra": extra})
-                    except Exception:
+                    except Exception as copy_exc:
+                        log_suppressed_exception(
+                            context="tool_choice_override",
+                            exc=copy_exc,
+                            extra={"method": "copy", "target_field": "extra"},
+                        )
                         forwarded = request
                 else:
                     raise TypeError(
@@ -435,8 +477,8 @@ class _UsageTapBackend:
     - 若底层 backend 自己能产出 `llm_usage` ChatStreamEvent，本层也会被动收集。
     """
 
-    def __init__(self, *, backend: Any) -> None:
-        self._backend = backend
+    def __init__(self, *, backend: ChatBackendProtocol) -> None:
+        self._backend: ChatBackendProtocol = backend
         self._usage_payloads: List[Dict[str, Any]] = []
 
     def _capture_usage(self, payload: Any) -> None:
@@ -452,7 +494,7 @@ class _UsageTapBackend:
         self._usage_payloads.clear()
         return out
 
-    async def stream_chat(self, request: Any) -> AsyncIterator[Any]:
+    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
         """注入 `_caprt_usage_sink` 后转发到底层 backend。"""
 
         forwarded = _clone_request_with_extra(
@@ -539,7 +581,7 @@ def _merge_usage_sink(*, extra: Dict[str, Any], sink: Any) -> Dict[str, Any]:
 
 def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
     """
-    以“拷贝 + 覆写 extra”的方式构造转发 request（兼容 dict/dataclass/pydantic）。
+    以"拷贝 + 覆写 extra"的方式构造转发 request（兼容 dict/dataclass/pydantic）。
     """
 
     if isinstance(request, dict):
@@ -561,7 +603,12 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
         if dataclasses.is_dataclass(request):
             forwarded = dataclasses.replace(request, extra=updated_extra)  # type: ignore[type-var,assignment]
             replaced = True
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="clone_request_with_extra_dataclasses_replace",
+            exc=exc,
+            extra={"target_field": "extra"},
+        )
         replaced = False
 
     if not replaced:
@@ -569,13 +616,23 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
             try:
                 forwarded = request.model_copy(update={"extra": updated_extra})
                 replaced = True
-            except Exception:
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="clone_request_with_extra_model_copy",
+                    exc=exc,
+                    extra={"target_field": "extra"},
+                )
                 replaced = False
         elif hasattr(request, "copy"):
             try:
                 forwarded = request.copy(update={"extra": updated_extra})
                 replaced = True
-            except Exception:
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="clone_request_with_extra_copy",
+                    exc=exc,
+                    extra={"target_field": "extra"},
+                )
                 replaced = False
 
     if not replaced:
@@ -608,7 +665,7 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
     背景：
     - `skills-runtime-sdk>=1.0` 对 skills 配置 schema 采用 `extra=forbid`，未知字段会直接导致校验异常；
     - 本仓历史上允许在 `skills_config` dict 里包含一些旧字段（例如 `roots/mode/max_auto`），需要在桥接层做最小兼容，
-      以便“warn 模式可继续跑、error 模式可 fail-closed”由 preflight gate 决定，而不是初始化期直接崩溃。
+      以便"warn 模式可继续跑、error 模式可 fail-closed"由 preflight gate 决定，而不是初始化期直接崩溃。
 
     参数：
     - skills_config：可能为 dict / pydantic model / 其它对象
@@ -669,7 +726,7 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
 
 def _sanitize_sdk_overlay_dict_for_loader(overlay: Dict[str, Any]) -> tuple[Dict[str, Any], List[FrameworkIssue]]:
     """
-    在调用上游 `load_config_dicts()` 前，对 overlay 做“最小清洗”，避免未知字段导致初始化期直接崩溃。
+    在调用上游 `load_config_dicts()` 前，对 overlay 做"最小清洗"，避免未知字段导致初始化期直接崩溃。
 
     说明：
     - 上游 `AgentSdkConfig/AgentSdkSkillsConfig` 默认 `extra=forbid`，因此 overlay 内出现未知字段会直接抛校验异常；
@@ -720,7 +777,7 @@ def _sanitize_sdk_overlay_dict_for_loader(overlay: Dict[str, Any]) -> tuple[Dict
                     )
                 )
         elif warnings:
-            # overlay 的目标是“不让初始化期直接崩”，因此这里做 best-effort：丢弃 spaces 并把原因写入 issues。
+            # overlay 的目标是"不让初始化期直接崩"，因此这里做 best-effort：丢弃 spaces 并把原因写入 issues。
             skills_obj.pop("spaces", None)
             issues.append(
                 FrameworkIssue(

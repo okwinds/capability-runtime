@@ -10,6 +10,7 @@ from .capability import (
     CapabilitySpec,
     CapabilityStatus,
 )
+from .chat_backend import ChatBackendProtocol
 from .context import ExecutionContext, RecursionLimitError
 from .workflow import (
     ConditionalStep,
@@ -29,6 +30,7 @@ __all__ = [
     "CapabilityResult",
     "AgentSpec",
     "AgentIOSchema",
+    "ChatBackendProtocol",
     "WorkflowSpec",
     "Step",
     "LoopStep",

@@ -83,7 +83,6 @@ class Runtime(RuntimeUIEventsMixin):
 
         self._config = config
         self._registry = CapabilityRegistry()
-        self._last_node_report: Optional[NodeReport] = None
         self._sdk: Optional[SdkLifecycle] = None
         # 兼容保留：部分内部逻辑仍通过 `_sdk_state` 读取 skills_config（仅只读）。
         self._sdk_state: Any = None
@@ -91,7 +90,6 @@ class Runtime(RuntimeUIEventsMixin):
             mode=self._config.output_validation_mode,
             validator=self._config.output_validator,
         )
-        self._last_lock = asyncio.Lock()
         # UI events taps：用于把 SDK AgentEvent（含 workflow 内 nested agent 事件）
         # 旁路投影为 RuntimeEvent v1，不影响 NodeReport/WAL 真相源。
         self._agent_event_taps: List[Any] = []
@@ -523,13 +521,15 @@ class Runtime(RuntimeUIEventsMixin):
             return
 
         guards = ExecutionGuards(max_total_loop_iterations=self._config.max_total_loop_iterations)
-        ctx = context or ExecutionContext(
-            run_id=uuid.uuid4().hex,
-            max_depth=self._config.max_depth,
-            guards=guards,
-        )
-        if ctx.guards is None:
-            ctx.guards = guards
+        if context is not None:
+            # 使用 with_guards() 确保 per-run 隔离，复制可变容器避免共享引用
+            ctx = context.with_guards(guards)
+        else:
+            ctx = ExecutionContext(
+                run_id=uuid.uuid4().hex,
+                max_depth=self._config.max_depth,
+                guards=guards,
+            )
 
         started = time.monotonic()
         if _get_base(spec).kind == CapabilityKind.AGENT:
@@ -698,9 +698,6 @@ class Runtime(RuntimeUIEventsMixin):
             return
 
         async for item in self._agent_adapter.execute_stream(spec=spec, input=input, context=context):
-            if isinstance(item, CapabilityResult) and item.node_report is not None:
-                async with self._last_lock:
-                    self._last_node_report = item.node_report
             yield item
 
     def build_fail_closed_report(
@@ -776,15 +773,3 @@ class Runtime(RuntimeUIEventsMixin):
         if self._sdk is None:
             raise RuntimeError("SDK lifecycle is not initialized")
         return self._sdk.create_agent(custom_tools=list(self._config.custom_tools), llm_config=llm_config)
-
-    @property
-    def last_node_report(self) -> Optional[NodeReport]:
-        """
-        最近一次 bridge/sdk_native 执行产出的 NodeReport（可选便利属性）。
-
-        并发警告：
-        - 多个 `run()` / `run_stream()` 并发执行时，本属性将被最后一个完成的 run 覆盖；
-        - 如需 per-run 隔离报告，请从 `CapabilityResult.node_report` 读取。
-        """
-
-        return self._last_node_report

@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from skills_runtime.core.contracts import AgentEvent
 
+from ..logging_utils import log_suppressed_exception
 from ..types import NodeReport, NodeToolCallReport, NodeUsageReport
 from ..utils.usage import extract_usage_metrics
 
@@ -26,7 +27,11 @@ def _get_skills_runtime_version() -> Optional[str]:
         v = getattr(skills_runtime, "__version__", None)
         if isinstance(v, str) and v.strip():
             return v.strip()
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="get_skills_runtime_version",
+            exc=exc,
+        )
         return None
     return None
 
@@ -36,7 +41,12 @@ def _get_dist_version(dist_name: str) -> Optional[str]:
 
     try:
         return importlib.metadata.version(dist_name)
-    except Exception:
+    except Exception as exc:
+        log_suppressed_exception(
+            context="get_dist_version",
+            exc=exc,
+            extra={"dist_name": dist_name},
+        )
         return None
 
 
@@ -415,12 +425,20 @@ def build_fail_closed_report(
                 v = getattr(skills_runtime, "__version__", None)
                 if isinstance(v, str) and v.strip():
                     return v.strip()
-            except Exception:
-                pass
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="node_report_get_version_skills_runtime",
+                    exc=exc,
+                )
         for n in names:
             try:
                 return importlib.metadata.version(n)
-            except Exception:
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="node_report_get_version_dist",
+                    exc=exc,
+                    extra={"dist_name": n},
+                )
                 continue
         return None
 
