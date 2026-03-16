@@ -137,6 +137,43 @@ def _extract_usage_payload_from_sse_data(data: str) -> Optional[Dict[str, Any]]:
     return _normalize_usage_payload(usage=obj.get("usage"), model=obj.get("model"))
 
 
+def _merge_stream_options_for_usage(value: Any) -> Dict[str, Any]:
+    """
+    为 streaming 请求补齐 `include_usage=true`，同时保留已有 stream_options。
+
+    说明：
+    - OpenAICompatible provider 若不支持该字段，应在 provider/requester 侧 fail-open；
+    - 本函数只负责把请求事实补齐，不在此处做兼容分支判断。
+    """
+
+    merged = dict(value) if isinstance(value, dict) else {}
+    merged.setdefault("include_usage", True)
+    return merged
+
+
+def _should_retry_without_stream_options(error: Any) -> bool:
+    """判断 provider 拒绝 `stream_options/include_usage` 时是否应 fail-open 重试。"""
+
+    message = str(error or "").lower()
+    if not message:
+        return False
+    mentions_stream_options = "stream_options" in message or "include_usage" in message
+    mentions_unsupported = any(
+        token in message
+        for token in (
+            "unknown parameter",
+            "unsupported",
+            "not support",
+            "not supported",
+            "invalid parameter",
+            "extra inputs are not permitted",
+            "400",
+            "422",
+        )
+    )
+    return mentions_stream_options and mentions_unsupported
+
+
 class AgentlyChatBackend(ChatBackend):
     """
     SDK `ChatBackend` 的 Agently 适配实现。
@@ -159,8 +196,6 @@ class AgentlyChatBackend(ChatBackend):
         - `request`：上游 `ChatRequest` 参数包（包含 model/messages/tools 与可选推理参数）
         """
 
-        requester = self._config.requester_factory()
-        request_data = requester.generate_request_data()
         usage_sink = None
         if isinstance(getattr(request, "extra", None), dict):
             candidate_sink = request.extra.get("_caprt_usage_sink")
@@ -169,154 +204,176 @@ class AgentlyChatBackend(ChatBackend):
 
         if not isinstance(request.messages, list):
             raise TypeError("messages must be a list[dict]")
+        include_usage_enabled = True
+        for attempt in range(2):
+            requester = self._config.requester_factory()
+            request_data = requester.generate_request_data()
+            request_data.data["messages"] = request.messages
+            request_data.request_options["model"] = request.model
+            request_data.request_options["stream"] = True
+            request_data.stream = True
 
-        request_data.data["messages"] = request.messages
-        request_data.request_options["model"] = request.model
-        request_data.request_options["stream"] = True
-        request_data.stream = True
+            tool_specs: List[ToolSpec] = list(request.tools or [])
+            tool_choice_target_tool_name: Optional[str] = None
 
-        tool_specs: List[ToolSpec] = list(request.tools or [])
-        tool_choice_target_tool_name: Optional[str] = None
+            if request.temperature is not None:
+                request_data.request_options["temperature"] = float(request.temperature)
+            if request.max_tokens is not None:
+                request_data.request_options["max_tokens"] = int(request.max_tokens)
+            if request.top_p is not None:
+                request_data.request_options["top_p"] = float(request.top_p)
+            if request.response_format is not None:
+                request_data.request_options["response_format"] = dict(request.response_format)
 
-        if request.temperature is not None:
-            request_data.request_options["temperature"] = float(request.temperature)
-        if request.max_tokens is not None:
-            request_data.request_options["max_tokens"] = int(request.max_tokens)
-        if request.top_p is not None:
-            request_data.request_options["top_p"] = float(request.top_p)
-        if request.response_format is not None:
-            request_data.request_options["response_format"] = dict(request.response_format)
+            # provider 特有扩展字段（best-effort 透传；冲突时以 request_options 显式字段为准）
+            #
+            # 重要：
+            # - request.extra 可能包含“运行时回调/非 JSON 值”（例如 on_retry=function），它们不属于 wire payload；
+            # - 这些值若被透传到 requester，可能导致 JSON 序列化失败并让 real 模式不可用。
+            if isinstance(request.extra, dict) and request.extra:
 
-        # provider 特有扩展字段（best-effort 透传；冲突时以 request_options 显式字段为准）
-        #
-        # 重要：
-        # - request.extra 可能包含“运行时回调/非 JSON 值”（例如 on_retry=function），它们不属于 wire payload；
-        # - 这些值若被透传到 requester，可能导致 JSON 序列化失败并让 real 模式不可用。
-        if isinstance(request.extra, dict) and request.extra:
-            def _is_jsonable(value: Any) -> bool:
-                """
-                判断 value 是否可 JSON 序列化（最小、保守）。
+                def _is_jsonable(value: Any) -> bool:
+                    """
+                    判断 value 是否可 JSON 序列化（最小、保守）。
 
-                说明：
-                - 我们不尝试做自定义 default 编码（避免改变 wire 契约语义）；
-                - 不可序列化的字段将被跳过（fail-closed），避免 real 模式因 requester 序列化失败而崩溃。
-                """
+                    说明：
+                    - 我们不尝试做自定义 default 编码（避免改变 wire 契约语义）；
+                    - 不可序列化的字段将被跳过（fail-closed），避免 real 模式因 requester 序列化失败而崩溃。
+                    """
 
-                try:
-                    json.dumps(value)
-                    return True
-                except TypeError:
-                    return False
+                    try:
+                        json.dumps(value)
+                        return True
+                    except TypeError:
+                        return False
 
-            for k, v in request.extra.items():
-                # 过滤明显的非 wire 字段（以及所有不可 JSON 序列化值）
-                if k == "on_retry":
-                    continue
-                if callable(v) or not _is_jsonable(v):
-                    continue
+                for k, v in request.extra.items():
+                    # 过滤明显的非 wire 字段（以及所有不可 JSON 序列化值）
+                    if k == "on_retry":
+                        continue
+                    if callable(v) or not _is_jsonable(v):
+                        continue
 
-                # 覆写优先级（spec 要求）：
-                # - per-run llm_config 会写入 request.extra["tool_choice"]
-                # - 即使底层 requester/backend 已预置 tool_choice（例如默认 "auto"），也必须被本覆写覆盖
-                if k == "tool_choice":
-                    if isinstance(v, dict):
-                        # OpenAI 新格式：{"type":"function","function":{"name":"..."}}
-                        # 某些 OpenAICompatible server 不支持 tool_choice.function，会直接 400；
-                        # 兼容策略：归一化为 tool_choice="required"，并（若可定位）过滤 tools 以避免选错工具。
-                        function = v.get("function") if isinstance(v.get("function"), dict) else None
-                        if function is not None:
-                            name = function.get("name")
-                            if isinstance(name, str) and name:
-                                tool_choice_target_tool_name = name
-                        request_data.request_options[k] = "required"
-                    else:
+                    # 覆写优先级（spec 要求）：
+                    # - per-run llm_config 会写入 request.extra["tool_choice"]
+                    # - 即使底层 requester/backend 已预置 tool_choice（例如默认 "auto"），也必须被本覆写覆盖
+                    if k == "tool_choice":
+                        if isinstance(v, dict):
+                            # OpenAI 新格式：{"type":"function","function":{"name":"..."}}
+                            # 某些 OpenAICompatible server 不支持 tool_choice.function，会直接 400；
+                            # 兼容策略：归一化为 tool_choice="required"，并（若可定位）过滤 tools 以避免选错工具。
+                            function = v.get("function") if isinstance(v.get("function"), dict) else None
+                            if function is not None:
+                                name = function.get("name")
+                                if isinstance(name, str) and name:
+                                    tool_choice_target_tool_name = name
+                            request_data.request_options[k] = "required"
+                        else:
+                            request_data.request_options[k] = v
+                        continue
+
+                    if k not in request_data.request_options:
                         request_data.request_options[k] = v
+
+            if include_usage_enabled:
+                request_data.request_options["stream_options"] = _merge_stream_options_for_usage(
+                    request_data.request_options.get("stream_options")
+                )
+            else:
+                request_data.request_options.pop("stream_options", None)
+
+            if tool_choice_target_tool_name:
+                matched = [spec for spec in tool_specs if spec.name == tool_choice_target_tool_name]
+                if matched:
+                    tool_specs = matched
+
+            tools_wire = [tool_spec_to_openai_tool(spec) for spec in tool_specs]
+            if tools_wire:
+                request_data.request_options["tools"] = tools_wire
+                request_data.request_options.setdefault("tool_choice", "auto")
+            else:
+                # 某些 provider 对 tools=[] 敏感；无工具时直接移除该字段。
+                request_data.request_options.pop("tools", None)
+
+            parser = ChatCompletionsSseParser()
+            deferred_completed: Optional[ChatStreamEvent] = None
+
+            # 兼容：不同版本/实现的 requester 可能返回：
+            # - async iterator（可直接 async for）
+            # - coroutine -> async iterator（需要 await 一次再 async for）
+            stream_or_coro = requester.request_model(request_data)
+            stream: AsyncIterator[tuple[str, Any]]
+            if hasattr(stream_or_coro, "__aiter__"):
+                stream = cast(AsyncIterator[tuple[str, Any]], stream_or_coro)
+            else:
+                stream = await stream_or_coro
+
+            retry_without_stream_options = False
+            async for event, data in stream:
+                if event == "error":
+                    error = data if isinstance(data, BaseException) else RuntimeError(f"Agently requester error: {data!r}")
+                    if include_usage_enabled and attempt == 0 and _should_retry_without_stream_options(error):
+                        retry_without_stream_options = True
+                        log_suppressed_exception(
+                            context="agently_backend_include_usage_retry",
+                            exc=error,
+                            extra={"retry_without_stream_options": True},
+                        )
+                        break
+                    raise error
+
+                # OpenAICompatible requester 通常 yield ("message", <sse.data>)
+                if not isinstance(data, str):
                     continue
 
-                if k not in request_data.request_options:
-                    request_data.request_options[k] = v
+                usage_payload = _extract_usage_payload_from_sse_data(data)
+                if usage_payload is not None and usage_sink is not None:
+                    try:
+                        usage_sink(dict(usage_payload))
+                    except Exception as sink_exc:
+                        log_suppressed_exception(
+                            context="usage_sink_callback",
+                            exc=sink_exc,
+                            extra={"source": "agently_backend"},
+                        )
 
-        if tool_choice_target_tool_name:
-            matched = [spec for spec in tool_specs if spec.name == tool_choice_target_tool_name]
-            if matched:
-                tool_specs = matched
+                for ev in parser.feed_data(data):
+                    # 关键不变量：
+                    # 某些 OpenAICompatible server 的 SSE 序列可能是：
+                    # - delta.tool_calls ...（累计中）
+                    # - finish_reason="stop" → parser 先 emit completed
+                    # - [DONE] → parser 才 flush tool_calls
+                    #
+                    # 若我们把 completed 立即 yield，上游消费端可能在 completed 后停止消费，
+                    # 从而错过后续 tool_calls，最终表现为 NodeReport.tool_calls 为空。
+                    #
+                    # 因此：completed 事件必须延迟到“确认不会再有 tool_calls”后再产出。
+                    if ev.type == "completed":
+                        deferred_completed = ev
+                        continue
+                    yield ev
 
-        tools_wire = [tool_spec_to_openai_tool(spec) for spec in tool_specs]
-        if tools_wire:
-            request_data.request_options["tools"] = tools_wire
-            request_data.request_options.setdefault("tool_choice", "auto")
-        else:
-            # 某些 provider 对 tools=[] 敏感；无工具时直接移除该字段。
-            request_data.request_options.pop("tools", None)
+                if data.strip() in ("[DONE]", "DONE"):
+                    break
 
-        parser = ChatCompletionsSseParser()
-        done_sentinel_seen = False
-        deferred_completed: Optional[ChatStreamEvent] = None
-
-        # 兼容：不同版本/实现的 requester 可能返回：
-        # - async iterator（可直接 async for）
-        # - coroutine -> async iterator（需要 await 一次再 async for）
-        stream_or_coro = requester.request_model(request_data)
-        stream: AsyncIterator[tuple[str, Any]]
-        if hasattr(stream_or_coro, "__aiter__"):
-            stream = cast(AsyncIterator[tuple[str, Any]], stream_or_coro)
-        else:
-            stream = await stream_or_coro
-
-        async for event, data in stream:
-            if event == "error":
-                if isinstance(data, BaseException):
-                    raise data
-                raise RuntimeError(f"Agently requester error: {data!r}")
-
-            # OpenAICompatible requester 通常 yield ("message", <sse.data>)
-            if not isinstance(data, str):
+            if retry_without_stream_options:
+                include_usage_enabled = False
                 continue
 
-            usage_payload = _extract_usage_payload_from_sse_data(data)
-            if usage_payload is not None and usage_sink is not None:
-                try:
-                    usage_sink(dict(usage_payload))
-                except Exception as sink_exc:
-                    log_suppressed_exception(
-                        context="usage_sink_callback",
-                        exc=sink_exc,
-                        extra={"source": "agently_backend"},
-                    )
-
-            for ev in parser.feed_data(data):
-                # 关键不变量：
-                # 某些 OpenAICompatible server 的 SSE 序列可能是：
-                # - delta.tool_calls ...（累计中）
-                # - finish_reason="stop" → parser 先 emit completed
-                # - [DONE] → parser 才 flush tool_calls
-                #
-                # 若我们把 completed 立即 yield，上游消费端可能在 completed 后停止消费，
-                # 从而错过后续 tool_calls，最终表现为 NodeReport.tool_calls 为空。
-                #
-                # 因此：completed 事件必须延迟到“确认不会再有 tool_calls”后再产出。
+            # 注意：即使已看到 [DONE]，也必须调用 parser.finish()：
+            # - 某些实现可能不会在 feed_data("[DONE]") 时 flush tool_calls；
+            # - 若跳过 finish()，会出现“tool_calls 丢失/NodeReport.tool_calls 为空”的假阴性。
+            for ev in parser.finish():
                 if ev.type == "completed":
-                    deferred_completed = ev
+                    # 不用 finish() 的 eof 覆盖真实 stop（若已看到 stop completed）
+                    if deferred_completed is None:
+                        deferred_completed = ev
                     continue
                 yield ev
 
-            if data.strip() in ("[DONE]", "DONE"):
-                done_sentinel_seen = True
-                break
-
-        # 注意：即使已看到 [DONE]，也必须调用 parser.finish()：
-        # - 某些实现可能不会在 feed_data("[DONE]") 时 flush tool_calls；
-        # - 若跳过 finish()，会出现“tool_calls 丢失/NodeReport.tool_calls 为空”的假阴性。
-        for ev in parser.finish():
-            if ev.type == "completed":
-                # 不用 finish() 的 eof 覆盖真实 stop（若已看到 stop completed）
-                if deferred_completed is None:
-                    deferred_completed = ev
-                continue
-            yield ev
-
-        if deferred_completed is not None:
-            yield deferred_completed
+            if deferred_completed is not None:
+                yield deferred_completed
+            return
 
 
 def build_openai_compatible_requester_factory(*, agently_agent: Any) -> AgentlyRequesterFactory:

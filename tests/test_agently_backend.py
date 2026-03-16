@@ -17,14 +17,28 @@ class _FakeRequestData:
 class _FakeRequester:
     def __init__(self, items):
         self._items = list(items)
+        self.last_request_data = None
 
     def generate_request_data(self):
         return _FakeRequestData()
 
     async def request_model(self, request_data):
-        _ = request_data
+        self.last_request_data = request_data
         for item in self._items:
             yield item
+
+
+class _FakeRequesterFactory:
+    def __init__(self, item_batches):
+        self._item_batches = list(item_batches)
+        self.instances = []
+
+    def __call__(self):
+        index = len(self.instances)
+        items = self._item_batches[index]
+        requester = _FakeRequester(items)
+        self.instances.append(requester)
+        return requester
 
 
 def _backend_from_items(items):
@@ -69,3 +83,65 @@ async def test_agently_backend_reports_usage_via_caprt_usage_sink():
             "total_tokens": 18,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_agently_backend_requests_include_usage_by_default_and_preserves_existing_stream_options():
+    requester = _FakeRequester(
+        [
+            ("message", '{"choices":[{"delta":{},"finish_reason":"stop"}]}'),
+            ("message", "[DONE]"),
+        ]
+    )
+    backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=lambda: requester))
+
+    out = [
+        ev
+        async for ev in backend.stream_chat(
+            ChatRequest(
+                model="m",
+                messages=[{"role": "user", "content": "x"}],
+                tools=[],
+                extra={"stream_options": {"existing_flag": "keep"}},
+            )
+        )
+    ]
+
+    assert [e.type for e in out] == ["completed"]
+    assert requester.last_request_data is not None
+    assert requester.last_request_data.request_options["stream_options"] == {
+        "existing_flag": "keep",
+        "include_usage": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agently_backend_retries_without_stream_options_when_provider_rejects_include_usage():
+    factory = _FakeRequesterFactory(
+        [
+            [
+                ("error", RuntimeError("400 Bad Request: Unknown parameter: 'stream_options.include_usage'")),
+            ],
+            [
+                ("message", '{"choices":[{"delta":{},"finish_reason":"stop"}]}'),
+                ("message", "[DONE]"),
+            ],
+        ]
+    )
+    backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=factory))
+
+    out = [
+        ev
+        async for ev in backend.stream_chat(
+            ChatRequest(
+                model="m",
+                messages=[{"role": "user", "content": "x"}],
+                tools=[],
+            )
+        )
+    ]
+
+    assert [e.type for e in out] == ["completed"]
+    assert len(factory.instances) == 2
+    assert factory.instances[0].last_request_data.request_options["stream_options"] == {"include_usage": True}
+    assert "stream_options" not in factory.instances[1].last_request_data.request_options
