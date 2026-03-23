@@ -84,7 +84,7 @@ class SdkLifecycle:
 
         参数：
         - custom_tools：每次创建 Agent 时要注册的自定义工具列表
-        - llm_config：可选 LLM 覆写配置（当前支持 `model` 与 `tool_choice` 字段覆写）
+        - llm_config：可选 LLM 覆写配置（当前支持 `model`、`tool_choice` 与 `response_format` 字段覆写）
         """
 
         from skills_runtime.core.agent import Agent
@@ -97,6 +97,10 @@ class SdkLifecycle:
         override_tool_choice = _extract_tool_choice_override(llm_config)
         if override_tool_choice is not None:
             backend = _ToolChoiceOverrideBackend(backend=backend, tool_choice=override_tool_choice)
+
+        override_response_format = _extract_response_format_override(llm_config)
+        if override_response_format is not None:
+            backend = _ResponseFormatOverrideBackend(backend=backend, response_format=override_response_format)
         usage_bridge_backend = _UsageTapBackend(backend=backend)
         backend = usage_bridge_backend
 
@@ -313,6 +317,35 @@ def _extract_tool_choice_override(llm_config: Optional[Dict[str, Any]]) -> Optio
     return tool_choice
 
 
+def _extract_response_format_override(llm_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """
+    从 llm_config 中提取 response_format 覆写值。
+
+    约束：
+    - 仅识别 `response_format` 字段；
+    - 值必须为 dict；
+    - 必须可 JSON 序列化（JSON-able），否则 fail-closed 抛异常。
+    """
+
+    if not isinstance(llm_config, dict):
+        return None
+
+    raw = llm_config.get("response_format")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return None
+
+    import json
+
+    try:
+        json.dumps(raw)
+    except TypeError as exc:
+        raise ValueError("llm_config.response_format must be JSON-serializable") from exc
+
+    return dict(raw)
+
+
 class _ModelOverrideBackend:
     """
     ChatBackend 薄代理：仅覆写 request.model，然后委托给底层 backend。
@@ -461,6 +494,81 @@ class _ToolChoiceOverrideBackend:
                 else:
                     raise TypeError(
                         "request 对象不支持 extra 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
+                    )
+
+        async for ev in self._backend.stream_chat(forwarded):
+            yield ev
+
+
+class _ResponseFormatOverrideBackend:
+    """
+    ChatBackend 薄代理：仅覆写 request.response_format，然后委托给底层 backend。
+
+    说明：
+    - 覆写以"拷贝 + 更新"为主，避免修改上游 request 对象的原始 response_format 引用；
+    - 不强依赖 request 的具体实现（pydantic v1/v2 / dict / 普通对象 best-effort 兼容）。
+    """
+
+    def __init__(self, *, backend: ChatBackendProtocol, response_format: Dict[str, Any]) -> None:
+        self._backend: ChatBackendProtocol = backend
+        self._response_format: Dict[str, Any] = dict(response_format)
+
+    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
+        """
+        覆写 request.response_format 并转发 `stream_chat`。
+
+        参数：
+        - request：上游 SDK 生成的 ChatRequest（或兼容对象）
+        """
+
+        forwarded = request
+
+        if isinstance(request, dict):
+            forwarded = dict(request)
+            forwarded["response_format"] = dict(self._response_format)
+        else:
+            replaced = False
+            try:
+                import dataclasses
+
+                if dataclasses.is_dataclass(request):
+                    forwarded = dataclasses.replace(
+                        request,
+                        response_format=dict(self._response_format),
+                    )  # type: ignore[type-var]
+                    replaced = True
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="response_format_override_dataclasses_replace",
+                    exc=exc,
+                    extra={"target_field": "response_format"},
+                )
+                replaced = False
+
+            if not replaced:
+                if hasattr(request, "model_copy"):
+                    try:
+                        forwarded = request.model_copy(update={"response_format": dict(self._response_format)})
+                    except Exception as copy_exc:
+                        log_suppressed_exception(
+                            context="response_format_override",
+                            exc=copy_exc,
+                            extra={"method": "model_copy", "target_field": "response_format"},
+                        )
+                        forwarded = request
+                elif hasattr(request, "copy"):
+                    try:
+                        forwarded = request.copy(update={"response_format": dict(self._response_format)})
+                    except Exception as copy_exc:
+                        log_suppressed_exception(
+                            context="response_format_override",
+                            exc=copy_exc,
+                            extra={"method": "copy", "target_field": "response_format"},
+                        )
+                        forwarded = request
+                else:
+                    raise TypeError(
+                        "request 对象不支持 response_format 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
                     )
 
         async for ev in self._backend.stream_chat(forwarded):

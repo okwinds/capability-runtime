@@ -30,10 +30,13 @@ class _RecordingBackend:
 
     def __init__(self) -> None:
         self.models: List[Optional[str]] = []
+        self.response_formats: List[Optional[Dict[str, Any]]] = []
         self.extras: List[Optional[Dict[str, Any]]] = []
 
     async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
         self.models.append(getattr(request, "model", None))
+        response_format = getattr(request, "response_format", None)
+        self.response_formats.append(dict(response_format) if isinstance(response_format, dict) else None)
         extra = getattr(request, "extra", None)
         self.extras.append(extra if isinstance(extra, dict) else None)
         yield ChatStreamEvent(type="text_delta", text="ok")
@@ -129,3 +132,66 @@ async def test_agent_spec_llm_config_tool_choice_overrides_backend_request_extra
 
     observed = backend.extras[before:after]
     assert any((isinstance(ex, dict) and ex.get("tool_choice") == "required") for ex in observed)
+
+
+@pytest.mark.asyncio
+async def test_agent_spec_llm_config_response_format_overrides_backend_request_response_format(tmp_path: Path) -> None:
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "agent_output",
+            "schema": {
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    rt.register(_agent_spec(agent_id="agent.rf", llm_config={"response_format": response_format}))
+    assert rt.validate() == []
+
+    before = len(backend.response_formats)
+    out = await rt.run("agent.rf", input={})
+    assert out.node_report is not None
+    after = len(backend.response_formats)
+
+    observed = backend.response_formats[before:after]
+    assert response_format in observed
+
+
+@pytest.mark.asyncio
+async def test_agent_spec_llm_config_response_format_absent_does_not_override_backend_request_response_format(
+    tmp_path: Path,
+) -> None:
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(_agent_spec(agent_id="agent.rf.none", llm_config=None))
+    assert rt.validate() == []
+
+    before = len(backend.response_formats)
+    out = await rt.run("agent.rf.none", input={})
+    assert out.node_report is not None
+    after = len(backend.response_formats)
+
+    sentinel = {
+        "type": "json_schema",
+        "json_schema": {"name": "caprt-test-response-format-override-sentinel"},
+    }
+    assert sentinel not in backend.response_formats[before:after]
