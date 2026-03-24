@@ -292,6 +292,9 @@ async def test_mock_handler_error_result_has_error_code_mock_handler_error() -> 
     assert out.status == CapabilityStatus.FAILED
     assert "mock_handler error" in out.error
     assert out.error_code == "MOCK_HANDLER_ERROR"
+    assert out.node_report is not None
+    assert out.node_report.reason == "mock_handler_error"
+    assert out.node_report.completion_reason == "mock_handler_error"
 
 
 @pytest.mark.asyncio

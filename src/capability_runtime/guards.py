@@ -1,6 +1,7 @@
 """执行守卫——全局循环与编排保护。"""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Awaitable, Callable, Dict, List
 
 from .protocol.capability import CapabilityResult, CapabilityStatus
@@ -86,6 +87,8 @@ class ExecutionGuards:
                 result = CapabilityResult(
                     status=CapabilityStatus.FAILED,
                     error=f"Loop iteration {idx} exception: {exc}",
+                    error_code="ENGINE_ERROR",
+                    metadata={"exception_type": type(exc).__name__},
                 )
 
             if result.status != CapabilityStatus.SUCCESS:
@@ -107,11 +110,12 @@ class ExecutionGuards:
                     )
 
                 if fail_strategy == "abort":
-                    return CapabilityResult(
-                        status=CapabilityStatus.FAILED,
+                    return replace(
+                        result,
                         output=results,
                         error=f"Loop aborted at iteration {idx}/{effective_max}: {result.error}",
                         metadata={
+                            **dict(getattr(result, "metadata", {}) or {}),
                             "completed_iterations": idx,
                             "total_planned": effective_max,
                         },
@@ -134,4 +138,3 @@ class ExecutionGuards:
                 "skipped_errors": errors if errors else None,
             },
         )
-

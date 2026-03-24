@@ -183,6 +183,8 @@ async def test_runtime_service_facade_reuses_single_run_per_handle_and_releases_
         )
     )
 
+    assert calls["count"] == 0
+
     chunks = [chunk async for chunk in facade.stream(handle)]
     assert chunks
     assert calls["count"] == 1

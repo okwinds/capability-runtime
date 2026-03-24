@@ -188,6 +188,50 @@ async def test_loop_step_iterate_over_not_list_returns_fail_closed_report() -> N
 
 
 @pytest.mark.asyncio
+async def test_loop_step_abort_preserves_child_failure_evidence() -> None:
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-L-ABORT", kind=CapabilityKind.WORKFLOW, name="loop-abort"),
+        steps=[
+            Step(id="plan", capability=CapabilityRef(id="PLANNER")),
+            LoopStep(id="loop", capability=CapabilityRef(id="WORKER"), iterate_over="step.plan.items"),
+        ],
+    )
+
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "PLANNER":
+            return {"items": ["a", "b"]}
+        report = NodeReport(
+            status="failed",
+            reason="workflow_step_failed",
+            completion_reason="loop_iteration_failed",
+            engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+            bridge={"name": "capability-runtime"},
+            run_id="loop-child",
+            events_path="wal.jsonl",
+            activated_skills=[],
+            tool_calls=[],
+            artifacts=[],
+            meta={},
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error="worker failed",
+            error_code="STEP_TIMEOUT",
+            report=report,
+            node_report=report,
+        )
+
+    rt = _build_runtime(agents=[_make_agent("PLANNER"), _make_agent("WORKER")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-L-ABORT")
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "STEP_TIMEOUT"
+    assert result.node_report is not None
+    assert result.node_report.reason == "workflow_step_failed"
+
+
+@pytest.mark.asyncio
 async def test_loop_step_collect_as_injects_results_into_context_bag() -> None:
     """
     回归护栏：LoopStep.collect_as 不能是 no-op。

@@ -555,6 +555,17 @@ class TriggerFlowWorkflowEngine:
                 fail_strategy=step.fail_strategy,
             )
 
+        if result.status == CapabilityStatus.FAILED and result.node_report is None:
+            report = services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="workflow_step_failed",
+                completion_reason="loop_iteration_failed",
+                meta={"step_id": step.id, "capability_id": step.capability.id},
+            )
+            result.report = report
+            result.node_report = report
+
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)
         return result

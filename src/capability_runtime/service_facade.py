@@ -153,7 +153,6 @@ class RuntimeServiceFacade:
             context=context,
             level=level,
         )
-        await session.ensure_started()
         handle = RuntimeServiceHandle(
             run_id=run_id,
             session_id=request.session.session_id if request.session is not None else None,
@@ -161,7 +160,6 @@ class RuntimeServiceFacade:
         )
         state = _HandleState(request=request, context=context, session=session)
         self._handles[handle.run_id] = state
-        state.reaper_task = asyncio.create_task(self._reap_handle_when_done(run_id=handle.run_id, session=session))
         return handle
 
     async def run(self, request: RuntimeServiceRequest) -> CapabilityResult:
@@ -190,6 +188,8 @@ class RuntimeServiceFacade:
         request = state.request
         use_sse = str(request.transport or "jsonl").strip().lower() == "sse"
         session = state.session
+        if state.reaper_task is None:
+            state.reaper_task = asyncio.create_task(self._reap_handle_when_done(run_id=handle.run_id, session=session))
         async for ev in session.subscribe(after_id=None):
             yield encode_json_line(ev, prefix_data=use_sse)
         self._handles.pop(handle.run_id, None)

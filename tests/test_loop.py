@@ -5,6 +5,23 @@ import pytest
 
 from capability_runtime.protocol.capability import CapabilityResult, CapabilityStatus
 from capability_runtime.guards import ExecutionGuards, LoopBreakerError
+from capability_runtime.types import NodeReport
+
+
+def _report(run_id: str) -> NodeReport:
+    return NodeReport(
+        status="failed",
+        reason="workflow_step_failed",
+        completion_reason="loop_iteration_failed",
+        engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime", "version": "0"},
+        bridge={"name": "capability-runtime", "version": "0"},
+        run_id=run_id,
+        events_path=f"/tmp/{run_id}.jsonl",
+        activated_skills=[],
+        tool_calls=[],
+        artifacts=[],
+        meta={},
+    )
 
 
 @pytest.fixture
@@ -49,7 +66,14 @@ async def test_max_iterations_limits_items(guards):
 async def test_abort_on_failure(guards):
     async def execute(item, idx):
         if idx == 1:
-            return CapabilityResult(status=CapabilityStatus.FAILED, error="bad item")
+            report = _report("loop-abort")
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error="bad item",
+                error_code="STEP_TIMEOUT",
+                report=report,
+                node_report=report,
+            )
         return CapabilityResult(status=CapabilityStatus.SUCCESS, output=item)
 
     result = await guards.run_loop(
@@ -61,6 +85,9 @@ async def test_abort_on_failure(guards):
     assert result.status == CapabilityStatus.FAILED
     assert "aborted at iteration 1" in result.error.lower()
     assert result.output == ["a"]
+    assert result.error_code == "STEP_TIMEOUT"
+    assert result.node_report is not None
+    assert result.node_report.reason == "workflow_step_failed"
 
 
 @pytest.mark.asyncio
@@ -131,6 +158,7 @@ async def test_exception_in_execute_fn(guards):
     )
     assert result.status == CapabilityStatus.FAILED
     assert "exception" in result.error.lower()
+    assert result.error_code == "ENGINE_ERROR"
 
 
 @pytest.mark.asyncio
@@ -160,4 +188,3 @@ async def test_empty_items(guards):
     )
     assert result.status == CapabilityStatus.SUCCESS
     assert result.output == []
-

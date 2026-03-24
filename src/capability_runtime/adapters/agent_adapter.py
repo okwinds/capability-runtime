@@ -110,10 +110,19 @@ class AgentAdapter:
                 return out
             return CapabilityResult(status=CapabilityStatus.SUCCESS, output=out)
         except Exception as exc:
+            report = self._services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="mock_handler_error",
+                completion_reason="mock_handler_error",
+                meta={"capability_id": spec.base.id, "exception_type": type(exc).__name__},
+            )
             return CapabilityResult(
                 status=CapabilityStatus.FAILED,
                 error=f"mock_handler error: {exc}",
                 error_code="MOCK_HANDLER_ERROR",
+                report=report,
+                node_report=report,
             )
 
     async def _bridge_execute_stream(
