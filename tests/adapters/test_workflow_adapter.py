@@ -286,6 +286,57 @@ async def test_parallel_step_context_bag_is_isolated_between_branches():
 
 
 @pytest.mark.asyncio
+async def test_parallel_step_all_success_prefers_failed_over_pending() -> None:
+    """
+    回归护栏：all_success 语义下，只要任一分支已 FAILED，就不能被其它分支的 PENDING 掩盖。
+    """
+
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "A":
+            return CapabilityResult(
+                status=CapabilityStatus.PENDING,
+                report=NodeReport(
+                    status="needs_approval",
+                    reason="approval_pending",
+                    completion_reason="run_cancelled",
+                    engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+                    bridge={"name": "capability-runtime"},
+                    run_id="r1",
+                    events_path="wal.jsonl",
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                ),
+            )
+        if spec.base.id == "B":
+            return CapabilityResult(status=CapabilityStatus.FAILED, error="branch failed")
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-P-FAIL-PEND", kind=CapabilityKind.WORKFLOW, name="parallel-fail-pending"),
+        steps=[
+            ParallelStep(
+                id="p1",
+                branches=[
+                    Step(id="b1", capability=CapabilityRef(id="A")),
+                    Step(id="b2", capability=CapabilityRef(id="B")),
+                ],
+                join_strategy="all_success",
+            ),
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-P-FAIL-PEND")
+    assert result.status == CapabilityStatus.FAILED
+    assert "branches not success" in (result.error or "")
+    assert result.metadata["branch_statuses"] == ["pending", "failed"]
+
+
+@pytest.mark.asyncio
 async def test_conditional_step():
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-C", kind=CapabilityKind.WORKFLOW, name="cond"),
@@ -726,3 +777,137 @@ async def test_parallel_step_increments_depth():
 
     result = await rt.run("wf-parallel", input={})
     assert result.status == CapabilityStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_workflow_engine_exception_returns_fail_closed_report() -> None:
+    """workflow 顶层异常必须返回 fail-closed CapabilityResult，而不是只剩字符串错误。"""
+
+    async def _boom_async_start(self, *_args, **_kwargs):
+        _ = self
+        raise RuntimeError("engine boom")
+
+    rt = Runtime(RuntimeConfig(mode="mock", mock_handler=lambda spec, input_data: {"ok": True}))
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-ENGINE-BOOM", kind=CapabilityKind.WORKFLOW, name="engine-boom"),
+        steps=[Step(id="s1", capability=CapabilityRef(id="A"))],
+    )
+    rt.register(_make_agent("A"))
+    rt.register(wf)
+
+    from capability_runtime.adapters import triggerflow_workflow_engine as workflow_mod
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(workflow_mod.TriggerFlow, "async_start", _boom_async_start, raising=True)
+
+    items = []
+    try:
+        async for item in rt.run_stream("WF-ENGINE-BOOM"):
+            items.append(item)
+    finally:
+        monkeypatch.undo()
+
+    terminal = items[-1]
+    assert isinstance(terminal, CapabilityResult)
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "ENGINE_ERROR"
+    assert terminal.node_report is not None
+    assert terminal.node_report.reason == "engine_error"
+    assert terminal.node_report.completion_reason == "engine_exception"
+
+
+@pytest.mark.asyncio
+async def test_workflow_execute_stream_without_terminal_returns_fail_closed_terminal() -> None:
+    """workflow execute_stream 即使未拿到 terminal，也必须合成 fail-closed 终态。"""
+
+    async def _return_non_terminal(self, *_args, **_kwargs):
+        _ = self
+        return {"unexpected": True}
+
+    rt = Runtime(RuntimeConfig(mode="mock", mock_handler=lambda spec, input_data: {"ok": True}))
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-NO-TERM", kind=CapabilityKind.WORKFLOW, name="wf-no-term"),
+        steps=[Step(id="s1", capability=CapabilityRef(id="A"))],
+    )
+    rt.register(_make_agent("A"))
+    rt.register(wf)
+
+    from capability_runtime.adapters import triggerflow_workflow_engine as workflow_mod
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(workflow_mod.TriggerFlow, "async_start", _return_non_terminal, raising=True)
+
+    items = []
+    try:
+        async for item in rt.run_stream("WF-NO-TERM"):
+            items.append(item)
+    finally:
+        monkeypatch.undo()
+
+    terminal = items[-1]
+    assert isinstance(terminal, CapabilityResult)
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "ENGINE_ERROR"
+    assert terminal.node_report is not None
+    assert terminal.node_report.reason == "engine_error"
+    assert terminal.node_report.completion_reason == "missing_terminal_result"
+
+
+@pytest.mark.asyncio
+async def test_workflow_execute_without_terminal_returns_fail_closed_result() -> None:
+    """workflow execute() drain execute_stream 后仍无 terminal 时必须 fail-closed。"""
+
+    rt = Runtime(RuntimeConfig(mode="mock", mock_handler=lambda spec, input_data: {"ok": True}))
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-EXEC-NO-TERM", kind=CapabilityKind.WORKFLOW, name="wf-exec-no-term"),
+        steps=[Step(id="s1", capability=CapabilityRef(id="A"))],
+    )
+    rt.register(_make_agent("A"))
+    rt.register(wf)
+
+    async def _stream_without_terminal(*, spec, input, context, services):  # type: ignore[no-untyped-def]
+        _ = (spec, input, context, services)
+        yield {
+            "type": "workflow.started",
+            "run_id": "r-no-term",
+            "workflow_id": "WF-EXEC-NO-TERM",
+            "workflow_instance_id": "wf-inst",
+        }
+
+    original = rt._workflow_engine.execute_stream  # type: ignore[attr-defined]
+    rt._workflow_engine.execute_stream = _stream_without_terminal  # type: ignore[attr-defined]
+    try:
+        result = await rt.run("WF-EXEC-NO-TERM")
+    finally:
+        rt._workflow_engine.execute_stream = original  # type: ignore[attr-defined]
+
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "ENGINE_ERROR"
+    assert result.node_report is not None
+    assert result.node_report.reason == "engine_error"
+    assert result.node_report.completion_reason == "missing_terminal_result"
+
+
+@pytest.mark.asyncio
+async def test_workflow_step_timeout_returns_fail_closed_node_report() -> None:
+    """workflow step timeout 不能只返回裸错误，必须带 node_report。"""
+
+    async def slow_handler(spec, input_data):  # type: ignore[no-untyped-def]
+        _ = (spec, input_data)
+        await asyncio.sleep(0.05)
+        return {"ok": True}
+
+    rt = Runtime(RuntimeConfig(mode="mock", mock_handler=slow_handler))
+    rt.register(_make_agent("A"))
+    rt.register(
+        WorkflowSpec(
+            base=CapabilitySpec(id="WF-TIMEOUT", kind=CapabilityKind.WORKFLOW, name="wf-timeout"),
+            steps=[Step(id="s1", capability=CapabilityRef(id="A"), timeout_s=0.001)],
+        )
+    )
+
+    result = await rt.run("WF-TIMEOUT")
+
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "STEP_TIMEOUT"
+    assert result.node_report is not None

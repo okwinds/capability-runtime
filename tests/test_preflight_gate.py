@@ -4,7 +4,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 import pytest
 
 from skills_runtime.core.contracts import AgentEvent
-from skills_runtime.core.errors import FrameworkIssue
+from skills_runtime.core.errors import FrameworkError, FrameworkIssue
 
 from capability_runtime.config import RuntimeConfig
 from capability_runtime.protocol.agent import AgentSpec
@@ -158,3 +158,72 @@ async def test_preflight_warn_mode_does_not_block_on_unknown_scan_option(tmp_pat
     assert out.node_report is not None
     issues = out.node_report.meta.get("preflight_issues") or []
     assert any(i.get("code") == "SKILL_CONFIG_UNKNOWN_SCAN_OPTION" for i in issues)
+
+
+def test_preflight_broken_overlay_yaml_surfaces_issue(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    回归护栏：损坏的 overlay 不能被静默吞掉为“无 issue”。
+
+    期望：
+    - Runtime 仍可在 warn 模式构造（保持最小侵入）；
+    - preflight() 至少返回一个与 overlay 加载失败相关的 issue。
+    """
+
+    overlay = tmp_path / "broken.yaml"
+    overlay.write_text("skills:\n  roots: [\n", encoding="utf-8")
+
+    rt = _mk_runtime(monkeypatch, preflight_mode="warn", config_paths=[overlay])
+    issues = rt.preflight()
+
+    assert issues
+    assert any(
+        str(getattr(issue, "code", "") or "") == "SKILL_CONFIG_OVERLAY_LOAD_FAILED"
+        and str(((getattr(issue, "details", None) or {}).get("path", ""))) == str(overlay)
+        for issue in issues
+    )
+
+
+def test_runtime_init_fails_closed_when_scan_raises_in_error_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    回归护栏：初始化期 `SkillsManager.scan()` 自身抛异常时，error 模式不得继续启动。
+    """
+
+    import skills_runtime.skills.manager as skills_manager_mod
+
+    def boom(_self):
+        raise RuntimeError("scan boom")
+
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+    monkeypatch.setattr(skills_manager_mod.SkillsManager, "scan", boom, raising=True)
+
+    with pytest.raises(FrameworkError, match="scan failed|scan boom|Skills scan"):
+        Runtime(
+            RuntimeConfig(
+                mode="sdk_native",
+                workspace_root=Path("."),
+                preflight_mode="error",
+            )
+        )
+
+
+def test_runtime_init_fails_closed_when_broken_overlay_yaml_in_error_mode(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    回归护栏：error 模式下损坏 overlay 必须阻断初始化。
+    """
+
+    overlay = tmp_path / "broken-error.yaml"
+    overlay.write_text("skills:\n  roots: [\n", encoding="utf-8")
+
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    with pytest.raises(FrameworkError):
+        Runtime(
+            RuntimeConfig(
+                mode="sdk_native",
+                workspace_root=Path("."),
+                sdk_config_paths=[overlay],
+                preflight_mode="error",
+            )
+        )

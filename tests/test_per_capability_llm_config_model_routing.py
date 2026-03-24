@@ -17,6 +17,12 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent
 from skills_runtime.llm.protocol import ChatRequest
 
 from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime.sdk_lifecycle import (
+    _ModelOverrideBackend,
+    _ResponseFormatOverrideBackend,
+    _ToolChoiceOverrideBackend,
+    _UsageTapBackend,
+)
 
 
 class _RecordingBackend:
@@ -41,6 +47,34 @@ class _RecordingBackend:
         self.extras.append(extra if isinstance(extra, dict) else None)
         yield ChatStreamEvent(type="text_delta", text="ok")
         yield ChatStreamEvent(type="completed")
+
+
+class _BrokenCloneRequest:
+    """模拟 request 暴露 copy/model_copy，但内部复制总是失败。"""
+
+    def __init__(self) -> None:
+        self.model = "orig"
+        self.extra = {"existing": True}
+        self.response_format = {"type": "text"}
+
+    def model_copy(self, *, update=None):  # type: ignore[no-untyped-def]
+        _ = update
+        raise RuntimeError("model_copy boom")
+
+    def copy(self, *, update=None):  # type: ignore[no-untyped-def]
+        _ = update
+        raise RuntimeError("copy boom")
+
+
+class _FallbackCloneRequest(_BrokenCloneRequest):
+    """模拟 model_copy 失败、copy 成功的兼容对象。"""
+
+    def copy(self, *, update=None):  # type: ignore[no-untyped-def]
+        dup = _FallbackCloneRequest()
+        if isinstance(update, dict):
+            for key, value in update.items():
+                setattr(dup, key, value)
+        return dup
 
 
 def _agent_spec(*, agent_id: str, llm_config: Optional[dict]) -> AgentSpec:
@@ -195,3 +229,54 @@ async def test_agent_spec_llm_config_response_format_absent_does_not_override_ba
         "json_schema": {"name": "caprt-test-response-format-override-sentinel"},
     }
     assert sentinel not in backend.response_formats[before:after]
+
+
+@pytest.mark.asyncio
+async def test_model_override_request_clone_failure_fails_closed_and_does_not_forward() -> None:
+    backend = _RecordingBackend()
+    wrapped = _ModelOverrideBackend(backend=backend, model="model-fail")
+
+    with pytest.raises(Exception):
+        async for _ in wrapped.stream_chat(_BrokenCloneRequest()):  # type: ignore[arg-type]
+            pass
+
+    assert backend.models == []
+
+
+@pytest.mark.asyncio
+async def test_tool_choice_override_request_clone_failure_fails_closed_and_does_not_forward() -> None:
+    backend = _RecordingBackend()
+    wrapped = _ToolChoiceOverrideBackend(backend=backend, tool_choice="required")
+
+    with pytest.raises(Exception):
+        async for _ in wrapped.stream_chat(_BrokenCloneRequest()):  # type: ignore[arg-type]
+            pass
+
+    assert backend.extras == []
+
+
+@pytest.mark.asyncio
+async def test_response_format_override_request_clone_failure_fails_closed_and_does_not_forward() -> None:
+    backend = _RecordingBackend()
+    wrapped = _ResponseFormatOverrideBackend(
+        backend=backend,
+        response_format={"type": "json_schema", "json_schema": {"name": "demo"}},
+    )
+
+    with pytest.raises(Exception):
+        async for _ in wrapped.stream_chat(_BrokenCloneRequest()):  # type: ignore[arg-type]
+            pass
+
+    assert backend.response_formats == []
+
+
+@pytest.mark.asyncio
+async def test_usage_tap_backend_falls_back_to_copy_when_model_copy_fails() -> None:
+    backend = _RecordingBackend()
+    wrapped = _UsageTapBackend(backend=backend)
+
+    async for _ in wrapped.stream_chat(_FallbackCloneRequest()):  # type: ignore[arg-type]
+        pass
+
+    assert backend.extras
+    assert any(isinstance(extra, dict) and "_caprt_usage_sink" in extra for extra in backend.extras)

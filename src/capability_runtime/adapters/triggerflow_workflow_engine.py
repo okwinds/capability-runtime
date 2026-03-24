@@ -5,11 +5,12 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, AsyncIterator, Dict, List, cast
+from typing import Any, AsyncIterator, Dict, List, Optional, cast
 
 from agently import TriggerFlow
 
 from ..host_protocol import build_approval_ticket_from_report
+from ..logging_utils import log_suppressed_exception
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext, RecursionLimitError
 from ..protocol.workflow import (
@@ -66,6 +67,33 @@ class TriggerFlowWorkflowEngine:
     - Workflow 流式输出仅提供轻量事件字典，深审计仍依赖 WAL/events。
     """
 
+    def _build_fail_closed_result(
+        self,
+        *,
+        services: RuntimeServices,
+        context: ExecutionContext,
+        workflow_id: str,
+        error: str,
+        error_code: str,
+        reason: str,
+        completion_reason: str,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> CapabilityResult:
+        report = services.build_fail_closed_report(
+            run_id=context.run_id,
+            status="failed",
+            reason=reason,
+            completion_reason=completion_reason,
+            meta={"workflow_id": workflow_id, **(meta or {})},
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error=error,
+            error_code=error_code,
+            report=report,
+            node_report=report,
+        )
+
     async def execute(
         self,
         *,
@@ -82,7 +110,20 @@ class TriggerFlowWorkflowEngine:
                 terminal = item
         if terminal is not None:
             return terminal
-        return CapabilityResult(status=CapabilityStatus.FAILED, error="Workflow execution produced no result")
+        report = services.build_fail_closed_report(
+            run_id=context.run_id,
+            status="failed",
+            reason="engine_error",
+            completion_reason="missing_terminal_result",
+            meta={"workflow_id": spec.base.id, "source": "workflow.execute"},
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error="Workflow execution produced no result",
+            error_code="ENGINE_ERROR",
+            report=report,
+            node_report=report,
+        )
 
     async def execute_stream(
         self,
@@ -244,9 +285,35 @@ class TriggerFlowWorkflowEngine:
                 if isinstance(result, CapabilityResult):
                     terminal_holder.setdefault("result", result)
             except Exception as exc:
+                log_suppressed_exception(
+                    context="workflow_triggerflow_engine",
+                    exc=exc,
+                    run_id=context_holder.context.run_id,
+                    capability_id=spec.base.id,
+                    extra={"workflow_instance_id": workflow_instance_id},
+                )
+                report = services.build_fail_closed_report(
+                    run_id=context_holder.context.run_id,
+                    status="failed",
+                    reason="engine_error",
+                    completion_reason="engine_exception",
+                    meta={"engine_exception": type(exc).__name__, "workflow_instance_id": workflow_instance_id},
+                )
                 terminal_holder["result"] = CapabilityResult(
                     status=CapabilityStatus.FAILED,
                     error=f"Workflow TriggerFlow engine error: {exc}",
+                    error_code="ENGINE_ERROR",
+                    report=report,
+                    node_report=report,
+                )
+                await emit(
+                    {
+                        "type": "workflow.finished",
+                        "run_id": context_holder.context.run_id,
+                        "workflow_id": spec.base.id,
+                        "workflow_instance_id": workflow_instance_id,
+                        "status": "failed",
+                    }
                 )
             finally:
                 await event_queue.put(queue_stop)
@@ -263,7 +330,20 @@ class TriggerFlowWorkflowEngine:
 
         terminal = terminal_holder.get("result")
         if terminal is None:
-            terminal = CapabilityResult(status=CapabilityStatus.FAILED, error="Workflow execution produced no result")
+            report = services.build_fail_closed_report(
+                run_id=context_holder.context.run_id,
+                status="failed",
+                reason="engine_error",
+                completion_reason="missing_terminal_result",
+                meta={"workflow_id": spec.base.id, "workflow_instance_id": workflow_instance_id},
+            )
+            terminal = CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error="Workflow execution produced no result",
+                error_code="ENGINE_ERROR",
+                report=report,
+                node_report=report,
+            )
         yield terminal
 
     async def _execute_step(
@@ -276,7 +356,20 @@ class TriggerFlowWorkflowEngine:
         """按步骤类型分发执行。"""
 
         if context.cancel_token is not None and context.cancel_token.is_cancelled:
-            return CapabilityResult(status=CapabilityStatus.CANCELLED, error="execution cancelled")
+            report = services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="cancelled",
+                reason="run_cancelled",
+                completion_reason="run_cancelled",
+                meta={"workflow_step": getattr(step, "id", None)},
+            )
+            return CapabilityResult(
+                status=CapabilityStatus.CANCELLED,
+                error="execution cancelled",
+                error_code="RUN_CANCELLED",
+                report=report,
+                node_report=report,
+            )
 
         if isinstance(step, Step):
             return await self._execute_basic_step(step, context=context, services=services)
@@ -286,9 +379,15 @@ class TriggerFlowWorkflowEngine:
             return await self._execute_parallel_step(step, context=context, services=services)
         if isinstance(step, ConditionalStep):
             return await self._execute_conditional_step(step, context=context, services=services)
-        return CapabilityResult(
-            status=CapabilityStatus.FAILED,
+        return self._build_fail_closed_result(
+            services=services,
+            context=context,
+            workflow_id="unknown",
             error=f"Unknown step type: {type(step).__name__}",
+            error_code="INVALID_WORKFLOW_STEP",
+            reason="invalid_workflow_step",
+            completion_reason="unknown_step_type",
+            meta={"actual_type": type(step).__name__},
         )
 
     def _step_capability_id(self, step: Any) -> str | None:
@@ -321,10 +420,19 @@ class TriggerFlowWorkflowEngine:
                     timeout=step.timeout_s,
                 )
             except asyncio.TimeoutError:
+                report = services.build_fail_closed_report(
+                    run_id=context.run_id,
+                    status="failed",
+                    reason="timeout",
+                    completion_reason="step_timeout",
+                    meta={"step_id": step.id, "capability_id": step.capability.id},
+                )
                 result = CapabilityResult(
                     status=CapabilityStatus.FAILED,
                     error=f"step timeout: {step.id}",
                     error_code="STEP_TIMEOUT",
+                    report=report,
+                    node_report=report,
                 )
         else:
             result = await services.execute_capability(spec=target_spec, input=step_input, context=context)
@@ -344,12 +452,18 @@ class TriggerFlowWorkflowEngine:
 
         items = context.resolve_mapping(step.iterate_over)
         if not isinstance(items, list):
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_fail_closed_result(
+                services=services,
+                context=context,
+                workflow_id=step.id,
                 error=(
                     f"LoopStep '{step.id}': iterate_over resolved to "
                     f"{type(items).__name__}, expected list"
                 ),
+                error_code="INVALID_LOOP_INPUT",
+                reason="invalid_workflow_step",
+                completion_reason="loop_iterate_over_not_list",
+                meta={"step_id": step.id, "actual_type": type(items).__name__},
             )
 
         target_spec = services.registry.get_or_raise(step.capability.id)
@@ -385,9 +499,15 @@ class TriggerFlowWorkflowEngine:
             return await services.execute_capability(spec=target_spec, input=step_input, context=item_context)
 
         if context.guards is None:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_fail_closed_result(
+                services=services,
+                context=context,
+                workflow_id=step.id,
                 error=f"LoopStep '{step.id}': missing ExecutionGuards in ExecutionContext",
+                error_code="MISSING_EXECUTION_GUARDS",
+                reason="engine_error",
+                completion_reason="missing_execution_guards",
+                meta={"step_id": step.id},
             )
 
         if step.timeout_s is not None:
@@ -402,11 +522,20 @@ class TriggerFlowWorkflowEngine:
                     timeout=step.timeout_s,
                 )
             except asyncio.TimeoutError:
+                report = services.build_fail_closed_report(
+                    run_id=context.run_id,
+                    status="failed",
+                    reason="timeout",
+                    completion_reason="loop_timeout",
+                    meta={"step_id": step.id, "capability_id": step.capability.id},
+                )
                 result = CapabilityResult(
                     status=CapabilityStatus.FAILED,
                     error=f"loop timeout: {step.id}",
                     error_code="LOOP_TIMEOUT",
                     output=[],
+                    report=report,
+                    node_report=report,
                 )
         else:
             result = await context.guards.run_loop(
@@ -478,10 +607,10 @@ class TriggerFlowWorkflowEngine:
             non_success = [result for result in branch_results if result.status != CapabilityStatus.SUCCESS]
             if non_success:
                 statuses = {result.status for result in non_success}
-                if CapabilityStatus.PENDING in statuses:
-                    overall = CapabilityStatus.PENDING
-                elif CapabilityStatus.FAILED in statuses:
+                if CapabilityStatus.FAILED in statuses:
                     overall = CapabilityStatus.FAILED
+                elif CapabilityStatus.PENDING in statuses:
+                    overall = CapabilityStatus.PENDING
                 elif CapabilityStatus.CANCELLED in statuses:
                     overall = CapabilityStatus.CANCELLED
                 else:

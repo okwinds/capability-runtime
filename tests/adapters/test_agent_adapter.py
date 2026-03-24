@@ -376,3 +376,29 @@ async def test_engine_error_result_has_error_code_engine_error() -> None:
     assert terminal.status == CapabilityStatus.FAILED
     assert "engine crashed" in terminal.error
     assert terminal.error_code == "ENGINE_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_runtime_execute_agent_when_adapter_stream_has_no_terminal_returns_fail_closed_result() -> None:
+    """Agent 路径若只产出事件不产出 terminal，Runtime 必须 fail-closed。"""
+
+    from skills_runtime.core.contracts import AgentEvent
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock"))
+
+    async def _events_only(*, spec, input, context):  # type: ignore[no-untyped-def]
+        _ = (spec, input)
+        yield AgentEvent(type="run_started", timestamp="t0", run_id=context.run_id, payload={})
+
+    original = rt._agent_adapter.execute_stream  # type: ignore[attr-defined]
+    rt._agent_adapter.execute_stream = _events_only  # type: ignore[attr-defined]
+    try:
+        out = await rt.run("A", context=ExecutionContext(run_id="r-agent-no-terminal"))
+    finally:
+        rt._agent_adapter.execute_stream = original  # type: ignore[attr-defined]
+
+    assert out.status == CapabilityStatus.FAILED
+    assert out.error_code == "ENGINE_ERROR"
+    assert out.node_report is not None
+    assert out.node_report.reason == "engine_error"
+    assert out.node_report.completion_reason == "missing_terminal_result"

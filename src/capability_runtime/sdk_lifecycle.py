@@ -7,8 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, List, Optional
 
-from skills_runtime.core.errors import FrameworkError, FrameworkIssue
 from skills_runtime.core.contracts import AgentEvent
+from skills_runtime.core.errors import FrameworkError, FrameworkIssue
+from skills_runtime.llm.chat_sse import ChatStreamEvent
+from skills_runtime.llm.protocol import ChatRequest
 from skills_runtime.skills.manager import SkillsManager
 
 from .config import CustomTool, RuntimeConfig, RuntimeMode, normalize_workspace_root
@@ -24,6 +26,7 @@ class _SdkInitState:
     config_paths: List[Path]
     skills_config: Any
     skills_config_overlay_issues: List[FrameworkIssue]
+    skills_scan_issues: List[FrameworkIssue]
     backend: Any
     shared_skills_manager: SkillsManager
 
@@ -67,7 +70,8 @@ class SdkLifecycle:
             )
             upstream_issues = mgr.preflight()
             overlay_issues = list(getattr(self._state, "skills_config_overlay_issues", []) or [])
-            return overlay_issues + list(upstream_issues or [])
+            scan_issues = list(getattr(self._state, "skills_scan_issues", []) or [])
+            return overlay_issues + scan_issues + list(upstream_issues or [])
         except Exception as exc:
             # preflight 异常不得 fail-open：否则 preflight_mode="error" gate 会被绕过。
             return [
@@ -151,6 +155,19 @@ class SdkLifecycle:
                     exc=exc,
                     extra={"config_path": str(p)},
                 )
+                overlay_issues.append(
+                    FrameworkIssue(
+                        code="SKILL_CONFIG_OVERLAY_LOAD_FAILED",
+                        message="Failed to load SDK config overlay; overlay ignored.",
+                        details={"path": str(p), "exception_type": type(exc).__name__},
+                    )
+                )
+                if self._config.preflight_mode == "error":
+                    raise FrameworkError(
+                        code="SKILL_CONFIG_OVERLAY_LOAD_FAILED",
+                        message="Failed to load SDK config overlay during Runtime initialization.",
+                        details={"path": str(p), "exception_type": type(exc).__name__},
+                    ) from exc
                 overlays.append({})
         cfg = load_config_dicts(overlays)
         return cfg, overlay_issues
@@ -233,6 +250,7 @@ class SdkLifecycle:
         backend = self._build_backend(mode=mode, cfg=cfg)
         shared_skills_manager = self._build_skills_manager(workspace_root=workspace_root, skills_config=skills_cfg)
 
+        scan_issues: List[FrameworkIssue] = []
         try:
             report = shared_skills_manager.scan()
         except Exception as exc:
@@ -241,20 +259,43 @@ class SdkLifecycle:
                 exc=exc,
                 extra={"workspace_root": str(workspace_root)},
             )
+            scan_issues.append(
+                FrameworkIssue(
+                    code="SKILL_SCAN_EXCEPTION",
+                    message="Skills scan raised exception during Runtime initialization.",
+                    details={"workspace_root": str(workspace_root), "exception_type": type(exc).__name__},
+                )
+            )
+            if self._config.preflight_mode == "error":
+                raise FrameworkError(
+                    code="SKILL_SCAN_EXCEPTION",
+                    message="Skills scan raised exception during Runtime initialization.",
+                    details={"workspace_root": str(workspace_root), "exception_type": type(exc).__name__},
+                ) from exc
             report = None
 
-        if report is not None and getattr(report, "errors", None) and self._config.preflight_mode == "error":
-            raise FrameworkError(
-                code="SKILL_SCAN_FAILED",
-                message="Skills scan failed during Runtime initialization.",
-                details={"errors": getattr(report, "errors", [])},
+        if report is not None and getattr(report, "errors", None):
+            errors = list(getattr(report, "errors", []) or [])
+            scan_issues.append(
+                FrameworkIssue(
+                    code="SKILL_SCAN_FAILED",
+                    message="Skills scan reported errors during Runtime initialization.",
+                    details={"errors": errors},
+                )
             )
+            if self._config.preflight_mode == "error":
+                raise FrameworkError(
+                    code="SKILL_SCAN_FAILED",
+                    message="Skills scan failed during Runtime initialization.",
+                    details={"errors": errors},
+                )
 
         return _SdkInitState(
             workspace_root=workspace_root,
             config_paths=config_paths,
             skills_config=skills_cfg,
             skills_config_overlay_issues=list(overlay_issues),
+            skills_scan_issues=list(scan_issues),
             backend=backend,
             shared_skills_manager=shared_skills_manager,
         )
@@ -346,6 +387,70 @@ def _extract_response_format_override(llm_config: Optional[Dict[str, Any]]) -> O
     return dict(raw)
 
 
+def _clone_request_with_field_update(
+    request: ChatRequest,
+    *,
+    field_name: str,
+    value: Any,
+    dataclasses_context: str,
+    clone_context: str,
+) -> ChatRequest:
+    """
+    以“安全复制 + 单字段覆写”的方式构造转发 request。
+
+    约束：
+    - 覆写必须真实生效，不能在 clone 失败后静默回退原 request；
+    - 支持 dict / dataclass / pydantic(v1/v2) 常见形态；
+    - 若对象暴露了 clone 能力但全部失败，必须 fail-closed 抛异常。
+    """
+
+    if isinstance(request, dict):
+        forwarded = dict(request)
+        forwarded[field_name] = value
+        return forwarded
+
+    try:
+        import dataclasses
+
+        if dataclasses.is_dataclass(request):
+            return dataclasses.replace(request, **{field_name: value})  # type: ignore[type-var,call-overload]
+    except Exception as exc:
+        log_suppressed_exception(
+            context=dataclasses_context,
+            exc=exc,
+            extra={"target_field": field_name},
+        )
+
+    clone_exc: Optional[Exception] = None
+    if hasattr(request, "model_copy"):
+        try:
+            return request.model_copy(update={field_name: value})
+        except Exception as exc:
+            log_suppressed_exception(
+                context=clone_context,
+                exc=exc,
+                extra={"method": "model_copy", "target_field": field_name},
+            )
+            clone_exc = exc
+    if hasattr(request, "copy"):
+        try:
+            return request.copy(update={field_name: value})
+        except Exception as exc:
+            log_suppressed_exception(
+                context=clone_context,
+                exc=exc,
+                extra={"method": "copy", "target_field": field_name},
+            )
+            clone_exc = exc
+
+    if clone_exc is not None:
+        raise RuntimeError(f"request 对象无法安全覆写字段: {field_name}") from clone_exc
+
+    raise TypeError(
+        f"request 对象不支持 {field_name} 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
+    )
+
+
 class _ModelOverrideBackend:
     """
     ChatBackend 薄代理：仅覆写 request.model，然后委托给底层 backend。
@@ -359,7 +464,7 @@ class _ModelOverrideBackend:
         self._backend: ChatBackendProtocol = backend
         self._model: str = model
 
-    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
+    async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """
         覆写 request.model 并转发 `stream_chat`。
 
@@ -367,55 +472,13 @@ class _ModelOverrideBackend:
         - request：上游 SDK 生成的 ChatRequest（或兼容对象）
         """
 
-        forwarded = request
-
-        if isinstance(request, dict):
-            forwarded = dict(request)
-            forwarded["model"] = self._model
-        else:
-            # dataclass（frozen=True）兼容：`skills_runtime.llm.protocol.ChatRequest` 是 frozen dataclass，
-            # 需要通过 dataclasses.replace 复制并覆写字段。
-            replaced = False
-            try:
-                import dataclasses
-
-                if dataclasses.is_dataclass(request):
-                    forwarded = dataclasses.replace(request, model=self._model)  # type: ignore[type-var]
-                    replaced = True
-            except Exception as exc:
-                log_suppressed_exception(
-                    context="model_override_dataclasses_replace",
-                    exc=exc,
-                    extra={"target_field": "model"},
-                )
-                replaced = False
-
-            if not replaced:
-                # pydantic v2: model_copy；pydantic v1: copy
-                if hasattr(request, "model_copy"):
-                    try:
-                        forwarded = request.model_copy(update={"model": self._model})
-                    except Exception as copy_exc:
-                        log_suppressed_exception(
-                            context="model_copy_override",
-                            exc=copy_exc,
-                            extra={"method": "model_copy", "target_field": "model"},
-                        )
-                        forwarded = request
-                elif hasattr(request, "copy"):
-                    try:
-                        forwarded = request.copy(update={"model": self._model})
-                    except Exception as copy_exc:
-                        log_suppressed_exception(
-                            context="model_copy_override",
-                            exc=copy_exc,
-                            extra={"method": "copy", "target_field": "model"},
-                        )
-                        forwarded = request
-                else:
-                    raise TypeError(
-                        "request 对象不支持 model 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
-                    )
+        forwarded = _clone_request_with_field_update(
+            request,
+            field_name="model",
+            value=self._model,
+            dataclasses_context="model_override_dataclasses_replace",
+            clone_context="model_copy_override",
+        )
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev
@@ -434,7 +497,7 @@ class _ToolChoiceOverrideBackend:
         self._backend: ChatBackendProtocol = backend
         self._tool_choice: Any = tool_choice
 
-    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
+    async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """
         覆写 request.extra["tool_choice"] 并转发 `stream_chat`。
 
@@ -442,59 +505,16 @@ class _ToolChoiceOverrideBackend:
         - request：上游 SDK 生成的 ChatRequest（或兼容对象）
         """
 
-        forwarded = request
-
-        if isinstance(request, dict):
-            forwarded = dict(request)
-            raw_extra = forwarded.get("extra")
-            extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-            extra["tool_choice"] = self._tool_choice
-            forwarded["extra"] = extra
-        else:
-            raw_extra = getattr(request, "extra", None)
-            extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-            extra["tool_choice"] = self._tool_choice
-
-            replaced = False
-            try:
-                import dataclasses
-
-                if dataclasses.is_dataclass(request):
-                    forwarded = dataclasses.replace(request, extra=extra)  # type: ignore[type-var]
-                    replaced = True
-            except Exception as exc:
-                log_suppressed_exception(
-                    context="tool_choice_override_dataclasses_replace",
-                    exc=exc,
-                    extra={"target_field": "extra"},
-                )
-                replaced = False
-
-            if not replaced:
-                if hasattr(request, "model_copy"):
-                    try:
-                        forwarded = request.model_copy(update={"extra": extra})
-                    except Exception as copy_exc:
-                        log_suppressed_exception(
-                            context="tool_choice_override",
-                            exc=copy_exc,
-                            extra={"method": "model_copy", "target_field": "extra"},
-                        )
-                        forwarded = request
-                elif hasattr(request, "copy"):
-                    try:
-                        forwarded = request.copy(update={"extra": extra})
-                    except Exception as copy_exc:
-                        log_suppressed_exception(
-                            context="tool_choice_override",
-                            exc=copy_exc,
-                            extra={"method": "copy", "target_field": "extra"},
-                        )
-                        forwarded = request
-                else:
-                    raise TypeError(
-                        "request 对象不支持 extra 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
-                    )
+        raw_extra = getattr(request, "extra", None)
+        extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
+        extra["tool_choice"] = self._tool_choice
+        forwarded = _clone_request_with_field_update(
+            request,
+            field_name="extra",
+            value=extra,
+            dataclasses_context="tool_choice_override_dataclasses_replace",
+            clone_context="tool_choice_override",
+        )
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev
@@ -513,7 +533,7 @@ class _ResponseFormatOverrideBackend:
         self._backend: ChatBackendProtocol = backend
         self._response_format: Dict[str, Any] = dict(response_format)
 
-    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
+    async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """
         覆写 request.response_format 并转发 `stream_chat`。
 
@@ -521,55 +541,13 @@ class _ResponseFormatOverrideBackend:
         - request：上游 SDK 生成的 ChatRequest（或兼容对象）
         """
 
-        forwarded = request
-
-        if isinstance(request, dict):
-            forwarded = dict(request)
-            forwarded["response_format"] = dict(self._response_format)
-        else:
-            replaced = False
-            try:
-                import dataclasses
-
-                if dataclasses.is_dataclass(request):
-                    forwarded = dataclasses.replace(
-                        request,
-                        response_format=dict(self._response_format),
-                    )  # type: ignore[type-var]
-                    replaced = True
-            except Exception as exc:
-                log_suppressed_exception(
-                    context="response_format_override_dataclasses_replace",
-                    exc=exc,
-                    extra={"target_field": "response_format"},
-                )
-                replaced = False
-
-            if not replaced:
-                if hasattr(request, "model_copy"):
-                    try:
-                        forwarded = request.model_copy(update={"response_format": dict(self._response_format)})
-                    except Exception as copy_exc:
-                        log_suppressed_exception(
-                            context="response_format_override",
-                            exc=copy_exc,
-                            extra={"method": "model_copy", "target_field": "response_format"},
-                        )
-                        forwarded = request
-                elif hasattr(request, "copy"):
-                    try:
-                        forwarded = request.copy(update={"response_format": dict(self._response_format)})
-                    except Exception as copy_exc:
-                        log_suppressed_exception(
-                            context="response_format_override",
-                            exc=copy_exc,
-                            extra={"method": "copy", "target_field": "response_format"},
-                        )
-                        forwarded = request
-                else:
-                    raise TypeError(
-                        "request 对象不支持 response_format 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy"
-                    )
+        forwarded = _clone_request_with_field_update(
+            request,
+            field_name="response_format",
+            value=dict(self._response_format),
+            dataclasses_context="response_format_override_dataclasses_replace",
+            clone_context="response_format_override",
+        )
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev
@@ -602,7 +580,7 @@ class _UsageTapBackend:
         self._usage_payloads.clear()
         return out
 
-    async def stream_chat(self, request: Any) -> AsyncGenerator[Any, None]:
+    async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """注入 `_caprt_usage_sink` 后转发到底层 backend。"""
 
         forwarded = _clone_request_with_extra(
@@ -705,6 +683,7 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
 
     replaced = False
     forwarded = request
+    clone_exc: Optional[Exception] = None
     try:
         import dataclasses
 
@@ -731,7 +710,8 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
                     extra={"target_field": "extra"},
                 )
                 replaced = False
-        elif hasattr(request, "copy"):
+                clone_exc = exc
+        if not replaced and hasattr(request, "copy"):
             try:
                 forwarded = request.copy(update={"extra": updated_extra})
                 replaced = True
@@ -742,8 +722,11 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
                     extra={"target_field": "extra"},
                 )
                 replaced = False
+                clone_exc = exc
 
     if not replaced:
+        if clone_exc is not None:
+            raise RuntimeError("request 对象无法安全覆写 extra 字段") from clone_exc
         raise TypeError("request 对象不支持 extra 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy")
 
     return forwarded
