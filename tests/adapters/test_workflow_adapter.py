@@ -128,8 +128,6 @@ async def test_workflow_cancellation_integration_stops_at_step_boundary() -> Non
     assert result.node_report is not None
     assert result.node_report.reason == "cancelled"
     assert result.node_report.completion_reason == "run_cancelled"
-    assert result.node_report is not None
-    assert result.node_report.reason == "run_cancelled"
 
 
 @pytest.mark.asyncio
