@@ -201,9 +201,19 @@ class TriggerFlowWorkflowEngine:
                 # - 当前 step 执行中取消：不强制中断，由 _execute_step 内部与下一个 step 边界决定；
                 # - 下一步开始前已取消：不得发出 step.started（避免误导为"已开始执行"）。
                 if step_context.cancel_token is not None and step_context.cancel_token.is_cancelled:
+                    report = services.build_fail_closed_report(
+                        run_id=step_context.run_id,
+                        status="incomplete",
+                        reason="cancelled",
+                        completion_reason="run_cancelled",
+                        meta={"workflow_id": spec.base.id, "step_id": step_id},
+                    )
                     payload["__terminal_result__"] = CapabilityResult(
                         status=CapabilityStatus.CANCELLED,
                         error="execution cancelled",
+                        error_code="RUN_CANCELLED",
+                        report=report,
+                        node_report=report,
                     )
                     return payload
 
@@ -358,8 +368,8 @@ class TriggerFlowWorkflowEngine:
         if context.cancel_token is not None and context.cancel_token.is_cancelled:
             report = services.build_fail_closed_report(
                 run_id=context.run_id,
-                status="cancelled",
-                reason="run_cancelled",
+                status="incomplete",
+                reason="cancelled",
                 completion_reason="run_cancelled",
                 meta={"workflow_step": getattr(step, "id", None)},
             )
@@ -628,6 +638,9 @@ class TriggerFlowWorkflowEngine:
                     overall = CapabilityStatus.RUNNING
 
                 context.step_outputs[step.id] = [result.output for result in branch_results]
+                branch_statuses = [
+                    getattr(result.status, "value", str(result.status)) for result in branch_results
+                ]
                 aggregated = CapabilityResult(
                     status=overall,
                     output=[result.output for result in branch_results],
@@ -637,23 +650,25 @@ class TriggerFlowWorkflowEngine:
                     )
                     if overall == CapabilityStatus.FAILED
                     else None,
-                    metadata={
-                        "branch_statuses": [
-                            getattr(result.status, "value", str(result.status)) for result in branch_results
-                        ]
-                    },
+                    metadata={"branch_statuses": branch_statuses},
                 )
-                if overall == CapabilityStatus.FAILED:
+                if overall != CapabilityStatus.SUCCESS:
+                    report_status = "failed"
+                    report_reason = "workflow_step_failed"
+                    if overall == CapabilityStatus.CANCELLED:
+                        report_status = "incomplete"
+                        report_reason = "cancelled"
+                    elif overall in (CapabilityStatus.PENDING, CapabilityStatus.RUNNING):
+                        report_status = "incomplete"
+                        report_reason = "parallel_branches_incomplete"
                     report = services.build_fail_closed_report(
                         run_id=context.run_id,
-                        status="failed",
-                        reason="workflow_step_failed",
+                        status=report_status,
+                        reason=report_reason,
                         completion_reason="parallel_all_success_not_met",
                         meta={
                             "step_id": step.id,
-                            "branch_statuses": [
-                                getattr(result.status, "value", str(result.status)) for result in branch_results
-                            ],
+                            "branch_statuses": branch_statuses,
                         },
                     )
                     aggregated.report = report
@@ -673,29 +688,34 @@ class TriggerFlowWorkflowEngine:
                     overall = CapabilityStatus.FAILED
 
                 context.step_outputs[step.id] = [result.output for result in branch_results]
+                branch_statuses = [
+                    getattr(result.status, "value", str(result.status)) for result in branch_results
+                ]
                 aggregated = CapabilityResult(
                     status=overall,
                     output=[result.output for result in branch_results],
                     error=f"ParallelStep '{step.id}': no branch succeeded"
                     if overall == CapabilityStatus.FAILED
                     else None,
-                    metadata={
-                        "branch_statuses": [
-                            getattr(result.status, "value", str(result.status)) for result in branch_results
-                        ]
-                    },
+                    metadata={"branch_statuses": branch_statuses},
                 )
-                if overall == CapabilityStatus.FAILED:
+                if overall != CapabilityStatus.SUCCESS:
+                    report_status = "failed"
+                    report_reason = "workflow_step_failed"
+                    if overall == CapabilityStatus.CANCELLED:
+                        report_status = "incomplete"
+                        report_reason = "cancelled"
+                    elif overall in (CapabilityStatus.PENDING, CapabilityStatus.RUNNING):
+                        report_status = "incomplete"
+                        report_reason = "parallel_branches_incomplete"
                     report = services.build_fail_closed_report(
                         run_id=context.run_id,
-                        status="failed",
-                        reason="workflow_step_failed",
+                        status=report_status,
+                        reason=report_reason,
                         completion_reason="parallel_any_success_not_met",
                         meta={
                             "step_id": step.id,
-                            "branch_statuses": [
-                                getattr(result.status, "value", str(result.status)) for result in branch_results
-                            ],
+                            "branch_statuses": branch_statuses,
                         },
                     )
                     aggregated.report = report

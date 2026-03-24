@@ -145,3 +145,67 @@ async def test_run_when_run_stream_emits_no_terminal_fails_closed(
     assert out.node_report is not None
     assert out.node_report.reason == "engine_error"
     assert out.node_report.completion_reason == "missing_terminal_result"
+
+
+@pytest.mark.asyncio
+async def test_execute_workflow_stream_invalid_spec_type_returns_fail_closed(tmp_path: Path) -> None:
+    rt = Runtime(RuntimeConfig(mode="mock", workspace_root=tmp_path))
+    invalid_spec = AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"))
+    ctx = ExecutionContext(run_id="r-invalid-wf")
+
+    items = [
+        item
+        async for item in rt._execute_workflow_stream(  # type: ignore[arg-type]
+            spec=invalid_spec,
+            input={},
+            context=ctx,
+        )
+    ]
+
+    assert len(items) == 1
+    terminal = items[0]
+    assert isinstance(terminal, CapabilityResult)
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "INVALID_WORKFLOW_SPEC"
+    assert terminal.node_report is not None
+    assert terminal.node_report.reason == "invalid_spec"
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_stream_invalid_spec_type_returns_fail_closed(tmp_path: Path) -> None:
+    rt = Runtime(RuntimeConfig(mode="mock", workspace_root=tmp_path))
+    invalid_spec = WorkflowSpec(
+        base=CapabilitySpec(id="WF-BAD", kind=CapabilityKind.WORKFLOW, name="WF-BAD"),
+        steps=[],
+    )
+    ctx = ExecutionContext(run_id="r-invalid-agent")
+
+    items = [
+        item
+        async for item in rt._execute_agent_stream(  # type: ignore[arg-type]
+            spec=invalid_spec,
+            input={},
+            context=ctx,
+        )
+    ]
+
+    assert len(items) == 1
+    terminal = items[0]
+    assert isinstance(terminal, CapabilityResult)
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "INVALID_AGENT_SPEC"
+    assert terminal.node_report is not None
+    assert terminal.node_report.reason == "invalid_spec"
+
+
+@pytest.mark.asyncio
+async def test_execute_recursion_limit_returns_fail_closed_report(tmp_path: Path) -> None:
+    rt = Runtime(RuntimeConfig(mode="mock", workspace_root=tmp_path))
+    spec = AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"))
+    ctx = ExecutionContext(run_id="r-rec-limit", max_depth=0)
+
+    out = await rt._execute(spec=spec, input={}, context=ctx)  # type: ignore[attr-defined]
+    assert out.status == CapabilityStatus.FAILED
+    assert out.error_code == "RECURSION_LIMIT"
+    assert out.node_report is not None
+    assert out.node_report.reason == "recursion_limit"

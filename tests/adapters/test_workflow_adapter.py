@@ -125,6 +125,11 @@ async def test_workflow_cancellation_integration_stops_at_step_boundary() -> Non
     assert called_b is False
     assert result.status == CapabilityStatus.CANCELLED
     assert result.error == "execution cancelled"
+    assert result.node_report is not None
+    assert result.node_report.reason == "cancelled"
+    assert result.node_report.completion_reason == "run_cancelled"
+    assert result.node_report is not None
+    assert result.node_report.reason == "run_cancelled"
 
 
 @pytest.mark.asyncio
@@ -157,6 +162,31 @@ async def test_loop_step():
     assert result.status == CapabilityStatus.SUCCESS
     loop_output = result.output["loop"]
     assert len(loop_output) == 3
+
+
+@pytest.mark.asyncio
+async def test_loop_step_iterate_over_not_list_returns_fail_closed_report() -> None:
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-L-BAD", kind=CapabilityKind.WORKFLOW, name="loop-bad"),
+        steps=[
+            Step(id="plan", capability=CapabilityRef(id="PLANNER")),
+            LoopStep(id="loop", capability=CapabilityRef(id="WORKER"), iterate_over="step.plan.items"),
+        ],
+    )
+
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "PLANNER":
+            return {"items": "not-a-list"}
+        return {"ok": True}
+
+    rt = _build_runtime(agents=[_make_agent("PLANNER"), _make_agent("WORKER")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-L-BAD")
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "INVALID_LOOP_INPUT"
+    assert result.node_report is not None
+    assert result.node_report.reason == "invalid_workflow_step"
 
 
 @pytest.mark.asyncio
@@ -334,6 +364,39 @@ async def test_parallel_step_all_success_prefers_failed_over_pending() -> None:
     assert result.status == CapabilityStatus.FAILED
     assert "branches not success" in (result.error or "")
     assert result.metadata["branch_statuses"] == ["pending", "failed"]
+    assert result.node_report is not None
+    assert result.node_report.completion_reason == "parallel_all_success_not_met"
+
+
+@pytest.mark.asyncio
+async def test_parallel_step_all_success_pending_terminal_still_has_node_report() -> None:
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        _ = (spec, _input)
+        return CapabilityResult(status=CapabilityStatus.PENDING, output={"pending": True})
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-P-PENDING", kind=CapabilityKind.WORKFLOW, name="parallel-pending"),
+        steps=[
+            ParallelStep(
+                id="p1",
+                branches=[
+                    Step(id="b1", capability=CapabilityRef(id="A")),
+                    Step(id="b2", capability=CapabilityRef(id="B")),
+                ],
+                join_strategy="all_success",
+            ),
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-P-PENDING")
+    assert result.status == CapabilityStatus.PENDING
+    assert result.node_report is not None
+    assert result.node_report.status == "incomplete"
+    assert result.node_report.reason == "parallel_branches_incomplete"
+    assert result.node_report.completion_reason == "parallel_all_success_not_met"
 
 
 @pytest.mark.asyncio
@@ -652,6 +715,9 @@ async def test_workflow_run_stream_cancellation_stops_at_step_boundary() -> None
     assert called_b is False
     assert terminal.status == CapabilityStatus.CANCELLED
     assert terminal.error == "execution cancelled"
+    assert terminal.node_report is not None
+    assert terminal.node_report.reason == "cancelled"
+    assert terminal.node_report.completion_reason == "run_cancelled"
 
     started_steps = [e.get("step_id") for e in events if e.get("type") == "workflow.step.started"]
     assert "s2" not in started_steps
@@ -746,6 +812,8 @@ async def test_loop_step_respects_max_depth():
 
     result = await rt.run("wf-loop", input={"items": ["a", "b"]})
     assert result.status == CapabilityStatus.FAILED
+    assert result.node_report is not None
+    assert result.node_report.reason == "recursion_limit"
 
 
 @pytest.mark.asyncio
@@ -777,6 +845,35 @@ async def test_parallel_step_increments_depth():
 
     result = await rt.run("wf-parallel", input={})
     assert result.status == CapabilityStatus.FAILED
+    assert result.node_report is not None
+    assert result.node_report.reason == "recursion_limit"
+    assert result.error_code == "RECURSION_LIMIT"
+    assert result.node_report is not None
+    assert result.node_report.reason == "recursion_limit"
+
+
+@pytest.mark.asyncio
+async def test_conditional_step_without_matching_branch_returns_fail_closed_report() -> None:
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-COND-NO-BRANCH", kind=CapabilityKind.WORKFLOW, name="cond-no-branch"),
+        steps=[
+            ConditionalStep(
+                id="c1",
+                condition_source="input.flag",
+                branches={"on": Step(id="on", capability=CapabilityRef(id="A"))},
+                default=None,
+            )
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A")], handler=lambda _spec, _input: {"ok": True})
+    rt.register(wf)
+
+    result = await rt.run("WF-COND-NO-BRANCH", input={"flag": "off"})
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "CONDITIONAL_BRANCH_NOT_FOUND"
+    assert result.node_report is not None
+    assert result.node_report.reason == "invalid_workflow_step"
 
 
 @pytest.mark.asyncio
