@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Runtime service façade / session continuity bridge."""
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
@@ -30,6 +31,7 @@ class RuntimeSession:
     session_id: str
     host_turn_id: str | None = None
     history: list[dict[str, str]] = field(default_factory=list)
+    turn_deltas: list[TurnDelta] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -69,6 +71,14 @@ class RuntimeServiceHandle:
     capability_id: str = ""
 
 
+@dataclass
+class _HandleState:
+    request: RuntimeServiceRequest
+    context: ExecutionContext
+    session: Any
+    reaper_task: asyncio.Task[None] | None = None
+
+
 def build_session_context(
     *,
     session: RuntimeSession | None,
@@ -83,6 +93,10 @@ def build_session_context(
     """
 
     history: list[dict[str, Any]] = []
+    if turn_deltas is None and session is not None and getattr(session, "turn_deltas", None):
+        raw_turn_deltas = getattr(session, "turn_deltas", None)
+        if isinstance(raw_turn_deltas, list):
+            turn_deltas = raw_turn_deltas
     if turn_deltas:
         history = HistoryAssembler().build_initial_history(deltas=turn_deltas)
     elif session is not None:
@@ -120,7 +134,7 @@ class RuntimeServiceFacade:
 
     def __init__(self, runtime: Runtime) -> None:
         self._runtime = runtime
-        self._handles: dict[str, tuple[RuntimeServiceRequest, ExecutionContext]] = {}
+        self._handles: dict[str, _HandleState] = {}
 
     async def start(self, request: RuntimeServiceRequest) -> RuntimeServiceHandle:
         """
@@ -132,12 +146,22 @@ class RuntimeServiceFacade:
 
         run_id = uuid.uuid4().hex
         context = self._build_context(run_id=run_id, request=request)
+        level = self._resolve_stream_level(request.stream_level)
+        session = self._runtime.start_ui_events_session(
+            request.capability_id,
+            input=request.input,
+            context=context,
+            level=level,
+        )
+        await session.ensure_started()
         handle = RuntimeServiceHandle(
             run_id=run_id,
             session_id=request.session.session_id if request.session is not None else None,
             capability_id=request.capability_id,
         )
-        self._handles[handle.run_id] = (request, context)
+        state = _HandleState(request=request, context=context, session=session)
+        self._handles[handle.run_id] = state
+        state.reaper_task = asyncio.create_task(self._reap_handle_when_done(run_id=handle.run_id, session=session))
         return handle
 
     async def run(self, request: RuntimeServiceRequest) -> CapabilityResult:
@@ -159,22 +183,16 @@ class RuntimeServiceFacade:
         - handle：`start()` 返回的 service handle
         """
 
-        stored = self._handles.get(handle.run_id)
-        if stored is None:
+        state = self._handles.get(handle.run_id)
+        if state is None:
             raise KeyError(f"Unknown runtime service handle: {handle.run_id!r}")
 
-        request, context = stored
-        level = self._resolve_stream_level(request.stream_level)
+        request = state.request
         use_sse = str(request.transport or "jsonl").strip().lower() == "sse"
-
-        session = self._runtime.start_ui_events_session(
-            request.capability_id,
-            input=request.input,
-            context=context,
-            level=level,
-        )
+        session = state.session
         async for ev in session.subscribe(after_id=None):
             yield encode_json_line(ev, prefix_data=use_sse)
+        self._handles.pop(handle.run_id, None)
 
     def _build_context(self, *, run_id: str, request: RuntimeServiceRequest) -> ExecutionContext:
         """
@@ -186,7 +204,10 @@ class RuntimeServiceFacade:
         """
 
         context = ExecutionContext(run_id=run_id, max_depth=self._runtime.config.max_depth)
-        overlay = build_session_context(session=request.session, turn_deltas=None)
+        overlay = build_session_context(
+            session=request.session,
+            turn_deltas=list(request.session.turn_deltas) if request.session is not None and request.session.turn_deltas else None,
+        )
         if overlay:
             context = context.with_bag_overlay(**overlay)
         return context
@@ -203,3 +224,10 @@ class RuntimeServiceFacade:
         if normalized == "lite":
             return StreamLevel.LITE
         return StreamLevel.UI
+
+    async def _reap_handle_when_done(self, *, run_id: str, session: Any) -> None:
+        wait_done = getattr(session, "wait_done", None)
+        if not callable(wait_done):
+            return
+        await wait_done()
+        self._handles.pop(run_id, None)

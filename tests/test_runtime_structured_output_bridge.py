@@ -146,6 +146,7 @@ async def test_run_structured_returns_schema_missing_error_when_agent_has_no_out
 
     assert out.status == CapabilityStatus.FAILED
     assert out.error_code == "STRUCTURED_OUTPUT_SCHEMA_MISSING"
+    assert out.node_report is not None
 
 
 @pytest.mark.asyncio
@@ -162,6 +163,7 @@ async def test_run_structured_returns_unsupported_kind_for_workflow(tmp_path: Pa
 
     assert out.status == CapabilityStatus.FAILED
     assert out.error_code == "STRUCTURED_OUTPUT_UNSUPPORTED_KIND"
+    assert out.node_report is not None
 
 
 @pytest.mark.asyncio

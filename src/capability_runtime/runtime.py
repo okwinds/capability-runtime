@@ -281,6 +281,63 @@ class Runtime(RuntimeUIEventsMixin):
             host_turn_id=host_turn_id,
         )
 
+    def _build_missing_terminal_result(
+        self,
+        *,
+        run_id: str,
+        capability_id: str,
+        source: str,
+        error: str,
+        error_code: str = "ENGINE_ERROR",
+    ) -> CapabilityResult:
+        """
+        为“内部未产出 terminal/result”这类不变量破坏合成 fail-closed 终态。
+        """
+
+        report = self.build_fail_closed_report(
+            run_id=run_id,
+            status="failed",
+            reason="engine_error",
+            completion_reason="missing_terminal_result",
+            meta={"source": source, "capability_id": capability_id},
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error=error,
+            error_code=error_code,
+            report=report,
+            node_report=report,
+        )
+
+    def _build_fail_closed_result(
+        self,
+        *,
+        run_id: str,
+        capability_id: str,
+        source: str,
+        error: str,
+        error_code: str,
+        reason: str,
+        completion_reason: str,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> CapabilityResult:
+        """为 public failure / contract failure 构造带 node_report 的 FAILED terminal。"""
+
+        report = self.build_fail_closed_report(
+            run_id=run_id,
+            status="failed",
+            reason=reason,
+            completion_reason=completion_reason,
+            meta={"source": source, "capability_id": capability_id, **(meta or {})},
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error=error,
+            error_code=error_code,
+            report=report,
+            node_report=report,
+        )
+
     async def run(
         self,
         capability_id: str,
@@ -302,8 +359,10 @@ class Runtime(RuntimeUIEventsMixin):
             if isinstance(item, CapabilityResult):
                 result = item
         if result is None:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_missing_terminal_result(
+                run_id=context.run_id if context is not None else uuid.uuid4().hex,
+                capability_id=capability_id,
+                source="runtime.run",
                 error="Runtime.run_stream produced no terminal CapabilityResult",
             )
         return result
@@ -327,16 +386,26 @@ class Runtime(RuntimeUIEventsMixin):
         if spec is None:
             return await self.run(capability_id, input=input, context=context)
         if not isinstance(spec, AgentSpec):
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            run_id = context.run_id if context is not None else uuid.uuid4().hex
+            return self._build_fail_closed_result(
+                run_id=run_id,
+                capability_id=capability_id,
+                source="runtime.run_structured",
                 error=f"Structured output is only supported for Agent capability: {capability_id!r}",
                 error_code="STRUCTURED_OUTPUT_UNSUPPORTED_KIND",
+                reason="structured_output_error",
+                completion_reason="structured_output_unsupported_kind",
             )
         if spec.output_schema is None or not spec.output_schema.fields:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            run_id = context.run_id if context is not None else uuid.uuid4().hex
+            return self._build_fail_closed_result(
+                run_id=run_id,
+                capability_id=capability_id,
+                source="runtime.run_structured",
                 error=f"Structured output schema is missing for capability: {capability_id!r}",
                 error_code="STRUCTURED_OUTPUT_SCHEMA_MISSING",
+                reason="structured_output_error",
+                completion_reason="structured_output_schema_missing",
             )
 
         result = await self.run(capability_id, input=input, context=context)
@@ -448,11 +517,14 @@ class Runtime(RuntimeUIEventsMixin):
             previous_snapshot = dict(snapshot)
 
         if terminal is None:
-            terminal = CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            fail_closed = self._build_missing_terminal_result(
+                run_id=ctx.run_id,
+                capability_id=capability_id,
+                source="runtime.run_structured_stream",
                 error="Runtime.run_stream produced no terminal CapabilityResult",
                 error_code="STRUCTURED_OUTPUT_MISSING_TERMINAL",
             )
+            terminal = fail_closed
 
         structured_terminal = terminal
         if terminal.status == CapabilityStatus.SUCCESS:
@@ -513,10 +585,15 @@ class Runtime(RuntimeUIEventsMixin):
 
         spec = self._registry.get(capability_id)
         if spec is None:
-            yield CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            run_id = context.run_id if context is not None else uuid.uuid4().hex
+            yield self._build_fail_closed_result(
+                run_id=run_id,
+                capability_id=capability_id,
+                source="runtime.run_stream",
                 error=f"Capability not found: {capability_id!r}",
                 error_code="CAPABILITY_NOT_FOUND",
+                reason="capability_not_found",
+                completion_reason="capability_not_found",
             )
             return
 
@@ -615,10 +692,15 @@ class Runtime(RuntimeUIEventsMixin):
         try:
             child_ctx = context.child(base.id)
         except RecursionLimitError as exc:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_fail_closed_result(
+                run_id=context.run_id,
+                capability_id=base.id,
+                source="runtime.execute",
                 error=str(exc),
-                metadata={"error_type": "recursion_limit"},
+                error_code="RECURSION_LIMIT",
+                reason="recursion_limit",
+                completion_reason="recursion_limit",
+                meta={"error_type": "recursion_limit"},
             )
 
         if base.kind == CapabilityKind.AGENT:
@@ -627,12 +709,23 @@ class Runtime(RuntimeUIEventsMixin):
             async for item in self._execute_agent_stream(spec=spec, input=input, context=child_ctx):
                 if isinstance(item, CapabilityResult):
                     last = item
-            return last or CapabilityResult(status=CapabilityStatus.FAILED, error="Agent execution produced no result")
+            return last or self._build_missing_terminal_result(
+                run_id=child_ctx.run_id,
+                capability_id=base.id,
+                source="runtime.execute_agent",
+                error="Agent execution produced no result",
+            )
 
         if not isinstance(spec, WorkflowSpec):
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_fail_closed_result(
+                run_id=child_ctx.run_id,
+                capability_id=base.id,
+                source="runtime.execute",
                 error=f"Invalid workflow spec type: {type(spec).__name__}",
+                error_code="INVALID_WORKFLOW_SPEC",
+                reason="invalid_spec",
+                completion_reason="invalid_workflow_spec",
+                meta={"actual_type": type(spec).__name__},
             )
         return await self._workflow_engine.execute(spec=spec, input=input, context=child_ctx, services=self)
 
@@ -660,17 +753,28 @@ class Runtime(RuntimeUIEventsMixin):
         try:
             child_ctx = context.child(base.id)
         except RecursionLimitError as exc:
-            yield CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            yield self._build_fail_closed_result(
+                run_id=context.run_id,
+                capability_id=base.id,
+                source="runtime.execute_workflow_stream",
                 error=str(exc),
-                metadata={"error_type": "recursion_limit"},
+                error_code="RECURSION_LIMIT",
+                reason="recursion_limit",
+                completion_reason="recursion_limit",
+                meta={"error_type": "recursion_limit"},
             )
             return
 
         if not isinstance(spec, WorkflowSpec):
-            yield CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            yield self._build_fail_closed_result(
+                run_id=child_ctx.run_id,
+                capability_id=base.id,
+                source="runtime.execute_workflow_stream",
                 error=f"Invalid workflow spec type: {type(spec).__name__}",
+                error_code="INVALID_WORKFLOW_SPEC",
+                reason="invalid_spec",
+                completion_reason="invalid_workflow_spec",
+                meta={"actual_type": type(spec).__name__},
             )
             return
 
@@ -691,9 +795,15 @@ class Runtime(RuntimeUIEventsMixin):
         """
 
         if not isinstance(spec, AgentSpec):
-            yield CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            yield self._build_fail_closed_result(
+                run_id=context.run_id,
+                capability_id=_get_base(spec).id,
+                source="runtime.execute_agent_stream",
                 error=f"Invalid agent spec type: {type(spec).__name__}",
+                error_code="INVALID_AGENT_SPEC",
+                reason="invalid_spec",
+                completion_reason="invalid_agent_spec",
+                meta={"actual_type": type(spec).__name__},
             )
             return
 

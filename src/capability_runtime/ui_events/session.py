@@ -129,7 +129,7 @@ class RuntimeUIEventsSession:
             },
         )
 
-    async def _ensure_started(self) -> None:
+    async def ensure_started(self) -> None:
         if self._started:
             return
         self._started = True
@@ -226,8 +226,11 @@ class RuntimeUIEventsSession:
 
         asyncio.create_task(_loop())
 
+    async def wait_done(self) -> None:
+        await self._done.wait()
+
     async def subscribe(self, *, after_id: Optional[str]) -> AsyncIterator[RuntimeEvent]:
-        await self._ensure_started()
+        await self.ensure_started()
         q: asyncio.Queue = asyncio.Queue(maxsize=self._subscriber_queue_maxsize)
         self._subs.add(q)
         try:
@@ -261,3 +264,8 @@ class RuntimeUIEventsSession:
                     return
         finally:
             self._subs.discard(q)
+
+    async def _ensure_started(self) -> None:
+        """兼容旧调用方；新代码应使用公开的 `ensure_started()`。"""
+
+        await self.ensure_started()

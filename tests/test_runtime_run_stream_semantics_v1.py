@@ -20,6 +20,7 @@ from capability_runtime import (
     RuntimeConfig,
     WorkflowSpec,
 )
+from capability_runtime.protocol.context import ExecutionContext
 from capability_runtime.protocol.workflow import CapabilityRef, Step
 
 
@@ -35,6 +36,8 @@ async def test_run_stream_unknown_capability_emits_single_terminal_failed(tmp_pa
     assert isinstance(items[0], CapabilityResult)
     assert items[0].status == CapabilityStatus.FAILED
     assert "Capability not found" in str(items[0].error or "")
+    assert items[0].node_report is not None
+    assert items[0].node_report.reason == "capability_not_found"
 
 
 @pytest.mark.asyncio
@@ -120,3 +123,25 @@ async def test_run_stream_workflow_emits_workflow_events_and_terminal_last(tmp_p
 
     step_started = [e for e in events if e.get("type") == "workflow.step.started"]
     assert step_started and all(e.get("step_id") for e in step_started)
+
+
+@pytest.mark.asyncio
+async def test_run_when_run_stream_emits_no_terminal_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rt = Runtime(RuntimeConfig(mode="mock", workspace_root=tmp_path))
+
+    async def _no_terminal(capability_id: str, *, input=None, context=None):  # type: ignore[no-untyped-def]
+        _ = (capability_id, input, context)
+        if False:
+            yield None
+
+    monkeypatch.setattr(rt, "run_stream", _no_terminal)
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r-no-terminal"))
+    assert out.status == CapabilityStatus.FAILED
+    assert out.error_code == "ENGINE_ERROR"
+    assert out.node_report is not None
+    assert out.node_report.reason == "engine_error"
+    assert out.node_report.completion_reason == "missing_terminal_result"

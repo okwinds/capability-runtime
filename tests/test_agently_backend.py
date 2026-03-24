@@ -41,6 +41,27 @@ class _FakeRequesterFactory:
         return requester
 
 
+class _RaiseOnRequestRequester(_FakeRequester):
+    def __init__(self, error):
+        super().__init__([])
+        self._error = error
+
+    async def request_model(self, request_data):
+        self.last_request_data = request_data
+        raise self._error
+
+
+class _MixedRequesterFactory:
+    def __init__(self, requesters):
+        self._requesters = list(requesters)
+        self.instances = []
+
+    def __call__(self):
+        requester = self._requesters[len(self.instances)]
+        self.instances.append(requester)
+        return requester
+
+
 def _backend_from_items(items):
     def factory():
         return _FakeRequester(items)
@@ -126,6 +147,39 @@ async def test_agently_backend_retries_without_stream_options_when_provider_reje
                 ("message", '{"choices":[{"delta":{},"finish_reason":"stop"}]}'),
                 ("message", "[DONE]"),
             ],
+        ]
+    )
+    backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=factory))
+
+    out = [
+        ev
+        async for ev in backend.stream_chat(
+            ChatRequest(
+                model="m",
+                messages=[{"role": "user", "content": "x"}],
+                tools=[],
+            )
+        )
+    ]
+
+    assert [e.type for e in out] == ["completed"]
+    assert len(factory.instances) == 2
+    assert factory.instances[0].last_request_data.request_options["stream_options"] == {"include_usage": True}
+    assert "stream_options" not in factory.instances[1].last_request_data.request_options
+
+
+@pytest.mark.asyncio
+async def test_agently_backend_retries_without_stream_options_when_requester_raises() -> None:
+    error = RuntimeError("400 Bad Request: Unknown parameter: 'stream_options.include_usage'")
+    factory = _MixedRequesterFactory(
+        [
+            _RaiseOnRequestRequester(error),
+            _FakeRequester(
+                [
+                    ("message", '{"choices":[{"delta":{},"finish_reason":"stop"}]}'),
+                    ("message", "[DONE]"),
+                ]
+            ),
         ]
     )
     backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=factory))

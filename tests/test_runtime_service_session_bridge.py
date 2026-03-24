@@ -158,3 +158,87 @@ async def test_runtime_service_facade_supports_sse_transport() -> None:
 
     assert chunks, "expected SSE stream output"
     assert chunks[0].startswith("data: ")
+
+
+@pytest.mark.asyncio
+async def test_runtime_service_facade_reuses_single_run_per_handle_and_releases_completed_handle() -> None:
+    """同一 handle 不得重复执行；完成后 handle 应回收。"""
+
+    calls = {"count": 0}
+
+    def mock_handler(spec, input, context=None) -> Any:
+        _ = (spec, input, context)
+        calls["count"] += 1
+        return {"ok": True, "call_index": calls["count"]}
+
+    rt = _build_runtime(mock_handler=mock_handler)
+    rt.register(AgentSpec(base=CapabilitySpec(id="agent.once", kind=CapabilityKind.AGENT, name="Once Agent")))
+    facade = RuntimeServiceFacade(rt)
+
+    handle = await facade.start(
+        RuntimeServiceRequest(
+            capability_id="agent.once",
+            input={},
+            session=RuntimeSession(session_id="session-once"),
+        )
+    )
+
+    chunks = [chunk async for chunk in facade.stream(handle)]
+    assert chunks
+    assert calls["count"] == 1
+    assert handle.run_id not in facade._handles
+
+    with pytest.raises(KeyError):
+        _ = [chunk async for chunk in facade.stream(handle)]
+
+    assert calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_service_facade_run_prefers_session_turn_deltas_for_continuity() -> None:
+    """façade 层必须真正把 session.turn_deltas 接到 initial_history。"""
+
+    def mock_handler(spec, input, context=None) -> Any:
+        _ = (spec, input)
+        host_meta = dict(getattr(context, "bag", {}) or {}).get("__host_meta__", {})
+        return {
+            "session_id": host_meta.get("session_id"),
+            "host_turn_id": host_meta.get("host_turn_id"),
+            "initial_history": host_meta.get("initial_history"),
+        }
+
+    rt = _build_runtime(mock_handler=mock_handler)
+    rt.register(AgentSpec(base=CapabilitySpec(id="agent.delta", kind=CapabilityKind.AGENT, name="Delta Agent")))
+    facade = RuntimeServiceFacade(rt)
+
+    turn_deltas = [
+        TurnDelta(
+            session_id="session-delta",
+            host_turn_id="turn-prev",
+            run_id="run-prev",
+            user_input="delta-user",
+            final_output="delta-assistant",
+            node_report=_report("run-prev"),
+            events_path="/tmp/run-prev.jsonl",
+        )
+    ]
+    request = RuntimeServiceRequest(
+        capability_id="agent.delta",
+        input={},
+        session=RuntimeSession(
+            session_id="session-delta",
+            host_turn_id="turn-now",
+            history=[{"role": "user", "content": "history should lose"}],
+            turn_deltas=turn_deltas,
+        ),
+    )
+
+    result = await facade.run(request)
+    assert result.output == {
+        "session_id": "session-delta",
+        "host_turn_id": "turn-now",
+        "initial_history": [
+            {"role": "user", "content": "delta-user"},
+            {"role": "assistant", "content": "delta-assistant"},
+        ],
+    }

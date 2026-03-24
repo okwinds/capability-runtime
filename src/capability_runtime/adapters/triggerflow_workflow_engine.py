@@ -561,12 +561,17 @@ class TriggerFlowWorkflowEngine:
         # 深度递增并检查是否超限
         new_depth = context.depth + 1
         if new_depth > context.max_depth:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_fail_closed_result(
+                services=services,
+                context=context,
+                workflow_id=step.id,
                 error=(
                     f"ParallelStep '{step.id}': 深度 {new_depth} 超过最大值 {context.max_depth}"
                 ),
-                metadata={"error_type": "recursion_limit"},
+                error_code="RECURSION_LIMIT",
+                reason="recursion_limit",
+                completion_reason="recursion_limit",
+                meta={"error_type": "recursion_limit", "step_id": step.id},
             )
 
         branch_contexts = [
@@ -595,9 +600,15 @@ class TriggerFlowWorkflowEngine:
             if isinstance(result, BaseException):
                 msg = str(result).strip()
                 branch_results.append(
-                    CapabilityResult(
-                        status=CapabilityStatus.FAILED,
+                    self._build_fail_closed_result(
+                        services=services,
+                        context=context,
+                        workflow_id=step.id,
                         error=msg or type(result).__name__,
+                        error_code="BRANCH_EXECUTION_ERROR",
+                        reason="engine_error",
+                        completion_reason="parallel_branch_exception",
+                        meta={"step_id": step.id, "exception_type": type(result).__name__},
                     )
                 )
             else:
@@ -632,6 +643,21 @@ class TriggerFlowWorkflowEngine:
                         ]
                     },
                 )
+                if overall == CapabilityStatus.FAILED:
+                    report = services.build_fail_closed_report(
+                        run_id=context.run_id,
+                        status="failed",
+                        reason="workflow_step_failed",
+                        completion_reason="parallel_all_success_not_met",
+                        meta={
+                            "step_id": step.id,
+                            "branch_statuses": [
+                                getattr(result.status, "value", str(result.status)) for result in branch_results
+                            ],
+                        },
+                    )
+                    aggregated.report = report
+                    aggregated.node_report = report
                 context.step_results[step.id] = _to_step_result_dict(aggregated)
                 return aggregated
         elif step.join_strategy == "any_success":
@@ -659,6 +685,21 @@ class TriggerFlowWorkflowEngine:
                         ]
                     },
                 )
+                if overall == CapabilityStatus.FAILED:
+                    report = services.build_fail_closed_report(
+                        run_id=context.run_id,
+                        status="failed",
+                        reason="workflow_step_failed",
+                        completion_reason="parallel_any_success_not_met",
+                        meta={
+                            "step_id": step.id,
+                            "branch_statuses": [
+                                getattr(result.status, "value", str(result.status)) for result in branch_results
+                            ],
+                        },
+                    )
+                    aggregated.report = report
+                    aggregated.node_report = report
                 context.step_results[step.id] = _to_step_result_dict(aggregated)
                 return aggregated
 
@@ -683,12 +724,18 @@ class TriggerFlowWorkflowEngine:
         condition_key = str(condition_value) if condition_value is not None else ""
         branch = step.branches.get(condition_key, step.default)
         if branch is None:
-            return CapabilityResult(
-                status=CapabilityStatus.FAILED,
+            return self._build_fail_closed_result(
+                services=services,
+                context=context,
+                workflow_id=step.id,
                 error=(
                     f"ConditionalStep '{step.id}': no branch for "
                     f"condition '{condition_key}' and no default"
                 ),
+                error_code="CONDITIONAL_BRANCH_NOT_FOUND",
+                reason="invalid_workflow_step",
+                completion_reason="conditional_branch_not_found",
+                meta={"step_id": step.id, "condition_key": condition_key},
             )
 
         branch_context = context.with_bag_overlay(

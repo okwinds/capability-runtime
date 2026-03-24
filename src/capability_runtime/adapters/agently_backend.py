@@ -303,58 +303,69 @@ class AgentlyChatBackend(ChatBackend):
             # - coroutine -> async iterator（需要 await 一次再 async for）
             stream_or_coro = requester.request_model(request_data)
             stream: AsyncIterator[tuple[str, Any]]
-            if hasattr(stream_or_coro, "__aiter__"):
-                stream = cast(AsyncIterator[tuple[str, Any]], stream_or_coro)
-            else:
-                stream = await stream_or_coro
-
             retry_without_stream_options = False
-            async for event, data in stream:
-                if event == "error":
-                    error = data if isinstance(data, BaseException) else RuntimeError(f"Agently requester error: {data!r}")
-                    if include_usage_enabled and attempt == 0 and _should_retry_without_stream_options(error):
-                        retry_without_stream_options = True
-                        log_suppressed_exception(
-                            context="agently_backend_include_usage_retry",
-                            exc=error,
-                            extra={"retry_without_stream_options": True},
-                        )
-                        break
-                    raise error
+            try:
+                if hasattr(stream_or_coro, "__aiter__"):
+                    stream = cast(AsyncIterator[tuple[str, Any]], stream_or_coro)
+                else:
+                    stream = await stream_or_coro
 
-                # OpenAICompatible requester 通常 yield ("message", <sse.data>)
-                if not isinstance(data, str):
-                    continue
+                async for event, data in stream:
+                    if event == "error":
+                        error = data if isinstance(data, BaseException) else RuntimeError(f"Agently requester error: {data!r}")
+                        if include_usage_enabled and attempt == 0 and _should_retry_without_stream_options(error):
+                            retry_without_stream_options = True
+                            log_suppressed_exception(
+                                context="agently_backend_include_usage_retry",
+                                exc=error,
+                                extra={"retry_without_stream_options": True},
+                            )
+                            break
+                        raise error
 
-                usage_payload = _extract_usage_payload_from_sse_data(data)
-                if usage_payload is not None and usage_sink is not None:
-                    try:
-                        usage_sink(dict(usage_payload))
-                    except Exception as sink_exc:
-                        log_suppressed_exception(
-                            context="usage_sink_callback",
-                            exc=sink_exc,
-                            extra={"source": "agently_backend"},
-                        )
-
-                for ev in parser.feed_data(data):
-                    # 关键不变量：
-                    # 某些 OpenAICompatible server 的 SSE 序列可能是：
-                    # - delta.tool_calls ...（累计中）
-                    # - finish_reason="stop" → parser 先 emit completed
-                    # - [DONE] → parser 才 flush tool_calls
-                    #
-                    # 若我们把 completed 立即 yield，上游消费端可能在 completed 后停止消费，
-                    # 从而错过后续 tool_calls，最终表现为 NodeReport.tool_calls 为空。
-                    #
-                    # 因此：completed 事件必须延迟到“确认不会再有 tool_calls”后再产出。
-                    if ev.type == "completed":
-                        deferred_completed = ev
+                    # OpenAICompatible requester 通常 yield ("message", <sse.data>)
+                    if not isinstance(data, str):
                         continue
-                    yield ev
 
-                if data.strip() in ("[DONE]", "DONE"):
-                    break
+                    usage_payload = _extract_usage_payload_from_sse_data(data)
+                    if usage_payload is not None and usage_sink is not None:
+                        try:
+                            usage_sink(dict(usage_payload))
+                        except Exception as sink_exc:
+                            log_suppressed_exception(
+                                context="usage_sink_callback",
+                                exc=sink_exc,
+                                extra={"source": "agently_backend"},
+                            )
+
+                    for ev in parser.feed_data(data):
+                        # 关键不变量：
+                        # 某些 OpenAICompatible server 的 SSE 序列可能是：
+                        # - delta.tool_calls ...（累计中）
+                        # - finish_reason="stop" → parser 先 emit completed
+                        # - [DONE] → parser 才 flush tool_calls
+                        #
+                        # 若我们把 completed 立即 yield，上游消费端可能在 completed 后停止消费，
+                        # 从而错过后续 tool_calls，最终表现为 NodeReport.tool_calls 为空。
+                        #
+                        # 因此：completed 事件必须延迟到“确认不会再有 tool_calls”后再产出。
+                        if ev.type == "completed":
+                            deferred_completed = ev
+                            continue
+                        yield ev
+
+                    if data.strip() in ("[DONE]", "DONE"):
+                        break
+            except Exception as error:
+                if include_usage_enabled and attempt == 0 and _should_retry_without_stream_options(error):
+                    retry_without_stream_options = True
+                    log_suppressed_exception(
+                        context="agently_backend_include_usage_retry",
+                        exc=error,
+                        extra={"retry_without_stream_options": True, "raised_directly": True},
+                    )
+                else:
+                    raise
 
             if retry_without_stream_options:
                 include_usage_enabled = False
