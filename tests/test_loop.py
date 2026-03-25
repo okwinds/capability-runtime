@@ -109,6 +109,47 @@ async def test_abort_on_pending(guards):
 
 
 @pytest.mark.asyncio
+async def test_abort_on_cancelled_preserves_error_code_and_node_report(guards):
+    async def execute(item, idx):
+        if idx == 1:
+            report = NodeReport(
+                status="incomplete",
+                reason="cancelled",
+                completion_reason="run_cancelled",
+                engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime", "version": "0"},
+                bridge={"name": "capability-runtime", "version": "0"},
+                run_id="loop-cancelled",
+                events_path="/tmp/loop-cancelled.jsonl",
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={},
+            )
+            return CapabilityResult(
+                status=CapabilityStatus.CANCELLED,
+                error="execution cancelled",
+                error_code="RUN_CANCELLED",
+                report=report,
+                node_report=report,
+            )
+        return CapabilityResult(status=CapabilityStatus.SUCCESS, output=item)
+
+    result = await guards.run_loop(
+        items=["a", "b", "c"],
+        max_iterations=10,
+        execute_fn=execute,
+        fail_strategy="abort",
+    )
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.output == ["a"]
+    assert result.error == "execution cancelled"
+    assert result.error_code == "RUN_CANCELLED"
+    assert result.node_report is not None
+    assert result.node_report.reason == "cancelled"
+    assert result.metadata["completed_iterations"] == 1
+
+
+@pytest.mark.asyncio
 async def test_skip_on_failure(guards):
     async def execute(item, idx):
         if idx == 1:

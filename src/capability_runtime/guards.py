@@ -65,7 +65,7 @@ class ExecutionGuards:
         执行 LoopStep 语义（确定性）。
 
         参数：
-        - items：要遍历的集合
+        - items：要遍历的集合（必须为 list）
         - max_iterations：最多迭代次数（在 items 长度之上取 min）
         - execute_fn：执行函数，签名为 `(item, index) -> CapabilityResult`
         - fail_strategy："abort" | "skip" | "collect"
@@ -73,6 +73,15 @@ class ExecutionGuards:
         返回：
         - CapabilityResult，其中 output 为结果列表；metadata 提供 completed/total/skipped 等摘要。
         """
+
+        # 输入验证：items 必须为 list
+        if not isinstance(items, list):
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"run_loop: items must be list, got {type(items).__name__}",
+                error_code="INVALID_LOOP_INPUT",
+                metadata={"actual_type": type(items).__name__},
+            )
 
         results: List[Any] = []
         errors: List[Dict[str, Any]] = []
@@ -96,13 +105,11 @@ class ExecutionGuards:
                 # - FAILED：按 fail_strategy 处理（abort/skip/collect）
                 # - PENDING/RUNNING/CANCELLED：不应被当作成功继续推进（否则会吞掉 needs_approval/incomplete 等语义）
                 if result.status in (CapabilityStatus.PENDING, CapabilityStatus.RUNNING, CapabilityStatus.CANCELLED):
-                    return CapabilityResult(
-                        status=result.status,
+                    return replace(
+                        result,
                         output=results,
-                        error=result.error,
-                        report=result.report,
-                        node_report=result.node_report,
                         metadata={
+                            **dict(getattr(result, "metadata", {}) or {}),
                             "completed_iterations": idx,
                             "total_planned": effective_max,
                             "aborted_status": getattr(result.status, "value", str(result.status)),
