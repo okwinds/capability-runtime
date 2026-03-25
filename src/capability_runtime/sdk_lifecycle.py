@@ -66,7 +66,7 @@ class SdkLifecycle:
         try:
             mgr = SkillsManager(
                 workspace_root=self._state.workspace_root,
-                skills_config=_normalize_skills_config_for_skills_runtime(self._state.skills_config),
+                skills_config=self._state.skills_config,
             )
             upstream_issues = mgr.preflight()
             overlay_issues = list(getattr(self._state, "skills_config_overlay_issues", []) or [])
@@ -172,7 +172,7 @@ class SdkLifecycle:
         cfg = load_config_dicts(overlays)
         return cfg, overlay_issues
 
-    def _resolve_skills_config(self, cfg: Any) -> Any:
+    def _resolve_skills_config(self, cfg: Any) -> tuple[Any, List[FrameworkIssue]]:
         """
         解析 skills 配置（优先使用 RuntimeConfig.skills_config，否则使用 SDK config）。
 
@@ -180,12 +180,12 @@ class SdkLifecycle:
         - cfg：已加载的 SDK 配置对象
 
         返回：
-        - 归一化后的 skills_config
+        - (归一化后的 skills_config, 归一化阶段产生的 issues)
         """
         if self._config.skills_config is not None:
             return _normalize_skills_config_for_skills_runtime(self._config.skills_config)
         else:
-            return cfg.skills
+            return cfg.skills, []
 
     def _build_backend(self, *, mode: RuntimeMode, cfg: Any) -> Any:
         """
@@ -246,7 +246,8 @@ class SdkLifecycle:
         config_paths = [Path(p).expanduser().resolve() for p in self._config.sdk_config_paths]
 
         cfg, overlay_issues = self._load_sdk_config(config_paths)
-        skills_cfg = self._resolve_skills_config(cfg)
+        skills_cfg, config_issues = self._resolve_skills_config(cfg)
+        overlay_issues.extend(config_issues)
         backend = self._build_backend(mode=mode, cfg=cfg)
         shared_skills_manager = self._build_skills_manager(workspace_root=workspace_root, skills_config=skills_cfg)
 
@@ -749,7 +750,7 @@ def _load_yaml_dict(path: Path) -> Dict[str, Any]:
     return obj
 
 
-def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
+def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> tuple[Any, List[FrameworkIssue]]:
     """
     将 RuntimeConfig.skills_config 归一为上游 skills config 可接受的形态（dict 或 model）。
 
@@ -762,15 +763,17 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
     - skills_config：可能为 dict / pydantic model / 其它对象
 
     返回：
-    - 归一后的 skills_config（尽量保持调用方意图；无法识别时原样返回）
+    - (归一后的 skills_config, 归一化阶段产生的 issues)
     """
 
     if not isinstance(skills_config, dict):
-        return skills_config
+        return skills_config, []
 
     # 兼容：允许传入完整 SDK config（包含 skills 根节点）
+    path_prefix = ""
     if isinstance(skills_config.get("skills"), dict):
         skills_config = dict(skills_config["skills"])
+        path_prefix = "skills."
 
     allowed_keys = {
         "env_var_missing_policy",
@@ -787,14 +790,30 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
     legacy_keys = {"roots", "mode", "max_auto"}
 
     out: Dict[str, Any] = {}
+    issues: List[FrameworkIssue] = []
     for k, v in dict(skills_config).items():
         if k in allowed_keys:
             out[k] = v
         elif k in legacy_keys:
+            issue_code = "SKILL_CONFIG_LEGACY_ROOTS_UNSUPPORTED" if k == "roots" else "SKILL_CONFIG_LEGACY_OPTION_UNSUPPORTED"
+            issues.append(
+                FrameworkIssue(
+                    code=issue_code,
+                    message=f"{path_prefix}{k} is a legacy option and is not supported by skills-runtime-sdk>=1.x",
+                    details={"path": f"{path_prefix}{k}", "key": k},
+                )
+            )
             continue
         else:
-            # 未知字段：不在这里直接抛错（由 preflight gate 控制 fail-closed），
-            # 但必须过滤掉以避免 SDK loader/model_validate 直接异常。
+            # 未知字段：过滤掉避免上游 loader/model_validate 直接异常，
+            # 但必须生成 issue，交给 preflight gate 决定 warn 还是 fail-closed。
+            issues.append(
+                FrameworkIssue(
+                    code="SKILL_CONFIG_UNKNOWN_OPTION",
+                    message="Unknown skills config option is not supported.",
+                    details={"path": f"{path_prefix}{k}", "key": k},
+                )
+            )
             continue
 
     # === v0.1.5 兼容：skills.spaces schema（account/domain ↔ namespace）===
@@ -806,13 +825,21 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> Any:
         normalized, warnings = normalize_spaces_for_upstream(spaces=spaces, target_schema=target_schema)
         if normalized is not None:
             out["spaces"] = normalized
+            for warning in warnings:
+                issues.append(
+                    FrameworkIssue(
+                        code="SKILL_CONFIG_SPACES_SCHEMA_NORMALIZED",
+                        message="skills.spaces schema normalized for upstream compatibility",
+                        details={"path": f"{path_prefix}spaces", "target_schema": target_schema, "warning": warning},
+                    )
+                )
         elif warnings:
             raise FrameworkError(
                 code="SKILL_CONFIG_SPACES_SCHEMA_INCOMPATIBLE",
                 message="skills.spaces schema is incompatible with installed skills-runtime-sdk",
-                details={"target_schema": target_schema, "warnings": warnings},
+                details={"path": f"{path_prefix}spaces", "target_schema": target_schema, "warnings": warnings},
             )
-    return out
+    return out, issues
 
 
 def _sanitize_sdk_overlay_dict_for_loader(overlay: Dict[str, Any]) -> tuple[Dict[str, Any], List[FrameworkIssue]]:

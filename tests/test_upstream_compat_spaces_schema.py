@@ -64,7 +64,7 @@ def test_runtime_normalize_converts_when_target_namespace(monkeypatch):
         "capability_runtime.upstream_compat.detect_skills_space_schema",
         lambda: "namespace",
     )
-    out = _normalize_skills_config_for_skills_runtime(
+    out, issues = _normalize_skills_config_for_skills_runtime(
         {
             "spaces": [{"id": "sp1", "account": "aa", "domain": "bb", "sources": ["s1"], "enabled": True}],
             "sources": [],
@@ -72,4 +72,4 @@ def test_runtime_normalize_converts_when_target_namespace(monkeypatch):
     )
     assert isinstance(out, dict)
     assert out["spaces"][0]["namespace"] == "aa:bb"
-
+    assert any(getattr(issue, "code", "") == "SKILL_CONFIG_SPACES_SCHEMA_NORMALIZED" for issue in issues)

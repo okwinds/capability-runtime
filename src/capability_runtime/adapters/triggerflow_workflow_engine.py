@@ -53,7 +53,8 @@ def _to_step_result_dict(result: CapabilityResult) -> Dict[str, Any]:
         "status": getattr(result.status, "value", str(result.status)),
         "output": result.output,
         "error": result.error,
-        "report": result.report,
+        "report": result.report or result.node_report,
+        "node_report": result.node_report,
     }
 
 
@@ -619,6 +620,24 @@ class TriggerFlowWorkflowEngine:
         branch_results: List[CapabilityResult] = []
         for result in raw_results:
             if isinstance(result, BaseException):
+                if isinstance(result, asyncio.CancelledError):
+                    report = services.build_fail_closed_report(
+                        run_id=context.run_id,
+                        status="incomplete",
+                        reason="cancelled",
+                        completion_reason="parallel_branch_cancelled",
+                        meta={"step_id": step.id, "exception_type": type(result).__name__},
+                    )
+                    branch_results.append(
+                        CapabilityResult(
+                            status=CapabilityStatus.CANCELLED,
+                            error="execution cancelled",
+                            error_code="RUN_CANCELLED",
+                            report=report,
+                            node_report=report,
+                        )
+                    )
+                    continue
                 msg = str(result).strip()
                 branch_results.append(
                     self._build_fail_closed_result(
@@ -641,10 +660,10 @@ class TriggerFlowWorkflowEngine:
                 statuses = {result.status for result in non_success}
                 if CapabilityStatus.FAILED in statuses:
                     overall = CapabilityStatus.FAILED
-                elif CapabilityStatus.PENDING in statuses:
-                    overall = CapabilityStatus.PENDING
                 elif CapabilityStatus.CANCELLED in statuses:
                     overall = CapabilityStatus.CANCELLED
+                elif CapabilityStatus.PENDING in statuses:
+                    overall = CapabilityStatus.PENDING
                 else:
                     overall = CapabilityStatus.RUNNING
 
@@ -661,6 +680,12 @@ class TriggerFlowWorkflowEngine:
                     )
                     if overall == CapabilityStatus.FAILED
                     else None,
+                    error_code=(
+                        "BRANCH_EXECUTION_ERROR"
+                        if overall == CapabilityStatus.FAILED
+                        and any(result.error_code == "BRANCH_EXECUTION_ERROR" for result in branch_results)
+                        else ("RUN_CANCELLED" if overall == CapabilityStatus.CANCELLED else None)
+                    ),
                     metadata={"branch_statuses": branch_statuses},
                 )
                 if overall != CapabilityStatus.SUCCESS:
@@ -689,10 +714,12 @@ class TriggerFlowWorkflowEngine:
         elif step.join_strategy == "any_success":
             if not any(result.status == CapabilityStatus.SUCCESS for result in branch_results):
                 statuses = {result.status for result in branch_results}
-                if CapabilityStatus.PENDING in statuses:
-                    overall = CapabilityStatus.PENDING
+                if CapabilityStatus.FAILED in statuses:
+                    overall = CapabilityStatus.FAILED
                 elif CapabilityStatus.CANCELLED in statuses:
                     overall = CapabilityStatus.CANCELLED
+                elif CapabilityStatus.PENDING in statuses:
+                    overall = CapabilityStatus.PENDING
                 elif CapabilityStatus.RUNNING in statuses:
                     overall = CapabilityStatus.RUNNING
                 else:
@@ -708,6 +735,12 @@ class TriggerFlowWorkflowEngine:
                     error=f"ParallelStep '{step.id}': no branch succeeded"
                     if overall == CapabilityStatus.FAILED
                     else None,
+                    error_code=(
+                        "BRANCH_EXECUTION_ERROR"
+                        if overall == CapabilityStatus.FAILED
+                        and any(result.error_code == "BRANCH_EXECUTION_ERROR" for result in branch_results)
+                        else ("RUN_CANCELLED" if overall == CapabilityStatus.CANCELLED else None)
+                    ),
                     metadata={"branch_statuses": branch_statuses},
                 )
                 if overall != CapabilityStatus.SUCCESS:

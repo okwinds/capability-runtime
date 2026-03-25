@@ -183,6 +183,48 @@ def test_preflight_broken_overlay_yaml_surfaces_issue(tmp_path, monkeypatch: pyt
     )
 
 
+def test_preflight_skills_config_unknown_option_surfaces_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="warn",
+            skills_config={"unknown_top_level_key": 1, "roots": ["/tmp"]},
+        )
+    )
+    issues = rt.preflight()
+
+    assert any(str(getattr(issue, "code", "") or "") == "SKILL_CONFIG_UNKNOWN_OPTION" for issue in issues)
+    assert any(str(getattr(issue, "code", "") or "") == "SKILL_CONFIG_LEGACY_ROOTS_UNSUPPORTED" for issue in issues)
+
+
+@pytest.mark.asyncio
+async def test_run_preflight_error_fails_closed_on_runtimeconfig_skills_config_issues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="error",
+            skills_config={"unknown_top_level_key": 1},
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-skills-config"))
+
+    assert out.status == CapabilityStatus.FAILED
+    assert out.error_code == "PREFLIGHT_FAILED"
+    assert out.node_report is not None
+    issues = (((out.node_report.meta.get("skill_issue") or {}).get("details") or {}).get("issues") or [])
+    assert any(i.get("code") == "SKILL_CONFIG_UNKNOWN_OPTION" for i in issues)
+
+
 def test_runtime_init_fails_closed_when_scan_raises_in_error_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     回归护栏：初始化期 `SkillsManager.scan()` 自身抛异常时，error 模式不得继续启动。

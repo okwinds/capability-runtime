@@ -64,6 +64,18 @@ class TestResolveMapping:
         assert ctx.resolve_mapping("result.obj.report.status") == "needs_approval"
         assert ctx.resolve_mapping("result.dict.report.status") == "failed"
 
+    def test_result_prefix_node_report_status_is_supported(self):
+        from types import SimpleNamespace
+
+        ctx = ExecutionContext(run_id="r1")
+        ctx.step_results["obj"] = {
+            "report": None,
+            "node_report": SimpleNamespace(status="incomplete"),
+        }
+
+        assert ctx.resolve_mapping("result.obj.node_report.status") == "incomplete"
+        assert ctx.resolve_mapping("result.obj.report.status") is None
+
     def test_literal_prefix(self):
         ctx = ExecutionContext(run_id="r1")
         assert ctx.resolve_mapping("literal.hello world") == "hello world"

@@ -442,6 +442,118 @@ async def test_parallel_step_all_success_pending_terminal_still_has_node_report(
 
 
 @pytest.mark.asyncio
+async def test_parallel_step_all_success_prefers_cancelled_over_pending() -> None:
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "A":
+            return CapabilityResult(
+                status=CapabilityStatus.PENDING,
+                report=NodeReport(
+                    status="needs_approval",
+                    reason="approval_pending",
+                    completion_reason="needs_approval",
+                    engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+                    bridge={"name": "capability-runtime"},
+                    run_id="r1",
+                    events_path=None,
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                ),
+            )
+        if spec.base.id == "B":
+            return CapabilityResult(
+                status=CapabilityStatus.CANCELLED,
+                report=NodeReport(
+                    status="incomplete",
+                    reason="cancelled",
+                    completion_reason="run_cancelled",
+                    engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+                    bridge={"name": "capability-runtime"},
+                    run_id="r1",
+                    events_path=None,
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                ),
+                node_report=NodeReport(
+                    status="incomplete",
+                    reason="cancelled",
+                    completion_reason="run_cancelled",
+                    engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+                    bridge={"name": "capability-runtime"},
+                    run_id="r1",
+                    events_path=None,
+                    activated_skills=[],
+                    tool_calls=[],
+                    artifacts=[],
+                    meta={},
+                ),
+            )
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-P-PEND-CANCEL", kind=CapabilityKind.WORKFLOW, name="parallel-pend-cancel"),
+        steps=[
+            ParallelStep(
+                id="p1",
+                branches=[
+                    Step(id="b1", capability=CapabilityRef(id="A")),
+                    Step(id="b2", capability=CapabilityRef(id="B")),
+                ],
+                join_strategy="all_success",
+            )
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-P-PEND-CANCEL")
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.error_code == "RUN_CANCELLED"
+    assert result.metadata["branch_statuses"] == ["pending", "cancelled"]
+    assert result.node_report is not None
+    assert result.node_report.status == "incomplete"
+    assert result.node_report.reason == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_parallel_step_cancelled_error_preserves_cancelled_semantics() -> None:
+    async def handler(spec: AgentSpec, _input: Dict[str, Any]):  # type: ignore[no-untyped-def]
+        if spec.base.id == "A":
+            raise asyncio.CancelledError()
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-P-BRANCH-CANCELLED", kind=CapabilityKind.WORKFLOW, name="parallel-branch-cancelled"),
+        steps=[
+            ParallelStep(
+                id="p1",
+                branches=[
+                    Step(id="b1", capability=CapabilityRef(id="A")),
+                    Step(id="b2", capability=CapabilityRef(id="B")),
+                ],
+                join_strategy="all_success",
+            )
+        ],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A"), _make_agent("B")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-P-BRANCH-CANCELLED")
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.error_code == "RUN_CANCELLED"
+    assert result.metadata["branch_statuses"] == ["cancelled", "success"]
+    assert result.node_report is not None
+    assert result.node_report.status == "incomplete"
+    assert result.node_report.reason == "cancelled"
+    assert result.node_report.completion_reason == "parallel_all_success_not_met"
+
+
+@pytest.mark.asyncio
 async def test_conditional_step():
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-C", kind=CapabilityKind.WORKFLOW, name="cond"),
