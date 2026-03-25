@@ -328,3 +328,95 @@ def test_invoke_capability_tool_timeout_sets_error_kind(tmp_path: Path) -> None:
     assert ic is not None
     assert ic.ok is False
     assert ic.error_kind == "timeout"
+
+
+def test_invoke_capability_tool_timeout_cancels_child_run(tmp_path: Path) -> None:
+    """
+    回归护栏：timeout 后必须尝试取消 child run，不能让 child 在后台继续完成副作用。
+
+    说明：
+    - 使用 async child handler（协作取消），确保“取消是否发生”可被稳定观察。
+    - 当前断言聚焦 runtime-owned child run 是否继续完成，而不是强杀任意同步业务代码。
+    """
+
+    outer_backend = FakeChatBackend(
+        calls=[
+            FakeChatCall(
+                events=[
+                    ChatStreamEvent(
+                        type="tool_calls",
+                        tool_calls=[
+                            LlmToolCall(
+                                call_id="ic_timeout_cancel",
+                                name="invoke_capability",
+                                args={"capability_id": "child.slow.async", "input": {"x": 1}},
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatStreamEvent(type="completed", finish_reason="tool_calls"),
+                ]
+            ),
+            FakeChatCall(events=[ChatStreamEvent(type="text_delta", text="ok"), ChatStreamEvent(type="completed")]),
+        ]
+    )
+
+    cfg = RuntimeConfig(
+        mode="sdk_native",
+        workspace_root=tmp_path,
+        sdk_config_paths=[],
+        sdk_backend=outer_backend,
+        preflight_mode="off",
+        approval_provider=_ApproveAll(),
+    )
+
+    completed: list[str] = []
+
+    async def _slow_async_mock_handler(spec: CapabilitySpec, input_dict: dict) -> str:
+        _ = (spec, input_dict)
+        await asyncio.sleep(0.05)
+        completed.append("child-finished")
+        return "child"
+
+    from capability_runtime.host_toolkit.invoke_capability import InvokeCapabilityAllowlist, make_invoke_capability_tool
+
+    tool = make_invoke_capability_tool(
+        allowlist=InvokeCapabilityAllowlist(allowed_ids=["child.slow.async"]),
+        child_runtime_config=replace(cfg, mode="mock", sdk_backend=None, mock_handler=_slow_async_mock_handler),
+        child_specs=[
+            AgentSpec(
+                base=CapabilitySpec(
+                    id="child.slow.async",
+                    kind=CapabilityKind.AGENT,
+                    name="ChildSlowAsync",
+                    description="child agent (slow async mock handler)",
+                )
+            )
+        ],
+        requires_approval=True,
+        timeout_ms=1,
+    )
+
+    rt = Runtime(replace(cfg, custom_tools=[tool]))
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(
+                id="outer_timeout_cancel",
+                kind=CapabilityKind.AGENT,
+                name="OuterTimeoutCancel",
+                description="call invoke_capability then say ok",
+            )
+        )
+    )
+    assert rt.validate() == []
+
+    result = asyncio.run(rt.run("outer_timeout_cancel", input={}, context=ExecutionContext(run_id="t_invoke_capability_timeout_cancel")))
+    assert result.node_report is not None
+
+    ic = next((t for t in (result.node_report.tool_calls or []) if t.name == "invoke_capability"), None)
+    assert ic is not None
+    assert ic.ok is False
+    assert ic.error_kind == "timeout"
+
+    time.sleep(0.08)
+    assert completed == []

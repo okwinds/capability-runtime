@@ -150,7 +150,12 @@ class _AsyncRunner:
         self.ensure_started()
         assert self._loop is not None
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return fut.result(timeout=timeout_s)
+        try:
+            return fut.result(timeout=timeout_s)
+        except TimeoutError:
+            # timeout 必须尝试取消后台 child run，避免父调用已超时但子调用继续执行。
+            fut.cancel()
+            raise
 
 
 _INVOKE_CAPABILITY_RUNNER = _AsyncRunner()
