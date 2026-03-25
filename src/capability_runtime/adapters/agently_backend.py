@@ -284,8 +284,9 @@ class AgentlyChatBackend(ChatBackend):
 
             if tool_choice_target_tool_name:
                 matched = [spec for spec in tool_specs if spec.name == tool_choice_target_tool_name]
-                if matched:
-                    tool_specs = matched
+                if not matched:
+                    raise ValueError(f"tool_choice target tool not found: {tool_choice_target_tool_name}")
+                tool_specs = matched
 
             tools_wire = [tool_spec_to_openai_tool(spec) for spec in tool_specs]
             if tools_wire:

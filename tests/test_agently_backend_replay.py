@@ -216,6 +216,51 @@ async def test_backend_tool_choice_string_is_passthrough_and_tools_not_filtered(
 
 
 @pytest.mark.asyncio
+async def test_backend_named_tool_choice_missing_target_fails_closed_before_request() -> None:
+    captured = {"requested": False}
+
+    class _CapturingRequester(_FakeRequester):
+        async def request_model(self, request_data):
+            captured["requested"] = True
+            captured["options"] = dict(getattr(request_data, "request_options", {}) or {})
+            async for x in super().request_model(request_data):
+                yield x
+
+    def factory():
+        return _CapturingRequester([("message", "[DONE]")])
+
+    backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=factory))
+
+    tool_spec_write = ToolSpec(
+        name="file_write",
+        description="write file",
+        parameters={"type": "object", "properties": {}, "required": []},
+        requires_approval=False,
+    )
+    tool_spec_exec = ToolSpec(
+        name="shell_exec",
+        description="exec shell",
+        parameters={"type": "object", "properties": {}, "required": []},
+        requires_approval=False,
+    )
+
+    with pytest.raises(ValueError, match="missing_tool"):
+        _ = [
+            ev
+            async for ev in backend.stream_chat(
+                ChatRequest(
+                    model="m",
+                    messages=[{"role": "user", "content": "x"}],
+                    tools=[tool_spec_write, tool_spec_exec],
+                    extra={"tool_choice": {"type": "function", "function": {"name": "missing_tool"}}},
+                )
+            )
+        ]
+
+    assert captured["requested"] is False
+
+
+@pytest.mark.asyncio
 async def test_backend_emits_text_delta_and_completed_on_stop_finish_reason():
     backend = _backend_from_items(
         [
