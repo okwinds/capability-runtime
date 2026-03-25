@@ -131,6 +131,33 @@ async def test_workflow_cancellation_integration_stops_at_step_boundary() -> Non
 
 
 @pytest.mark.asyncio
+async def test_workflow_step_cancelled_error_does_not_escape_public_api() -> None:
+    """回归：步骤内部 `CancelledError` 必须收敛为 CANCELLED terminal。"""
+
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "A":
+            raise asyncio.CancelledError()
+        return {"ok": True}
+
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-STEP-CANCEL", kind=CapabilityKind.WORKFLOW, name="step-cancel"),
+        steps=[Step(id="s1", capability=CapabilityRef(id="A"))],
+    )
+
+    rt = _build_runtime(agents=[_make_agent("A")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-STEP-CANCEL", context=ExecutionContext(run_id="r-step-cancel"))
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.error == "execution cancelled"
+    assert result.error_code == "RUN_CANCELLED"
+    assert result.node_report is not None
+    assert result.node_report.status == "incomplete"
+    assert result.node_report.reason == "cancelled"
+    assert result.node_report.completion_reason == "run_cancelled"
+
+
+@pytest.mark.asyncio
 async def test_loop_step():
     wf = WorkflowSpec(
         base=CapabilitySpec(id="WF-L", kind=CapabilityKind.WORKFLOW, name="loop"),
@@ -229,6 +256,58 @@ async def test_loop_step_abort_preserves_child_failure_evidence() -> None:
     assert result.error_code == "STEP_TIMEOUT"
     assert result.node_report is not None
     assert result.node_report.reason == "workflow_step_failed"
+
+
+@pytest.mark.asyncio
+async def test_loop_step_cancelled_preserves_error_code() -> None:
+    wf = WorkflowSpec(
+        base=CapabilitySpec(id="WF-L-CANCEL", kind=CapabilityKind.WORKFLOW, name="loop-cancel"),
+        steps=[
+            Step(id="plan", capability=CapabilityRef(id="PLANNER")),
+            LoopStep(id="loop", capability=CapabilityRef(id="WORKER"), iterate_over="step.plan.items"),
+        ],
+    )
+
+    worker_calls = {"count": 0}
+
+    def handler(spec: AgentSpec, _input: Dict[str, Any]):
+        if spec.base.id == "PLANNER":
+            return {"items": ["a", "b", "c"]}
+        worker_calls["count"] += 1
+        if worker_calls["count"] == 2:
+            report = NodeReport(
+                status="incomplete",
+                reason="cancelled",
+                completion_reason="run_cancelled",
+                engine={"name": "skills-runtime-sdk-python", "module": "skills_runtime"},
+                bridge={"name": "capability-runtime"},
+                run_id="loop-cancelled",
+                events_path="wal.jsonl",
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta={},
+            )
+            return CapabilityResult(
+                status=CapabilityStatus.CANCELLED,
+                error="execution cancelled",
+                error_code="RUN_CANCELLED",
+                report=report,
+                node_report=report,
+            )
+        return {"ok": True, "call_index": worker_calls["count"]}
+
+    rt = _build_runtime(agents=[_make_agent("PLANNER"), _make_agent("WORKER")], handler=handler)
+    rt.register(wf)
+
+    result = await rt.run("WF-L-CANCEL")
+    assert result.status == CapabilityStatus.CANCELLED
+    assert result.error == "execution cancelled"
+    assert result.error_code == "RUN_CANCELLED"
+    assert result.output == [{"ok": True, "call_index": 1}]
+    assert result.node_report is not None
+    assert result.node_report.reason == "cancelled"
+    assert result.node_report.completion_reason == "run_cancelled"
 
 
 @pytest.mark.asyncio

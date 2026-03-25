@@ -1,6 +1,7 @@
 """AgentAdapter 单元测试（以统一 Runtime + mock/bridge 语义为真相源）。"""
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, Dict
 
@@ -298,6 +299,24 @@ async def test_mock_handler_error_result_has_error_code_mock_handler_error() -> 
 
 
 @pytest.mark.asyncio
+async def test_mock_handler_cancelled_error_returns_cancelled_terminal() -> None:
+    """回归：mock handler 抛 `CancelledError` 不得抛穿 public API。"""
+
+    def handler(_spec: AgentSpec, _input: Dict[str, Any]) -> Dict[str, Any]:
+        raise asyncio.CancelledError()
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.CANCELLED
+    assert out.error == "execution cancelled"
+    assert out.error_code == "RUN_CANCELLED"
+    assert out.node_report is not None
+    assert out.node_report.status == "incomplete"
+    assert out.node_report.reason == "cancelled"
+    assert out.node_report.completion_reason == "run_cancelled"
+
+
+@pytest.mark.asyncio
 async def test_preflight_failure_result_has_error_code_preflight_failed() -> None:
     """验证 preflight 失败时 error_code 为 PREFLIGHT_FAILED。"""
     from skills_runtime.core.errors import FrameworkIssue
@@ -382,6 +401,69 @@ async def test_engine_error_result_has_error_code_engine_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bridge_cancelled_error_result_has_error_code_run_cancelled() -> None:
+    """回归：SDK Agent 抛 `CancelledError` 时必须返回 CANCELLED terminal。"""
+
+    spec = AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"))
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeSdkAgent:
+        async def run_stream_async(self, task: str, *, run_id: str, initial_history=None):  # type: ignore[no-untyped-def]
+            _ = (task, run_id, initial_history)
+            raise asyncio.CancelledError()
+            yield  # type: ignore[unreachable]
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, *, llm_config=None):  # type: ignore[no-untyped-def]
+            _ = llm_config
+            return _FakeSdkAgent()
+
+        def get_host_meta(self, *, context: ExecutionContext):  # type: ignore[no-untyped-def]
+            _ = context
+            return {}
+
+        def emit_agent_event_taps(self, *, ev, context: ExecutionContext, capability_id: str) -> None:  # type: ignore[no-untyped-def]
+            pass
+
+        def call_callback(self, cb, *args) -> None:  # type: ignore[no-untyped-def]
+            pass
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            return {
+                "run_id": run_id,
+                "status": status,
+                "reason": reason,
+                "completion_reason": completion_reason,
+                "meta": dict(meta),
+            }
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(spec=spec, input={}, context=ExecutionContext(run_id="r1")):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.CANCELLED
+    assert terminal.error == "execution cancelled"
+    assert terminal.error_code == "RUN_CANCELLED"
+    assert terminal.node_report == {
+        "run_id": "r1",
+        "status": "incomplete",
+        "reason": "cancelled",
+        "completion_reason": "run_cancelled",
+        "meta": {"capability_id": "A", "source": "sdk_agent"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_runtime_execute_agent_when_adapter_stream_has_no_terminal_returns_fail_closed_result() -> None:
     """Agent 路径若只产出事件不产出 terminal，Runtime 必须 fail-closed。"""
 
@@ -405,3 +487,98 @@ async def test_runtime_execute_agent_when_adapter_stream_has_no_terminal_returns
     assert out.node_report is not None
     assert out.node_report.reason == "engine_error"
     assert out.node_report.completion_reason == "missing_terminal_result"
+
+
+@pytest.mark.asyncio
+async def test_mock_handler_var_positional_receives_all_args() -> None:
+    """
+    回归护栏：handler 带 `*args` 时必须接收全部三个参数。
+
+    约束：
+    - 若 handler 签名含 VAR_POSITIONAL（`*args`），应传入 `(spec, input, context)`。
+    - 这是参数探测的边界情况测试。
+    """
+
+    received: List[Any] = []
+
+    def handler(*args: Any) -> Dict[str, Any]:
+        received.extend(args)
+        return {"count": len(args)}
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", input={"x": 1}, context=ExecutionContext(run_id="r1"))
+
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.output == {"count": 3}
+    assert len(received) == 3
+    # 验证参数顺序：spec, input, context
+    assert isinstance(received[0], AgentSpec)
+    assert isinstance(received[1], dict)
+    assert isinstance(received[2], ExecutionContext)
+
+
+@pytest.mark.asyncio
+async def test_mock_handler_mixed_positional_and_var_positional() -> None:
+    """
+    回归护栏：handler 带 POSITIONAL_ONLY + VAR_POSITIONAL 时行为正确。
+
+    签名：`def fn(spec, /, *args)` 或类似形式。
+    预期：传入 `(spec, input, context)`，handler 内部可访问所有参数。
+    """
+
+    received_spec: Any = None
+    received_args: List[Any] = []
+
+    def handler(spec, /, *args):  # type: ignore[no-untyped-def]
+        nonlocal received_spec, received_args
+        received_spec = spec
+        received_args = list(args)
+        return {"spec_id": spec.base.id, "args_count": len(args)}
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", input={"x": 1}, context=ExecutionContext(run_id="r1"))
+
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.output["spec_id"] == "A"
+    assert out.output["args_count"] == 2  # input, context
+    assert isinstance(received_spec, AgentSpec)
+    assert len(received_args) == 2
+
+
+@pytest.mark.asyncio
+async def test_mock_handler_single_param_works() -> None:
+    """
+    回归护栏：单参数 handler 只接收 spec。
+
+    约束：
+    - 若 handler 只有 1 个位置参数，应只传入 spec。
+    """
+
+    def handler(spec: AgentSpec) -> Dict[str, Any]:
+        return {"spec_id": spec.base.id}
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.output == {"spec_id": "A"}
+
+
+@pytest.mark.asyncio
+async def test_mock_handler_zero_param_works() -> None:
+    """
+    回归护栏：零参数 handler 也能工作（边缘情况）。
+
+    约束：
+    - 若 handler 没有位置参数，应无参调用。
+    """
+
+    def handler() -> Dict[str, Any]:
+        return {"no_params": True}
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock", mock_handler=handler))
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.output == {"no_params": True}
+

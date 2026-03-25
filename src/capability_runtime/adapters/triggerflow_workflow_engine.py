@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, AsyncIterator, Dict, List, Optional, cast
@@ -424,29 +425,55 @@ class TriggerFlowWorkflowEngine:
 
         step_input = self._resolve_input_mappings(step.input_mappings, context)
         target_spec = services.registry.get_or_raise(step.capability.id)
-        if step.timeout_s is not None:
-            try:
-                result = await asyncio.wait_for(
-                    services.execute_capability(spec=target_spec, input=step_input, context=context),
-                    timeout=step.timeout_s,
+        execute_task: asyncio.Task[CapabilityResult] | None = None
+        try:
+            if step.timeout_s is not None:
+                execute_task = asyncio.create_task(
+                    services.execute_capability(spec=target_spec, input=step_input, context=context)
                 )
-            except asyncio.TimeoutError:
-                report = services.build_fail_closed_report(
-                    run_id=context.run_id,
-                    status="failed",
-                    reason="timeout",
-                    completion_reason="step_timeout",
-                    meta={"step_id": step.id, "capability_id": step.capability.id},
-                )
-                result = CapabilityResult(
-                    status=CapabilityStatus.FAILED,
-                    error=f"step timeout: {step.id}",
-                    error_code="STEP_TIMEOUT",
-                    report=report,
-                    node_report=report,
-                )
-        else:
-            result = await services.execute_capability(spec=target_spec, input=step_input, context=context)
+                done, _pending = await asyncio.wait({execute_task}, timeout=step.timeout_s)
+                if not done:
+                    execute_task.cancel()
+                    with suppress(BaseException):
+                        await execute_task
+                    raise asyncio.TimeoutError()
+                result = execute_task.result()
+            else:
+                result = await services.execute_capability(spec=target_spec, input=step_input, context=context)
+        except asyncio.TimeoutError:
+            report = services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="timeout",
+                completion_reason="step_timeout",
+                meta={"step_id": step.id, "capability_id": step.capability.id},
+            )
+            result = CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=f"step timeout: {step.id}",
+                error_code="STEP_TIMEOUT",
+                report=report,
+                node_report=report,
+            )
+        except asyncio.CancelledError:
+            if execute_task is not None:
+                execute_task.cancel()
+                with suppress(BaseException):
+                    await execute_task
+            report = services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="incomplete",
+                reason="cancelled",
+                completion_reason="run_cancelled",
+                meta={"step_id": step.id, "capability_id": step.capability.id},
+            )
+            result = CapabilityResult(
+                status=CapabilityStatus.CANCELLED,
+                error="execution cancelled",
+                error_code="RUN_CANCELLED",
+                report=report,
+                node_report=report,
+            )
 
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)

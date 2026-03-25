@@ -12,6 +12,7 @@ from capability_runtime.protocol.agent import AgentSpec
 from capability_runtime.protocol.workflow import LoopStep, Step
 from capability_runtime.registry import CapabilityRegistry
 from capability_runtime.guards import ExecutionGuards
+from capability_runtime.types import NodeReport
 
 from capability_runtime.adapters.triggerflow_workflow_engine import TriggerFlowWorkflowEngine
 
@@ -26,6 +27,26 @@ class _FakeServices:
     ) -> CapabilityResult:
         self.calls.append({"spec_id": spec.base.id, "input": dict(input), "run_id": context.run_id})
         return CapabilityResult(status=CapabilityStatus.SUCCESS, output={"ok": True, "spec_id": spec.base.id})
+
+    def build_fail_closed_report(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        reason: Optional[str],
+        completion_reason: str,
+        meta: Dict[str, Any],
+    ) -> NodeReport:
+        """构造 fail-closed NodeReport（测试用最小实现）。"""
+        return NodeReport(
+            status=status,  # type: ignore[arg-type]
+            reason=reason,
+            completion_reason=completion_reason,
+            run_id=run_id,
+            engine={"name": "test", "module": "test"},
+            bridge={"name": "test"},
+            meta=meta,
+        )
 
 
 @pytest.mark.asyncio
