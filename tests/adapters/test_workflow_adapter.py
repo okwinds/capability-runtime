@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Dict
 
 import pytest
@@ -1240,4 +1241,61 @@ async def test_workflow_step_timeout_returns_fail_closed_node_report() -> None:
 
     assert result.status == CapabilityStatus.FAILED
     assert result.error_code == "STEP_TIMEOUT"
+    assert result.node_report is not None
+
+
+@pytest.mark.asyncio
+async def test_workflow_step_timeout_still_trips_for_sync_blocking_mock_handler() -> None:
+    """回归：同步阻塞型 mock_handler 不得让 workflow step timeout 失效。"""
+
+    def blocking_handler(spec, input_data):  # type: ignore[no-untyped-def]
+        _ = (spec, input_data)
+        time.sleep(0.05)
+        return {"ok": True}
+
+    rt = Runtime(RuntimeConfig(mode="mock", mock_handler=blocking_handler))
+    rt.register(_make_agent("A"))
+    rt.register(
+        WorkflowSpec(
+            base=CapabilitySpec(id="WF-TIMEOUT-SYNC", kind=CapabilityKind.WORKFLOW, name="wf-timeout-sync"),
+            steps=[Step(id="s1", capability=CapabilityRef(id="A"), timeout_s=0.001)],
+        )
+    )
+
+    result = await rt.run("WF-TIMEOUT-SYNC")
+
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "STEP_TIMEOUT"
+    assert result.node_report is not None
+
+
+@pytest.mark.asyncio
+async def test_workflow_loop_timeout_still_trips_for_sync_blocking_mock_handler() -> None:
+    """回归：同步阻塞型 mock_handler 不得让 workflow loop timeout 失效。"""
+
+    def blocking_handler(spec, input_data):  # type: ignore[no-untyped-def]
+        _ = (spec, input_data)
+        time.sleep(0.05)
+        return {"ok": True}
+
+    rt = Runtime(RuntimeConfig(mode="mock", mock_handler=blocking_handler))
+    rt.register(_make_agent("A"))
+    rt.register(
+        WorkflowSpec(
+            base=CapabilitySpec(id="WF-LOOP-TIMEOUT-SYNC", kind=CapabilityKind.WORKFLOW, name="wf-loop-timeout-sync"),
+            steps=[
+                LoopStep(
+                    id="loop",
+                    capability=CapabilityRef(id="A"),
+                    iterate_over="context.items",
+                    timeout_s=0.001,
+                )
+            ],
+        )
+    )
+
+    result = await rt.run("WF-LOOP-TIMEOUT-SYNC", input={"items": [1, 2, 3]})
+
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "LOOP_TIMEOUT"
     assert result.node_report is not None

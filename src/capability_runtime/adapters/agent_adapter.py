@@ -104,17 +104,27 @@ class AgentAdapter:
             # - 否则：按位置参数数量切片
             all_args = (spec, input, context)
             if has_var_positional:
-                out = handler(*all_args)
+                call_args = all_args
             elif len(positional_params) >= 3:
-                out = handler(*all_args)
+                call_args = all_args
             elif len(positional_params) == 2:
-                out = handler(spec, input)
+                call_args = (spec, input)
             elif len(positional_params) == 1:
-                out = handler(spec)
+                call_args = (spec,)
             else:
-                out = handler()
+                call_args = ()
 
-            if hasattr(out, "__await__"):
+            is_async_handler = inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(
+                getattr(handler, "__call__", None)
+            )
+            if is_async_handler:
+                out = handler(*call_args)
+            else:
+                # 同步 mock_handler 放到 worker thread 执行，避免阻塞当前事件循环，
+                # 使 workflow step/loop timeout 等上层护栏仍然有效。
+                out = await asyncio.to_thread(handler, *call_args)
+
+            if inspect.isawaitable(out):
                 out = await out
 
             if isinstance(out, CapabilityResult):

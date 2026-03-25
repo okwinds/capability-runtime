@@ -549,16 +549,23 @@ class TriggerFlowWorkflowEngine:
             )
 
         if step.timeout_s is not None:
+            loop_task: asyncio.Task[CapabilityResult] | None = None
             try:
-                result = await asyncio.wait_for(
+                loop_task = asyncio.create_task(
                     context.guards.run_loop(
                         items=items,
                         max_iterations=step.max_iterations,
                         execute_fn=execute_item,
                         fail_strategy=step.fail_strategy,
-                    ),
-                    timeout=step.timeout_s,
+                    )
                 )
+                done, _pending = await asyncio.wait({loop_task}, timeout=step.timeout_s)
+                if not done:
+                    loop_task.cancel()
+                    with suppress(BaseException):
+                        await loop_task
+                    raise asyncio.TimeoutError()
+                result = loop_task.result()
             except asyncio.TimeoutError:
                 report = services.build_fail_closed_report(
                     run_id=context.run_id,
