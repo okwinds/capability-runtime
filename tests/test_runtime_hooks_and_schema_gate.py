@@ -132,3 +132,19 @@ async def test_output_validator_records_normalized_payload_digest_only(monkeypat
     assert "normalized_payload_bytes" in ov
     assert "normalized_payload_top_keys" in ov
     assert "normalized_payload" not in ov
+
+
+@pytest.mark.asyncio
+async def test_output_validator_internal_typeerror_is_reported_not_mistaken_for_signature_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def validator(*, final_output: str, node_report, context: Dict[str, Any]) -> Dict[str, Any]:
+        _ = (final_output, node_report, context)
+        raise TypeError("validator-bug")
+
+    rt = _mk_runtime(monkeypatch, output_validation_mode="warn", output_validator=validator)
+    out = await rt.run("A", context=ExecutionContext(run_id="r-ov-typeerror"))
+    assert out.node_report is not None
+    ov = out.node_report.meta.get("output_validation") or {}
+    assert ov.get("ok") is False
+    assert ov.get("error") == "validator_exception:TypeError"

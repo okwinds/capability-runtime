@@ -1,8 +1,9 @@
-from __future__ import annotations
-
 """Output 校验组件：包装 output_validator 并写入 NodeReport.meta。"""
 
+from __future__ import annotations
+
 import hashlib
+import inspect
 import json
 from typing import Any, Callable, Dict, Optional
 
@@ -25,6 +26,34 @@ class OutputValidator:
 
         self._mode = mode
         self._validator = validator
+
+    def _invoke_validator(self, *, final_output: Any, report: NodeReport, context: Dict[str, Any]) -> Any:
+        """
+        调用 validator，并只在“签名确实不匹配”时回退到 positional。
+
+        说明：
+        - 不用 `except TypeError` 直接判定签名不匹配，避免把 validator 内部 bug 误吞；
+        - 优先走推荐的 keyword-only 契约：`(*, final_output, node_report, context)`。
+        """
+
+        validator = self._validator
+        assert validator is not None
+
+        keyword_args = {"final_output": final_output, "node_report": report, "context": context}
+        try:
+            signature = inspect.signature(validator)
+        except (TypeError, ValueError):
+            return validator(final_output, report, context)
+
+        try:
+            signature.bind_partial(**keyword_args)
+        except TypeError as keyword_bind_error:
+            try:
+                signature.bind_partial(final_output, report, context)
+            except TypeError:
+                raise keyword_bind_error
+            return validator(final_output, report, context)
+        return validator(**keyword_args)
 
     def validate(
         self,
@@ -61,10 +90,7 @@ class OutputValidator:
             return
 
         try:
-            # 推荐签名：validate(*, final_output=..., node_report=..., context=...)
-            raw = self._validator(final_output=final_output, node_report=report, context=context)
-        except TypeError:
-            raw = self._validator(final_output, report, context)
+            raw = self._invoke_validator(final_output=final_output, report=report, context=context)
         except Exception as exc:
             # validator 自身异常：作为可观测信息记录；不强行失败（避免“验证器把系统打挂”）。
             report.meta["output_validation"] = {
