@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional, Protocol, cast
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, cast
 
 from skills_runtime.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
 from skills_runtime.llm.protocol import ChatBackend, ChatRequest
@@ -232,20 +232,38 @@ class AgentlyChatBackend(ChatBackend):
             # - 这些值若被透传到 requester，可能导致 JSON 序列化失败并让 real 模式不可用。
             if isinstance(request.extra, dict) and request.extra:
 
-                def _is_jsonable(value: Any) -> bool:
+                def _is_jsonable(value: Any, *, _seen: set[int] | None = None) -> bool:
                     """
-                    判断 value 是否可 JSON 序列化（最小、保守）。
+                    判断 value 是否可 JSON 序列化（最小、保守、避免热路径重复 dumps）。
 
                     说明：
                     - 我们不尝试做自定义 default 编码（避免改变 wire 契约语义）；
                     - 不可序列化的字段将被跳过（fail-closed），避免 real 模式因 requester 序列化失败而崩溃。
                     """
 
-                    try:
-                        json.dumps(value)
+                    if value is None or isinstance(value, (str, int, float, bool)):
                         return True
-                    except TypeError:
-                        return False
+                    if isinstance(value, dict):
+                        seen = _seen if _seen is not None else set()
+                        oid = id(value)
+                        if oid in seen:
+                            return False
+                        seen.add(oid)
+                        try:
+                            return all(isinstance(k, str) and _is_jsonable(v, _seen=seen) for k, v in value.items())
+                        finally:
+                            seen.remove(oid)
+                    if isinstance(value, (list, tuple)):
+                        seen = _seen if _seen is not None else set()
+                        oid = id(value)
+                        if oid in seen:
+                            return False
+                        seen.add(oid)
+                        try:
+                            return all(_is_jsonable(v, _seen=seen) for v in value)
+                        finally:
+                            seen.remove(oid)
+                    return False
 
                 for k, v in request.extra.items():
                     # 过滤明显的非 wire 字段（以及所有不可 JSON 序列化值）
