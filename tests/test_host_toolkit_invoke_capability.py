@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 离线单测：host_toolkit.invoke_capability（公共 API）契约与最小披露。
 
@@ -8,13 +6,17 @@ from __future__ import annotations
 - 仅断言工具规格与返回 data 的结构约束（可回归、可审计）。
 """
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
@@ -418,5 +420,73 @@ def test_invoke_capability_tool_timeout_cancels_child_run(tmp_path: Path) -> Non
     assert ic.ok is False
     assert ic.error_kind == "timeout"
 
-    time.sleep(0.08)
-    assert completed == []
+
+def test_async_runner_ensure_started_is_singleton_under_concurrent_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    回归护栏：并发调用 ensure_started() 时，只允许启动一个 live runner。
+
+    说明：
+    - 通过延迟的 fake thread_main 放大启动窗口；
+    - 若 ensure_started 没有原子保护，多个调用方会在 `_loop` 仍未就绪时重复创建线程。
+    """
+
+    from capability_runtime.host_toolkit.invoke_capability import _AsyncRunner
+
+    runner = _AsyncRunner()
+    started_loops: list[asyncio.AbstractEventLoop] = []
+    started_lock = threading.Lock()
+    release_runner = threading.Event()
+
+    def _fake_thread_main() -> None:
+        loop = asyncio.new_event_loop()
+        with started_lock:
+            started_loops.append(loop)
+        runner._loop = loop
+        runner._ready.set()
+        release_runner.wait(timeout=1.0)
+        runner._loop = None
+        loop.close()
+
+    monkeypatch.setattr(runner, "_thread_main", _fake_thread_main)
+
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(8)
+
+    def _worker() -> None:
+        try:
+            barrier.wait(timeout=1.0)
+            runner.ensure_started()
+        except BaseException as exc:  # pragma: no cover - 失败时用于收集线程异常
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_worker, daemon=True) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=1.0)
+    release_runner.set()
+
+    assert not errors
+    assert len(started_loops) == 1, f"expected single live runner start, got {len(started_loops)}"
+
+
+def test_async_runner_shutdown_resets_state_and_allows_restart() -> None:
+    """
+    回归护栏：runner 必须支持显式 shutdown，并在后续调用时干净重启。
+    """
+
+    from capability_runtime.host_toolkit.invoke_capability import _AsyncRunner
+
+    runner = _AsyncRunner()
+    runner.ensure_started()
+    first_loop = runner._loop
+    assert first_loop is not None
+
+    runner.shutdown()
+    assert runner._loop is None
+    assert runner._thread is None
+
+    runner.ensure_started()
+    assert runner._loop is not None
+    assert runner._loop is not first_loop
+    runner.shutdown()

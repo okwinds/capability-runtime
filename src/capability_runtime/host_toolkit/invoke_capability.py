@@ -14,6 +14,7 @@ invoke_capability：宿主侧“能力委托工具”（CustomTool）公共 API�
 from __future__ import annotations
 
 import asyncio
+import atexit
 import hashlib
 import json
 import time
@@ -129,27 +130,88 @@ class _AsyncRunner:
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._ready = threading.Event()
+        self._state_lock = threading.Lock()
 
     def _thread_main(self) -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        self._loop = loop
-        self._ready.set()
-        loop.run_forever()
+        with self._state_lock:
+            self._loop = loop
+            self._ready.set()
+        try:
+            loop.run_forever()
+        finally:
+            pending = [task for task in asyncio.all_tasks(loop) if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            shutdown_default_executor = getattr(loop, "shutdown_default_executor", None)
+            if callable(shutdown_default_executor):
+                loop.run_until_complete(shutdown_default_executor())
+            loop.close()
+            with self._state_lock:
+                if self._loop is loop:
+                    self._loop = None
+                if self._thread is threading.current_thread():
+                    self._thread = None
+                self._ready.clear()
 
     def ensure_started(self) -> None:
-        if self._thread is not None and self._loop is not None:
-            return
-        self._thread = threading.Thread(target=self._thread_main, name="caprt-invoke-capability-runner", daemon=True)
-        self._thread.start()
-        self._ready.wait(timeout=5.0)
-        if self._loop is None:
-            raise RuntimeError("invoke_capability runner loop failed to start")
+        with self._state_lock:
+            loop = self._loop
+            thread = self._thread
+            if loop is not None and thread is not None and thread.is_alive() and not loop.is_closed():
+                return
+
+            if thread is not None and thread.is_alive():
+                ready_event = self._ready
+            else:
+                self._ready.clear()
+                self._loop = None
+                thread = threading.Thread(target=self._thread_main, name="caprt-invoke-capability-runner", daemon=True)
+                self._thread = thread
+                thread.start()
+                ready_event = self._ready
+
+        ready = ready_event.wait(timeout=5.0)
+        with self._state_lock:
+            loop = self._loop
+            if (not ready) or loop is None or loop.is_closed():
+                if self._thread is thread:
+                    self._thread = None
+                self._loop = None
+                self._ready.clear()
+                raise RuntimeError("invoke_capability runner loop failed to start")
+
+    def shutdown(self, *, timeout_s: float = 5.0) -> None:
+        """停止后台 loop 并重置状态；供测试与进程退出清理复用。"""
+
+        with self._state_lock:
+            loop = self._loop
+            thread = self._thread
+
+        if loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(loop.stop)
+
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=timeout_s)
+
+        with self._state_lock:
+            live_thread = self._thread
+            if live_thread is None or not live_thread.is_alive():
+                self._thread = None
+                self._loop = None
+                self._ready.clear()
 
     def run(self, coro: Any, *, timeout_s: float | None) -> Any:
         self.ensure_started()
-        assert self._loop is not None
-        fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        with self._state_lock:
+            loop = self._loop
+        if loop is None or loop.is_closed():
+            raise RuntimeError("invoke_capability runner loop is unavailable")
+        fut = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
             return fut.result(timeout=timeout_s)
         except TimeoutError:
@@ -159,6 +221,7 @@ class _AsyncRunner:
 
 
 _INVOKE_CAPABILITY_RUNNER = _AsyncRunner()
+atexit.register(_INVOKE_CAPABILITY_RUNNER.shutdown)
 
 
 def make_invoke_capability_tool(
