@@ -64,6 +64,9 @@ class RuntimeUIEventsSession:
         self._subs: Set[asyncio.Queue] = set()
         self._started = False
         self._done = asyncio.Event()
+        self._runner_task: asyncio.Task[None] | None = None
+        self._session_task: asyncio.Task[None] | None = None
+        self._background_error: BaseException | None = None
 
     @property
     def run_id(self) -> str:
@@ -129,6 +132,16 @@ class RuntimeUIEventsSession:
             },
         )
 
+    def _remember_task_failure(self, task: asyncio.Task[Any]) -> None:
+        """提取后台任务异常，避免 fire-and-forget 把错误静默丢掉。"""
+
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return
+        if exc is not None and self._background_error is None:
+            self._background_error = exc
+
     async def ensure_started(self) -> None:
         if self._started:
             return
@@ -173,6 +186,8 @@ class RuntimeUIEventsSession:
                 await self._in_q.put(("error", exc))
 
         task = asyncio.create_task(_runner())
+        task.add_done_callback(self._remember_task_failure)
+        self._runner_task = task
 
         async def _loop() -> None:
             try:
@@ -224,10 +239,16 @@ class RuntimeUIEventsSession:
                 await task
                 self._runtime._unregister_agent_event_tap(_tap)
 
-        asyncio.create_task(_loop())
+        session_task = asyncio.create_task(_loop())
+        session_task.add_done_callback(self._remember_task_failure)
+        self._session_task = session_task
 
     async def wait_done(self) -> None:
         await self._done.wait()
+        if self._session_task is not None:
+            await self._session_task
+        if self._background_error is not None:
+            raise self._background_error
 
     async def subscribe(self, *, after_id: Optional[str]) -> AsyncIterator[RuntimeEvent]:
         await self.ensure_started()

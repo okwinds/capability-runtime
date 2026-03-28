@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Runtime UI Events：断线续传（rid/after_id）的最小 in-memory store。
 
@@ -9,9 +7,12 @@ Runtime UI Events：断线续传（rid/after_id）的最小 in-memory store。
 - run 级别隔离由调用方保证（通常一个 store 对应一个 run）。
 """
 
+from __future__ import annotations
+
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Iterable, Optional, Protocol
+import threading
+from typing import Deque, Dict, Iterable, Optional, Protocol
 
 from .v1 import RuntimeEvent
 
@@ -68,23 +69,36 @@ class InMemoryRuntimeEventStore(RuntimeEventStore):
             raise ValueError("max_events must be > 0")
         self._max_events = int(max_events)
         self._events: Deque[RuntimeEvent] = deque(maxlen=self._max_events)
+        self._rid_to_pos: Dict[str, int] = {}
+        self._start_pos = 0
+        self._lock = threading.Lock()
 
     @property
     def min_rid(self) -> Optional[str]:
-        if not self._events:
-            return None
-        return self._events[0].rid
+        with self._lock:
+            if not self._events:
+                return None
+            return self._events[0].rid
 
     @property
     def max_rid(self) -> Optional[str]:
-        if not self._events:
-            return None
-        return self._events[-1].rid
+        with self._lock:
+            if not self._events:
+                return None
+            return self._events[-1].rid
 
     def append(self, ev: RuntimeEvent) -> None:
         if ev.rid is None:
             raise ValueError("RuntimeEvent.rid is required for resume store")
-        self._events.append(ev)
+        with self._lock:
+            if len(self._events) == self._max_events:
+                evicted = self._events.popleft()
+                if evicted.rid is not None:
+                    self._rid_to_pos.pop(evicted.rid, None)
+                self._start_pos += 1
+            pos = self._start_pos + len(self._events)
+            self._events.append(ev)
+            self._rid_to_pos[ev.rid] = pos
 
     def read_after(self, *, after_id: Optional[str]) -> Iterable[RuntimeEvent]:
         """
@@ -94,16 +108,20 @@ class InMemoryRuntimeEventStore(RuntimeEventStore):
         - after_id：续传游标；None 表示从头读取当前窗口
         """
 
-        if after_id is None:
-            return list(self._events)
-        if not self._events:
-            return []
+        with self._lock:
+            snapshot = list(self._events)
+            min_rid = snapshot[0].rid if snapshot else None
+            max_rid = snapshot[-1].rid if snapshot else None
+            if after_id is None:
+                return snapshot
+            if not snapshot:
+                return []
 
-        idx = None
-        for i, ev in enumerate(self._events):
-            if ev.rid == after_id:
-                idx = i
-                break
-        if idx is None:
-            raise AfterIdExpiredError(after_id=str(after_id), min_rid=self.min_rid, max_rid=self.max_rid)
-        return list(self._events)[idx + 1 :]
+            pos = self._rid_to_pos.get(str(after_id))
+            if pos is None:
+                raise AfterIdExpiredError(after_id=str(after_id), min_rid=min_rid, max_rid=max_rid)
+
+            idx = pos - self._start_pos
+            if idx < 0 or idx >= len(snapshot):
+                raise AfterIdExpiredError(after_id=str(after_id), min_rid=min_rid, max_rid=max_rid)
+            return snapshot[idx + 1 :]
