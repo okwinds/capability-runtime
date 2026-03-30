@@ -70,3 +70,11 @@ def test_atomic_examples_offline_smoke(tmp_path: Path, rel_script: str) -> None:
         wal = line.split("=", 1)[1].strip()
         assert wal
         assert Path(wal).exists()
+
+
+def test_atomic_preflight_gate_example_does_not_use_todo_strategy() -> None:
+    example = _REPO_ROOT / "docs_for_coding_agent/examples/atomic/03_preflight_gate/run.py"
+    text = example.read_text(encoding="utf-8")
+
+    assert '"strategy": ""' in text
+    assert '"strategy": "TODO"' not in text

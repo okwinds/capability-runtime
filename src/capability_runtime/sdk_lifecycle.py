@@ -839,6 +839,16 @@ def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> tuple[Any
                 message="skills.spaces schema is incompatible with installed skills-runtime-sdk",
                 details={"path": f"{path_prefix}spaces", "target_schema": target_schema, "warnings": warnings},
             )
+
+    versioning = out.get("versioning")
+    if isinstance(versioning, dict) and versioning.get("strategy") == "TODO":
+        issues.append(
+            FrameworkIssue(
+                code="SKILL_CONFIG_VERSIONING_STRATEGY_DRIFT",
+                message="skills.versioning.strategy='TODO' is a stale value; use '' or an explicit upstream-supported strategy.",
+                details={"path": f"{path_prefix}versioning.strategy", "value": "TODO"},
+            )
+        )
     return out, issues
 
 

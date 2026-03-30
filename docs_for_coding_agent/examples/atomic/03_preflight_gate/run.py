@@ -75,10 +75,11 @@ def main() -> int:
         safety_mode="ask",
     )
 
-    # 构造一份“合法但会产生 preflight issues”的 skills_config：
-    # - versioning 是占位配置：启用后会产生 warning issue（用于演示 gate）
+    # 构造一份合法的 skills_config：
+    # - versioning.strategy 为空字符串，显式对齐上游当前默认值；
+    # - preflight issue 仍由 overlay 触发，用于演示 error/warn gate。
     skills_config = {
-        "versioning": {"enabled": True, "strategy": "TODO"},
+        "versioning": {"enabled": True, "strategy": ""},
         "strictness": {
             "unknown_mention": "error",
             "duplicate_name": "error",

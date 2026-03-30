@@ -201,6 +201,32 @@ def test_preflight_skills_config_unknown_option_surfaces_issue(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_run_preflight_warn_surfaces_versioning_strategy_drift_issue(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="warn",
+            skills_config={"versioning": {"strategy": "TODO"}},
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-versioning-warn"))
+
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.node_report is not None
+    issues = out.node_report.meta.get("preflight_issues") or []
+    assert any(
+        i.get("code") == "SKILL_CONFIG_VERSIONING_STRATEGY_DRIFT"
+        and ((i.get("details") or {}).get("path")) == "versioning.strategy"
+        for i in issues
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_preflight_error_fails_closed_on_runtimeconfig_skills_config_issues(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -223,6 +249,33 @@ async def test_run_preflight_error_fails_closed_on_runtimeconfig_skills_config_i
     assert out.node_report is not None
     issues = (((out.node_report.meta.get("skill_issue") or {}).get("details") or {}).get("issues") or [])
     assert any(i.get("code") == "SKILL_CONFIG_UNKNOWN_OPTION" for i in issues)
+
+
+@pytest.mark.asyncio
+async def test_run_preflight_error_fails_closed_on_versioning_strategy_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="error",
+            skills_config={"skills": {"versioning": {"strategy": "TODO"}}},
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r-preflight-versioning-error"))
+
+    assert out.status == CapabilityStatus.FAILED
+    assert out.error_code == "PREFLIGHT_FAILED"
+    assert out.node_report is not None
+    issues = (((out.node_report.meta.get("skill_issue") or {}).get("details") or {}).get("issues") or [])
+    assert any(
+        i.get("code") == "SKILL_CONFIG_VERSIONING_STRATEGY_DRIFT"
+        and ((i.get("details") or {}).get("path")) == "skills.versioning.strategy"
+        for i in issues
+    )
 
 
 def test_runtime_init_fails_closed_when_scan_raises_in_error_mode(monkeypatch: pytest.MonkeyPatch) -> None:
