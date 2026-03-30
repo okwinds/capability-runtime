@@ -40,7 +40,7 @@
 | CAP-IMG-001 | view_image：离线读取图片 base64 | 上游 tools | （上游包内路径，非本仓文件）`skills_runtime/tools/builtin/view_image.py` | `docs_for_coding_agent/examples/atomic/08_view_image_offline/` | `pytest -q tests/test_coding_agent_examples_atomic.py -k view_image_offline` | tool data.mime/base64 |
 | CAP-SSE-001 | HTTP/SSE：事件流 + 终态 + wal_locator | `openspec/specs/examples-human-apps/spec.md` | `examples/apps/sse_gateway_minimal/`（本变更创建） | `examples/apps/sse_gateway_minimal/`（本变更创建） | `pytest -q tests/test_examples_smoke.py -k sse`（本变更创建） | SSE 流包含 `run_started` 与终态（含 wal_locator） |
 
-## 2) 上游内置工具清单（pinned: skills-runtime-sdk==0.1.9.post1）
+## 2) 上游内置工具清单（pinned: skills-runtime-sdk==0.1.10）
 
 > 说明：以下为上游 `skills_runtime.tools.builtin.*` 模块名（用于覆盖矩阵与示例选择）。  
 > 本仓示例以“类别覆盖”为主，不要求每个工具都单独一个人类 app，但在编码智能体示例库中应做到“可获得能力面不遗漏”。
