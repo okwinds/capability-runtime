@@ -124,6 +124,22 @@ def test_summarize_workflow_run_collects_step_statuses_and_waiting_approval() ->
     assert snapshot.current_step_id == "review"
     assert snapshot.waiting_approval_key == "approval-1"
     assert snapshot.events_path == "/tmp/wf-run-1.jsonl"
+    assert snapshot.host_runtime == {
+        "status": "waiting_human",
+        "wait_kind": "approval",
+        "run_id": "wf-run-1",
+        "node_status": "needs_approval",
+        "events_path": "/tmp/wf-run-1.jsonl",
+        "tool_name": "apply_patch",
+        "call_id": "call-1",
+        "workflow_id": None,
+        "workflow_instance_id": None,
+        "step_id": "review",
+        "approval_key": "approval-1",
+        "message_kind": "approval_message",
+        "message_preview": None,
+        "resume_state": {"waiting_approval_key": "approval-1"},
+    }
     assert [(step.step_id, step.status, step.capability_id) for step in snapshot.steps] == [
         ("draft", "success", "agent.draft"),
         ("review", "pending", "agent.review"),

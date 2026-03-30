@@ -252,3 +252,23 @@ async def test_run_ui_events_agent_emits_pending_terminal_for_waiting_human(tmp_
     )
     terminal = next(e for e in reversed(out) if e.type == "run.status")
     assert terminal.data.get("status") == "pending"
+    host_runtime = terminal.data.get("host_runtime")
+    assert host_runtime == {
+        "status": "waiting_human",
+        "wait_kind": "host_input",
+        "run_id": terminal.run_id,
+        "node_status": "needs_approval",
+        "events_path": terminal.evidence.events_path if terminal.evidence else None,
+        "tool_name": "ask_human",
+        "call_id": "c1",
+        "workflow_id": None,
+        "workflow_instance_id": None,
+        "step_id": None,
+        "approval_key": None,
+        "message_kind": "ask_human",
+        "message_preview": host_runtime["message_preview"],
+        "resume_state": {},
+    }
+    assert isinstance(host_runtime["message_preview"], str)
+    assert host_runtime["message_preview"]
+    assert "question" not in host_runtime["message_preview"]

@@ -78,6 +78,14 @@ class HostRunSnapshot:
     approval_ticket: ApprovalTicket | None = None
     resume_state: dict[str, Any] = field(default_factory=dict)
     events_path: str | None = None
+    wait_kind: str | None = None
+    tool_name: str | None = None
+    call_id: str | None = None
+    workflow_id: str | None = None
+    workflow_instance_id: str | None = None
+    step_id: str | None = None
+    message_kind: str | None = None
+    message_preview: str | None = None
 
 
 def build_resume_intent(
@@ -166,6 +174,7 @@ def summarize_host_run_result(result: CapabilityResult, *, capability_id: str) -
     node_status = getattr(report, "status", None)
     approval_ticket = build_approval_ticket_from_report(report, capability_id=capability_id)
     status = _map_host_run_status(result=result, report=report, approval_ticket=approval_ticket)
+    wait_summary = _summarize_waiting_human_context(report=report, approval_ticket=approval_ticket)
 
     resume_state: dict[str, Any] = {}
     if approval_ticket is not None:
@@ -179,6 +188,14 @@ def summarize_host_run_result(result: CapabilityResult, *, capability_id: str) -
         approval_ticket=approval_ticket,
         resume_state=resume_state,
         events_path=_optional_text(getattr(report, "events_path", None)),
+        wait_kind=wait_summary["wait_kind"],
+        tool_name=wait_summary["tool_name"],
+        call_id=wait_summary["call_id"],
+        workflow_id=wait_summary["workflow_id"],
+        workflow_instance_id=wait_summary["workflow_instance_id"],
+        step_id=wait_summary["step_id"],
+        message_kind=wait_summary["message_kind"],
+        message_preview=wait_summary["message_preview"],
     )
 
 
@@ -192,12 +209,23 @@ def project_host_runtime_data(result: CapabilityResult, *, capability_id: str = 
     """
 
     snapshot = summarize_host_run_result(result, capability_id=capability_id)
-    if snapshot.status != HostRunStatus.WAITING_HUMAN or snapshot.approval_ticket is None:
+    if snapshot.status != HostRunStatus.WAITING_HUMAN:
         return None
     return {
         "status": snapshot.status.value,
-        "approval_key": snapshot.approval_ticket.approval_key,
-        "tool_name": snapshot.approval_ticket.tool_name,
+        "wait_kind": snapshot.wait_kind,
+        "run_id": snapshot.run_id,
+        "node_status": snapshot.node_status,
+        "events_path": snapshot.events_path,
+        "tool_name": snapshot.tool_name,
+        "call_id": snapshot.call_id,
+        "workflow_id": snapshot.workflow_id,
+        "workflow_instance_id": snapshot.workflow_instance_id,
+        "step_id": snapshot.step_id,
+        "approval_key": snapshot.approval_ticket.approval_key if snapshot.approval_ticket is not None else None,
+        "message_kind": snapshot.message_kind,
+        "message_preview": snapshot.message_preview,
+        "resume_state": dict(snapshot.resume_state),
     }
 
 
@@ -264,3 +292,109 @@ def _optional_text(value: Any) -> Optional[str]:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _summarize_waiting_human_context(
+    *,
+    report: NodeReport | None,
+    approval_ticket: ApprovalTicket | None,
+) -> dict[str, str | None]:
+    """提取 waiting_human 场景的最小宿主摘要字段。"""
+
+    empty = {
+        "wait_kind": None,
+        "tool_name": None,
+        "call_id": None,
+        "workflow_id": None,
+        "workflow_instance_id": None,
+        "step_id": None,
+        "message_kind": None,
+        "message_preview": None,
+    }
+    if report is None:
+        return empty
+
+    meta = report.meta if isinstance(report.meta, dict) else {}
+    message_preview = _build_message_preview(meta.get("final_message"))
+    waiting_call = _select_host_waiting_tool_call(report)
+
+    tool_name = approval_ticket.tool_name if approval_ticket is not None else _optional_text(getattr(waiting_call, "name", None))
+    call_id = approval_ticket.call_id if approval_ticket is not None else _optional_text(getattr(waiting_call, "call_id", None))
+    workflow_id = approval_ticket.workflow_id if approval_ticket is not None else _optional_text(meta.get("workflow_id"))
+    workflow_instance_id = (
+        approval_ticket.workflow_instance_id if approval_ticket is not None else _optional_text(meta.get("workflow_instance_id"))
+    )
+    step_id = approval_ticket.step_id if approval_ticket is not None else _optional_text(meta.get("step_id"))
+
+    if approval_ticket is not None:
+        wait_kind = "approval"
+        message_kind = "approval_message"
+    else:
+        wait_kind, message_kind = _classify_non_approval_waiting(
+            raw_kind=meta.get("waiting_human_kind"),
+            tool_name=tool_name,
+            message_preview=message_preview,
+        )
+
+    return {
+        "wait_kind": wait_kind,
+        "tool_name": tool_name,
+        "call_id": call_id,
+        "workflow_id": workflow_id,
+        "workflow_instance_id": workflow_instance_id,
+        "step_id": step_id,
+        "message_kind": message_kind,
+        "message_preview": message_preview,
+    }
+
+
+def _select_host_waiting_tool_call(report: NodeReport) -> NodeToolCallReport | None:
+    """选择最能代表 waiting_human 摘要的工具调用。"""
+
+    approval_call = _select_waiting_tool_call(report)
+    if approval_call is not None:
+        return approval_call
+
+    for call in report.tool_calls:
+        if _optional_text(call.name) in {"ask_human", "request_user_input"}:
+            return call
+    if report.tool_calls:
+        return report.tool_calls[0]
+    return None
+
+
+def _classify_non_approval_waiting(
+    *,
+    raw_kind: Any,
+    tool_name: str | None,
+    message_preview: str | None,
+) -> tuple[str, str]:
+    """best-effort 分类非 approval 型 waiting_human。"""
+
+    normalized_kind = _optional_text(raw_kind)
+    if normalized_kind == "workflow_continue":
+        return "workflow_continue", "generic_waiting_human"
+    if normalized_kind in {"host_input", "ask_human", "request_user_input"}:
+        message_kind = "request_user_input" if normalized_kind == "request_user_input" else "ask_human"
+        return "host_input", message_kind
+
+    if tool_name == "request_user_input":
+        return "host_input", "request_user_input"
+    if tool_name == "ask_human":
+        return "host_input", "ask_human"
+
+    preview = str(message_preview or "").lower()
+    if "ask" in preview or "input" in preview:
+        return "host_input", "generic_waiting_human"
+    return "unknown", "generic_waiting_human"
+
+
+def _build_message_preview(value: Any) -> str | None:
+    """把 waiting message 归一为单行、最多 120 个字符的摘要。"""
+
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())
+    if not normalized:
+        return None
+    return normalized[:120]

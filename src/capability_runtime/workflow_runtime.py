@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from .host_protocol import build_approval_ticket_from_report
+from .host_protocol import project_host_runtime_data
 from .protocol.capability import CapabilityResult, CapabilityStatus
 
 
@@ -62,6 +62,7 @@ class WorkflowRunSnapshot:
     current_step_id: str | None = None
     waiting_approval_key: str | None = None
     events_path: str | None = None
+    host_runtime: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -149,13 +150,15 @@ def summarize_workflow_items(
 
     waiting_approval_key = None
     events_path = None
+    host_runtime: dict[str, Any] | None = None
     if terminal is not None and terminal.node_report is not None:
-        ticket = build_approval_ticket_from_report(terminal.node_report, capability_id=workflow_id)
-        if ticket is not None:
-            waiting_approval_key = ticket.approval_key
+        host_runtime = project_host_runtime_data(terminal, capability_id=workflow_id)
+        if isinstance(host_runtime, dict):
             final_status = WorkflowRunStatus.WAITING_HUMAN
-            if ticket.step_id:
-                current_step_id = ticket.step_id
+            waiting_approval_key = _optional_text(host_runtime.get("approval_key"))
+            host_step_id = _optional_text(host_runtime.get("step_id"))
+            if host_step_id:
+                current_step_id = host_step_id
         if isinstance(terminal.node_report.events_path, str) and terminal.node_report.events_path:
             events_path = terminal.node_report.events_path
         if not run_id:
@@ -178,6 +181,7 @@ def summarize_workflow_items(
         current_step_id=current_step_id,
         waiting_approval_key=waiting_approval_key,
         events_path=events_path,
+        host_runtime=host_runtime,
     )
 
 
