@@ -273,7 +273,7 @@ class NodeReportBuilder:
                         if isinstance(data, dict):
                             t["data"] = data
 
-            if ev.type in ("run_completed", "run_failed", "run_cancelled"):
+            if ev.type in ("run_completed", "run_failed", "run_cancelled", "run_waiting_human"):
                 # skills-runtime-sdk>=1.0 使用 `wal_locator` 作为 WAL/事件证据链定位符；
                 # 本仓对外仍沿用 `events_path` 字段名，语义上存放 locator 字符串（可能是文件路径，也可能是 wal://...）。
                 locator_raw = ev.payload.get("events_path")
@@ -300,15 +300,21 @@ class NodeReportBuilder:
                         completion_status = "incomplete"
                     else:
                         completion_status = "failed"
+                elif ev.type == "run_waiting_human":
+                    completion_status = "needs_approval"
+                    final_error_kind = ev.payload.get("error_kind") if isinstance(ev.payload.get("error_kind"), str) else None
+                    final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
                 else:
                     completion_status = "incomplete"
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
 
-        # 优先级：needs_approval > run_failed > run_cancelled > run_completed
+        # 优先级：needs_approval(approval_requested / run_waiting_human) > run_failed > run_cancelled > run_completed
         status = completion_status or "incomplete"
         reason = None
         if approval_pending:
             status = "needs_approval"
+            reason = "approval_pending"
+        elif status == "needs_approval":
             reason = "approval_pending"
         elif status == "failed":
             # 失败原因粗分类：优先 error_kind，其次 message

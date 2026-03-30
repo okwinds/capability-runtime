@@ -381,7 +381,7 @@ class RuntimeUIEventProjector:
             out.append(self._emit(type="metrics", path=base_path, data=extract_usage_metrics(ev.payload)))
             return out
 
-        if ev.type in ("run_completed", "run_failed", "run_cancelled"):
+        if ev.type in ("run_completed", "run_failed", "run_cancelled", "run_waiting_human"):
             if ev.type == "run_completed":
                 status = "success"
                 # best-effort：run_* 事件出现后通常意味着进入“产出/收敛”阶段
@@ -393,6 +393,16 @@ class RuntimeUIEventProjector:
             if ev.type == "run_failed":
                 status = "failed"
                 data: Dict[str, Any] = {"status": status}
+                error_kind = ev.payload.get("error_kind")
+                if isinstance(error_kind, str) and error_kind.strip():
+                    data["error_kind"] = error_kind.strip()
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": "REPORTING"}))
+                out.append(self._emit(type="node.phase", path=base_path, data={"phase": "DONE"}))
+                out.append(self._emit(type="node.finished", path=base_path, data=data))
+                return out
+
+            if ev.type == "run_waiting_human":
+                data: Dict[str, Any] = {"status": "pending"}
                 error_kind = ev.payload.get("error_kind")
                 if isinstance(error_kind, str) and error_kind.strip():
                     data["error_kind"] = error_kind.strip()

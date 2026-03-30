@@ -183,6 +183,28 @@ def test_report_cancelled_maps_to_incomplete_and_cancelled_reason():
     assert rep.reason == "cancelled"
 
 
+def test_report_waiting_human_maps_to_needs_approval_and_preserves_message():
+    events = [
+        _ev("run_started"),
+        _ev(
+            "run_waiting_human",
+            payload={
+                "tool": "ask_human",
+                "call_id": "c1",
+                "message": "需要你确认下一步",
+                "error_kind": "human_required",
+                "wal_locator": "wal.jsonl",
+            },
+        ),
+    ]
+    rep = NodeReportBuilder().build(events=events)
+    assert rep.status == "needs_approval"
+    assert rep.reason == "approval_pending"
+    assert rep.completion_reason == "run_waiting_human"
+    assert rep.events_path == "wal.jsonl"
+    assert rep.meta["final_message"] == "需要你确认下一步"
+
+
 def test_report_budget_exceeded_maps_to_incomplete_and_budget_exceeded_reason():
     events = [
         _ev("run_started"),

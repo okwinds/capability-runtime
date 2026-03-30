@@ -186,3 +186,69 @@ async def test_run_ui_events_terminal_exposes_structured_output_summary_when_pre
     assert so.get("ok") is True
     assert so.get("schema_id") == "capability-runtime.agent_output_schema.v1:agent.structured-ui"
     assert so.get("required") == ["title", "summary"]
+
+
+@pytest.mark.asyncio
+async def test_run_ui_events_agent_emits_pending_terminal_for_waiting_human(tmp_path: Path) -> None:
+    backend = FakeChatBackend(
+        calls=[
+            FakeChatCall(
+                events=[
+                    ChatStreamEvent(
+                        type="tool_calls",
+                        tool_calls=[
+                            LlmToolCall(
+                                call_id="c1",
+                                name="ask_human",
+                                args={"question": "需要你确认下一步"},
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ChatStreamEvent(type="completed", finish_reason="tool_calls"),
+                ]
+            )
+        ]
+    )
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            sdk_config_paths=[],
+            preflight_mode="off",
+            sdk_backend=backend,
+            human_io=None,
+        )
+    )
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(
+                id="agent.waiting-human",
+                kind=CapabilityKind.AGENT,
+                name="AgentWaitingHuman",
+                description="离线：触发 ask_human 等待终态。",
+            ),
+        )
+    )
+
+    out: List = []
+    async for ev in rt.run_ui_events("agent.waiting-human", input={}, level=StreamLevel.UI):
+        out.append(ev)
+        if ev.type == "run.status" and ev.data.get("status") in {"completed", "failed", "cancelled", "pending"}:
+            break
+
+    assert any(
+        e.type == "node.finished"
+        and e.data.get("status") == "pending"
+        and any(seg.kind == "agent" for seg in e.path)
+        for e in out
+    )
+    assert any(
+        e.type == "node.phase"
+        and e.data.get("phase") == "DONE"
+        and any(seg.kind == "agent" for seg in e.path)
+        for e in out
+    )
+    terminal = next(e for e in reversed(out) if e.type == "run.status")
+    assert terminal.data.get("status") == "pending"

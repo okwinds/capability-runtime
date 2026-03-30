@@ -9,7 +9,7 @@ dependencies = [
   "PyYAML>=6",
   "pydantic>=2,<3",
   "agently==4.0.8",
-  "skills-runtime-sdk==0.1.9.post1",
+  "skills-runtime-sdk==0.1.10",
 ]
 
 [project.optional-dependencies]

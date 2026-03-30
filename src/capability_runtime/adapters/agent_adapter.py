@@ -286,6 +286,8 @@ class AgentAdapter:
                 final_output = str(ev.payload.get("final_output") or "")
             if ev.type in ("run_failed", "run_cancelled"):
                 final_output = str(ev.payload.get("message") or "")
+            if ev.type == "run_waiting_human":
+                final_output = str(ev.payload.get("message") or "")
 
         self._services.apply_output_validation(
             final_output=final_output,

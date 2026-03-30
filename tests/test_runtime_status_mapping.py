@@ -114,3 +114,31 @@ async def test_approval_pending_maps_to_pending(monkeypatch: pytest.MonkeyPatch)
     assert out.status == CapabilityStatus.PENDING
     assert out.node_report is not None
     assert out.node_report.status == "needs_approval"
+
+
+@pytest.mark.asyncio
+async def test_run_waiting_human_maps_to_pending_and_exposes_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    rt = _mk_runtime(
+        monkeypatch,
+        events=[
+            AgentEvent(type="run_started", timestamp="2026-03-30T00:00:00Z", run_id="r0", payload={}),
+            AgentEvent(
+                type="run_waiting_human",
+                timestamp="2026-03-30T00:00:01Z",
+                run_id="r0",
+                payload={
+                    "tool": "ask_human",
+                    "call_id": "c1",
+                    "message": "需要你确认下一步",
+                    "error_kind": "human_required",
+                    "wal_locator": "wal.jsonl",
+                },
+            ),
+        ],
+    )
+    out = await rt.run("A", context=ExecutionContext(run_id="r1"))
+    assert out.status == CapabilityStatus.PENDING
+    assert out.output == "需要你确认下一步"
+    assert out.node_report is not None
+    assert out.node_report.status == "needs_approval"
+    assert out.node_report.completion_reason == "run_waiting_human"
