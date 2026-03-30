@@ -678,6 +678,48 @@ class Runtime(RuntimeUIEventsMixin):
         ctx = context or ExecutionContext(run_id=request.run_id, max_depth=self._config.max_depth)
         return await self.run(request.workflow_id, input=request.current_input or {}, context=ctx)
 
+    async def replay(
+        self,
+        *,
+        workflow_id: str,
+        run_id: str,
+        current_input: dict[str, Any],
+    ) -> CapabilityResult:
+        """
+        workflow replay 的最小公共桥接入口。
+
+        参数：
+        - workflow_id：目标 workflow ID
+        - run_id：沿用的运行 ID
+        - current_input：当前输入
+        """
+
+        return await self.replay_workflow(
+            WorkflowReplayRequest(
+                workflow_id=workflow_id,
+                run_id=run_id,
+                current_input=current_input,
+            )
+        )
+
+    def bind_runtime_server(self) -> None:
+        """
+        若配置了 runtime_server，则显式把本地 Runtime 绑定给它。
+        """
+
+        runtime_server = getattr(self._config, "runtime_server", None)
+        if runtime_server is None:
+            return
+        bind_runtime = getattr(runtime_server, "bind_runtime", None)
+        if callable(bind_runtime):
+            bind_runtime(self)
+            return
+        set_runtime = getattr(runtime_server, "set_runtime", None)
+        if callable(set_runtime):
+            set_runtime(self)
+            return
+        setattr(runtime_server, "runtime", self)
+
     async def _execute(self, *, spec: AnySpec, input: Dict[str, Any], context: ExecutionContext) -> CapabilityResult:
         """
         内部执行: 创建子 context 并分发到 Agent/Workflow 执行器。

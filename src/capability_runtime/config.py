@@ -77,6 +77,15 @@ class RuntimeConfig:
     #   - execute_stream(*, spec, input, context, runtime) -> AsyncIterator[WorkflowStreamItem]
     workflow_engine: Optional[Any] = None
 
+    # === 可选 Runtime RPC client/server 注入（v1）===
+    #
+    # 说明：
+    # - `runtime_client`：供 RuntimeServiceFacade 在 RPC 执行目标下使用；
+    # - `runtime_server`：供 Runtime.bind_runtime_server() 显式绑定本地 Runtime；
+    # - 两者均采用 duck typing，不在 RuntimeConfig 层做强类型约束。
+    runtime_client: Optional[Any] = None
+    runtime_server: Optional[Any] = None
+
     # === SDK 注入 ===
     approval_provider: Optional[ApprovalProvider] = None
     human_io: Optional[HumanIOProvider] = None
