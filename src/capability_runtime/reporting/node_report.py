@@ -146,6 +146,7 @@ class NodeReportBuilder:
         # - tool_call_requested payload 带 call_id/name
         # - approval_requested/approval_decided payload 可能不带 call_id，仅能通过 step_id 关联到同一步的 tool_call_requested
         step_to_call: Dict[str, Dict[str, str]] = {}
+        tool_safety: Dict[str, Dict[str, str]] = {}
 
         completion_status: Optional[str] = None
         completion_reason = ""
@@ -177,6 +178,27 @@ class NodeReportBuilder:
                     "data": None,
                 }
             return tool_calls[call_id]
+
+        def _record_tool_safety(*, call_id: str, payload: Dict[str, Any], source: str) -> None:
+            """记录最小 tool safety 摘要（仅保留枚举字符串与来源）。"""
+
+            args = payload.get("arguments")
+            if not isinstance(args, dict):
+                args = payload.get("args")
+            if not isinstance(args, dict):
+                args = payload.get("request")
+            if not isinstance(args, dict):
+                return
+            sandbox_permissions = args.get("sandbox_permissions")
+            if not isinstance(sandbox_permissions, str) or not sandbox_permissions.strip():
+                return
+            tool_safety.setdefault(
+                call_id,
+                {
+                    "sandbox_permissions": sandbox_permissions.strip(),
+                    "source": source,
+                },
+            )
 
         for ev in events:
             artifact_path = ev.payload.get("artifact_path")
@@ -215,6 +237,7 @@ class NodeReportBuilder:
                 name = str(ev.payload.get("name") or "").strip()
                 if call_id and name:
                     _ensure_tool(call_id, name=name)
+                    _record_tool_safety(call_id=call_id, payload=ev.payload, source="tool_call_requested")
                     if ev.step_id:
                         step_to_call[str(ev.step_id)] = {"call_id": call_id, "tool": name}
 
@@ -232,6 +255,7 @@ class NodeReportBuilder:
                     t["requires_approval"] = True
                     # Bridge 无法稳定读取 tool spec 时，只能通过 approval_* 事件推断 requires_approval。
                     requires_approval_inferred.add(call_id)
+                    _record_tool_safety(call_id=call_id, payload=ev.payload, source="approval_requested")
                     if isinstance(approval_key, str) and approval_key:
                         t["approval_key"] = approval_key
                     approval_pending.add(call_id)
@@ -393,6 +417,7 @@ class NodeReportBuilder:
                     if requires_approval_inferred
                     else {}
                 ),
+                **({"tool_safety": tool_safety} if tool_safety else {}),
             },
         )
         return report

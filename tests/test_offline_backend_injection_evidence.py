@@ -176,3 +176,5 @@ async def test_offline_injected_fake_backend_produces_wal_node_report_tool_evide
     t0 = next(t for t in tools if t.call_id == "c1")
     assert t0.requires_approval is True
     assert t0.approval_decision in {"approved", "approved_for_session"}
+    approval_inference = terminal.node_report.meta.get("approval_inference") or {}
+    assert approval_inference.get("requires_approval_call_ids") == ["c1"]
