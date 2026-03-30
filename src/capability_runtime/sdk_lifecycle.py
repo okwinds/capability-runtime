@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """SDK 生命周期组件：初始化、预检与 per-run Agent 创建。"""
 
+import inspect
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,9 +125,12 @@ class SdkLifecycle:
         }
 
         agent = Agent(**kwargs)
+        diagnostics: Dict[str, Dict[str, bool]] = {}
         for t in custom_tools:
-            agent.register_tool(t.spec, t.handler, override=bool(t.override))
-        return _AgentUsageEventBridge(agent=agent, usage_bridge_backend=usage_bridge_backend)
+            diagnostics[t.spec.name] = _register_custom_tool_compat(agent, t)
+        bridge = _AgentUsageEventBridge(agent=agent, usage_bridge_backend=usage_bridge_backend)
+        setattr(bridge, "_caprt_tool_registration_diagnostics", diagnostics)
+        return bridge
 
     def _load_sdk_config(self, config_paths: List[Path]) -> tuple[Any, List[FrameworkIssue]]:
         """
@@ -748,6 +752,39 @@ def _load_yaml_dict(path: Path) -> Dict[str, Any]:
     if not isinstance(obj, dict):
         raise ValueError("YAML root must be a mapping")
     return obj
+
+
+def _register_custom_tool_compat(agent: Any, tool: CustomTool) -> dict[str, bool]:
+    """
+    兼容上游 `register_tool` 的 descriptor 新旧签名。
+
+    返回值中的布尔位仅用于内部诊断与测试，不应作为生产逻辑分支条件。
+    """
+
+    descriptor_requested = tool.descriptor is not None
+    register_tool = agent.register_tool
+    parameters = inspect.signature(register_tool).parameters
+    supports_descriptor = "descriptor" in parameters
+
+    if supports_descriptor:
+        register_tool(
+            tool.spec,
+            tool.handler,
+            override=bool(tool.override),
+            descriptor=tool.descriptor,
+        )
+        return {
+            "descriptor_requested": descriptor_requested,
+            "descriptor_supported": True,
+            "descriptor_applied": descriptor_requested,
+        }
+
+    register_tool(tool.spec, tool.handler, override=bool(tool.override))
+    return {
+        "descriptor_requested": descriptor_requested,
+        "descriptor_supported": False,
+        "descriptor_applied": False,
+    }
 
 
 def _normalize_skills_config_for_skills_runtime(skills_config: Any) -> tuple[Any, List[FrameworkIssue]]:

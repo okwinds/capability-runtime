@@ -34,11 +34,13 @@ class CustomTool:
     - spec：工具规格（ToolSpec）
     - handler：工具处理函数（签名需兼容上游 ToolRegistry）
     - override：是否允许覆盖同名工具
+    - descriptor：可选上游 tool descriptor（若注册签名支持则透传）
     """
 
     spec: ToolSpec
     handler: Any
     override: bool = False
+    descriptor: Any | None = None
 
 
 @dataclass(frozen=True)

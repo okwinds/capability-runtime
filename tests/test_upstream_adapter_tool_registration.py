@@ -67,13 +67,21 @@ async def test_custom_tools_override_flag_is_propagated(monkeypatch: pytest.Monk
             mode="sdk_native",
             workspace_root=Path("."),
             preflight_mode="off",
-            custom_tools=[CustomTool(spec=spec, handler=handler, override=True)],
+            custom_tools=[CustomTool(spec=spec, handler=handler, override=True, descriptor={"kind": "demo"})],
         )
     )
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    sdk_agent = rt.create_sdk_agent()
     out = await rt.run("A", context=ExecutionContext(run_id="r1"))
     assert out.status == CapabilityStatus.SUCCESS
 
     agent = _FakeAgent.last_instance
     assert agent is not None
     assert ("t", True) in agent.registered
+    assert getattr(sdk_agent, "_caprt_tool_registration_diagnostics") == {
+        "t": {
+            "descriptor_requested": True,
+            "descriptor_supported": False,
+            "descriptor_applied": False,
+        }
+    }

@@ -17,11 +17,11 @@ class _FakeAgent:
     ):
         _FakeAgent.last_instance = self
         self.kwargs = kwargs
-        self.registered: list[tuple[str, bool]] = []
+        self.registered: list[tuple[str, bool, Any]] = []
 
-    def register_tool(self, spec, handler, *, override: bool = False) -> None:
+    def register_tool(self, spec, handler, *, override: bool = False, descriptor: Any = None) -> None:
         _ = handler
-        self.registered.append((str(getattr(spec, "name", "")), bool(override)))
+        self.registered.append((str(getattr(spec, "name", "")), bool(override), descriptor))
 
     async def run_stream_async(self, task, *, run_id=None, initial_history=None) -> AsyncIterator[AgentEvent]:
         _ = task
@@ -67,14 +67,22 @@ async def test_custom_tools_are_injected_into_sdk_agent(monkeypatch: pytest.Monk
             mode="sdk_native",
             workspace_root=Path("."),
             preflight_mode="off",
-            custom_tools=[CustomTool(spec=spec, handler=handler, override=False)],
+            custom_tools=[CustomTool(spec=spec, handler=handler, override=False, descriptor={"policy": "safe"})],
         )
     )
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    sdk_agent = rt.create_sdk_agent()
 
     out = await rt.run("A", context=ExecutionContext(run_id="r1"))
     assert out.output == "ok"
 
     agent = _FakeAgent.last_instance
     assert agent is not None
-    assert ("run_workflow", False) in agent.registered
+    assert ("run_workflow", False, {"policy": "safe"}) in agent.registered
+    assert getattr(sdk_agent, "_caprt_tool_registration_diagnostics") == {
+        "run_workflow": {
+            "descriptor_requested": True,
+            "descriptor_supported": True,
+            "descriptor_applied": True,
+        }
+    }
