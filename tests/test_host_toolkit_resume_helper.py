@@ -10,7 +10,12 @@ from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 
-from capability_runtime.host_toolkit.resume import build_host_resume_state, build_resume_replay_summary, load_agent_events_from_jsonl
+from capability_runtime.host_toolkit.resume import (
+    build_host_resume_state,
+    build_resume_replay_summary,
+    load_agent_events_from_jsonl,
+    load_agent_events_from_locator,
+)
 
 
 def _ev(t: str, *, payload=None) -> AgentEvent:
@@ -55,12 +60,33 @@ def test_resume_helper_builds_summary_without_leaking_tool_content(tmp_path: Pat
 
 
 def test_load_agent_events_from_jsonl_rejects_wal_locator_with_clear_message():
-    with pytest.raises(ValueError, match="wal locator is not a filesystem path"):
+    with pytest.raises(ValueError, match="wal_backend is required for wal locator"):
         load_agent_events_from_jsonl(events_path="wal://r1")
 
     # 允许 `#fragment`，但仍应明确拒绝 `wal://...` 作为 filesystem path。
-    with pytest.raises(ValueError, match="wal locator is not a filesystem path"):
+    with pytest.raises(ValueError, match="wal_backend is required for wal locator"):
         load_agent_events_from_jsonl(events_path="wal://r1#run_id=r1")
+
+
+def test_resume_helper_builds_summary_from_wal_locator_backend() -> None:
+    raw = "\n".join(
+        [
+            _ev("run_started").model_dump_json(),
+            _ev("tool_call_finished", payload={"call_id": "c1", "tool": "file_write", "result": {"ok": True}}).model_dump_json(),
+            _ev("run_completed", payload={"final_output": "ok"}).model_dump_json(),
+            "",
+        ]
+    )
+
+    class _WalBackend:
+        def read_text(self, locator: str) -> str:
+            assert locator == "wal://run/1"
+            return raw
+
+    loaded = load_agent_events_from_locator(events_path="wal://run/1", wal_backend=_WalBackend())
+    _state, summary = build_resume_replay_summary(events=loaded)
+
+    assert summary.tool_calls.finished_count == 1
 
 
 @pytest.mark.integration

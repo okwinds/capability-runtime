@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, Iterable, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -19,33 +19,53 @@ from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.state.replay import ResumeReplayState, rebuild_resume_replay_state
 
 
-def load_agent_events_from_jsonl(*, events_path: Union[Path, str]) -> List[AgentEvent]:
+def load_agent_events_from_locator(
+    *,
+    events_path: Union[Path, str],
+    wal_backend: Any | None = None,
+) -> List[AgentEvent]:
     """
-    从 events.jsonl 加载 AgentEvent 列表（用于回放/诊断）。
+    从 locator 加载 AgentEvent 列表（用于回放/诊断）。
 
     参数：
     - events_path：WAL 路径或 locator（本仓对外字段名为 `events_path`；上游 `skills-runtime-sdk>=1.0` 可能为 `wal_locator`）
+    - wal_backend：可选 WAL backend；当 locator 为 `wal://...` 时必须提供
 
     返回：
     - AgentEvent 列表（按文件顺序）
     """
 
     loc = str(events_path)
-    # best-effort：允许 wal_locator 追加 `#run_id=...` 等片段；文件读取仅使用其路径部分。
+    if loc.startswith("wal://"):
+        if wal_backend is None:
+            raise ValueError("wal_backend is required for wal locator")
+        read_events = getattr(wal_backend, "read_events", None)
+        if callable(read_events):
+            return _coerce_agent_events(read_events(loc))
+        read_text = getattr(wal_backend, "read_text", None)
+        if callable(read_text):
+            raw = read_text(loc)
+            return _parse_agent_events_jsonl(raw)
+        raise TypeError("wal_backend does not support wal locator reads")
+
+    # best-effort：允许 filesystem locator 追加 `#run_id=...` 等片段；文件读取仅使用其路径部分。
     if "#" in loc:
         loc = loc.split("#", 1)[0]
-    if loc.startswith("wal://"):
-        raise ValueError(f"wal locator is not a filesystem path: {loc}")
 
     raw = Path(loc).read_text(encoding="utf-8")
-    events: List[AgentEvent] = []
-    for line in raw.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        obj = json.loads(s)
-        events.append(AgentEvent.model_validate(obj))
-    return events
+    return _parse_agent_events_jsonl(raw)
+
+
+def load_agent_events_from_jsonl(
+    *,
+    events_path: Union[Path, str],
+    wal_backend: Any | None = None,
+) -> List[AgentEvent]:
+    """
+    兼容别名：保留旧函数名，实际委托到 locator 读取逻辑。
+    """
+
+    return load_agent_events_from_locator(events_path=events_path, wal_backend=wal_backend)
 
 
 class ResumeReplaySummary(BaseModel):
@@ -93,17 +113,25 @@ class HostResumeState(BaseModel):
     tool_calls: ReplayToolCallDigest
 
 
-def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeReplayState, ResumeReplaySummary]:
+def build_resume_replay_summary(
+    *,
+    events: List[AgentEvent] | None = None,
+    events_path: Union[Path, str, None] = None,
+    wal_backend: Any | None = None,
+) -> tuple[ResumeReplayState, ResumeReplaySummary]:
     """
     基于 events 回放得到 resume state，并生成诊断摘要。
 
     参数：
-    - events：AgentEvent 列表
+    - events：可选 AgentEvent 列表
+    - events_path：可选 locator；当未直接提供 events 时用于加载事件
+    - wal_backend：可选 WAL backend；当 events_path 为 `wal://...` 时透传给 locator 读取
 
     返回：
     - (ResumeReplayState, ResumeReplaySummary)
     """
 
+    events = _resolve_agent_events(events=events, events_path=events_path, wal_backend=wal_backend)
     st = rebuild_resume_replay_state(events)
     tool_calls = _build_replay_tool_call_digest(events)
 
@@ -125,17 +153,25 @@ def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeRepl
     return st, summary
 
 
-def build_host_resume_state(*, events: List[AgentEvent]) -> HostResumeState:
+def build_host_resume_state(
+    *,
+    events: List[AgentEvent] | None = None,
+    events_path: Union[Path, str, None] = None,
+    wal_backend: Any | None = None,
+) -> HostResumeState:
     """
     基于 events 回放得到面向宿主的续跑状态。
 
     参数：
-    - events：AgentEvent 列表
+    - events：可选 AgentEvent 列表
+    - events_path：可选 locator；当未直接提供 events 时用于加载事件
+    - wal_backend：可选 WAL backend；当 events_path 为 `wal://...` 时透传给 locator 读取
 
     返回：
     - HostResumeState（不暴露 tool 输出明文）
     """
 
+    events = _resolve_agent_events(events=events, events_path=events_path, wal_backend=wal_backend)
     st, summary = build_resume_replay_summary(events=events)
     requested_keys: List[str] = []
     resolved_keys: set[str] = set()
@@ -181,6 +217,46 @@ def _events_after_last_run_started(events: List[AgentEvent]) -> List[AgentEvent]
     if last_idx < 0:
         return list(events)
     return list(events[last_idx + 1 :])
+
+
+def _resolve_agent_events(
+    *,
+    events: List[AgentEvent] | None,
+    events_path: Union[Path, str, None],
+    wal_backend: Any | None,
+) -> List[AgentEvent]:
+    """统一解析 events / locator 两类输入。"""
+
+    if events is not None:
+        return list(events)
+    if events_path is None:
+        raise TypeError("either events or events_path is required")
+    return load_agent_events_from_locator(events_path=events_path, wal_backend=wal_backend)
+
+
+def _parse_agent_events_jsonl(raw: str) -> List[AgentEvent]:
+    """把 JSONL 文本解析为 AgentEvent 列表。"""
+
+    events: List[AgentEvent] = []
+    for line in raw.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        obj = json.loads(s)
+        events.append(AgentEvent.model_validate(obj))
+    return events
+
+
+def _coerce_agent_events(items: Iterable[Any]) -> List[AgentEvent]:
+    """把 backend 返回的事件序列归一为 AgentEvent 列表。"""
+
+    events: List[AgentEvent] = []
+    for item in items:
+        if isinstance(item, AgentEvent):
+            events.append(item)
+        else:
+            events.append(AgentEvent.model_validate(item))
+    return events
 
 
 def _build_replay_tool_call_digest(events: List[AgentEvent]) -> ReplayToolCallDigest:
