@@ -10,7 +10,7 @@ from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 
-from capability_runtime.host_toolkit.resume import build_resume_replay_summary, load_agent_events_from_jsonl
+from capability_runtime.host_toolkit.resume import build_host_resume_state, build_resume_replay_summary, load_agent_events_from_jsonl
 
 
 def _ev(t: str, *, payload=None) -> AgentEvent:
@@ -33,10 +33,24 @@ def test_resume_helper_builds_summary_without_leaking_tool_content(tmp_path: Pat
 
     loaded = load_agent_events_from_jsonl(events_path=p)
     _state, summary = build_resume_replay_summary(events=loaded)
+    host_state = build_host_resume_state(events=loaded)
 
     assert summary.events_count == 4
     assert summary.last_terminal_type == "run_completed"
     assert summary.approvals["approved_for_session_keys_count"] == 1
+    assert summary.tool_calls.requested_count == 0
+    assert summary.tool_calls.finished_count == 1
+    assert summary.tool_calls.pending_count == 0
+    assert summary.tool_calls.latest_pending_call_ids == []
+    assert summary.tool_calls.latest_tool_calls == [
+        {
+            "call_id": "c1",
+            "name": "file_write",
+            "step_id": None,
+            "status": "finished",
+        }
+    ]
+    assert host_state.tool_calls == summary.tool_calls
     assert secret_marker not in summary.model_dump_json()
 
 

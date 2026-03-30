@@ -58,6 +58,19 @@ class ResumeReplaySummary(BaseModel):
     events_count: int
     last_terminal_type: Optional[str] = None
     approvals: dict
+    tool_calls: "ReplayToolCallDigest"
+
+
+class ReplayToolCallDigest(BaseModel):
+    """replay / resume 所需的最小 tool call 摘要。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    requested_count: int
+    finished_count: int
+    pending_count: int
+    latest_pending_call_ids: list[str]
+    latest_tool_calls: list[dict]
 
 
 class HostResumeState(BaseModel):
@@ -77,6 +90,7 @@ class HostResumeState(BaseModel):
     approvals: dict
     last_terminal_type: Optional[str] = None
     waiting_approval_key: Optional[str] = None
+    tool_calls: ReplayToolCallDigest
 
 
 def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeReplayState, ResumeReplaySummary]:
@@ -91,6 +105,7 @@ def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeRepl
     """
 
     st = rebuild_resume_replay_state(events)
+    tool_calls = _build_replay_tool_call_digest(events)
 
     last_terminal_type = None
     for ev in reversed(events):
@@ -105,6 +120,7 @@ def build_resume_replay_summary(*, events: List[AgentEvent]) -> tuple[ResumeRepl
             "approved_for_session_keys_count": len(st.approved_for_session_keys),
             "denied_approvals_by_key_count": len(st.denied_approvals_by_key),
         },
+        tool_calls=tool_calls,
     )
     return st, summary
 
@@ -151,4 +167,75 @@ def build_host_resume_state(*, events: List[AgentEvent]) -> HostResumeState:
         },
         last_terminal_type=summary.last_terminal_type,
         waiting_approval_key=waiting_approval_key,
+        tool_calls=summary.tool_calls,
+    )
+
+
+def _events_after_last_run_started(events: List[AgentEvent]) -> List[AgentEvent]:
+    """只消费最近一次 run_started 之后的事件片段，与上游 replay 口径保持一致。"""
+
+    last_idx = -1
+    for i, ev in enumerate(events):
+        if ev.type == "run_started":
+            last_idx = i
+    if last_idx < 0:
+        return list(events)
+    return list(events[last_idx + 1 :])
+
+
+def _build_replay_tool_call_digest(events: List[AgentEvent]) -> ReplayToolCallDigest:
+    """从事件流中提取 replay / resume 所需的最小 tool call 摘要。"""
+
+    seg = _events_after_last_run_started(events)
+    requested_count = 0
+    finished_count = 0
+    pending_ids: list[str] = []
+    first_seen_order: list[str] = []
+    calls_by_id: dict[str, dict] = {}
+
+    for ev in seg:
+        if ev.type == "tool_call_requested":
+            call_id = str(ev.payload.get("call_id") or "").strip()
+            name = str(ev.payload.get("name") or ev.payload.get("tool") or "").strip()
+            if not call_id or not name:
+                continue
+            requested_count += 1
+            if call_id not in first_seen_order:
+                first_seen_order.append(call_id)
+            if call_id not in pending_ids:
+                pending_ids.append(call_id)
+            calls_by_id[call_id] = {
+                "call_id": call_id,
+                "name": name,
+                "step_id": str(ev.step_id or "").strip() or None,
+                "status": "pending",
+            }
+            continue
+
+        if ev.type == "tool_call_finished":
+            call_id = str(ev.payload.get("call_id") or "").strip()
+            name = str(ev.payload.get("tool") or ev.payload.get("name") or "").strip()
+            if not call_id or not name:
+                continue
+            finished_count += 1
+            if call_id not in first_seen_order:
+                first_seen_order.append(call_id)
+            if call_id in pending_ids:
+                pending_ids.remove(call_id)
+            prev = calls_by_id.get(call_id) or {}
+            calls_by_id[call_id] = {
+                "call_id": call_id,
+                "name": name,
+                "step_id": prev.get("step_id") or (str(ev.step_id or "").strip() or None),
+                "status": "finished",
+            }
+
+    latest_ids = first_seen_order[-20:]
+    latest_tool_calls = [calls_by_id[call_id] for call_id in latest_ids if call_id in calls_by_id]
+    return ReplayToolCallDigest(
+        requested_count=requested_count,
+        finished_count=finished_count,
+        pending_count=len(pending_ids),
+        latest_pending_call_ids=list(pending_ids),
+        latest_tool_calls=latest_tool_calls,
     )

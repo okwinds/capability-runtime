@@ -242,6 +242,21 @@ def test_report_turn_id_is_last_non_null_turn_id():
     assert rep.turn_id == "t3"
 
 
+def test_report_tool_calls_align_with_replay_pending_ids() -> None:
+    events = [
+        _ev("run_started"),
+        _ev("tool_call_requested", payload={"call_id": "c1", "name": "shell_exec", "arguments": {}}),
+        _ev("tool_call_requested", payload={"call_id": "c2", "name": "file_write", "arguments": {}}),
+        _ev("tool_call_finished", payload={"call_id": "c1", "tool": "shell_exec", "result": {"ok": True, "data": {}}}),
+        _ev("run_cancelled", payload={"message": "wait", "wal_locator": "wal.jsonl"}),
+    ]
+
+    rep = NodeReportBuilder().build(events=events)
+
+    unresolved = {tc.call_id for tc in rep.tool_calls if not tc.ok and tc.error_kind is None}
+    assert unresolved == {"c2"}
+
+
 def test_report_empty_events_returns_fail_closed_node_report():
     rep = NodeReportBuilder().build(events=[])
     assert rep.status == "failed"
