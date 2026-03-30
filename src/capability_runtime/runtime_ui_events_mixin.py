@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 
 from skills_runtime.core.contracts import AgentEvent
 
@@ -14,6 +14,40 @@ from .protocol.context import ExecutionContext
 
 # UI events 队列容量上限（防止内存无界增长）
 _UI_EVENTS_QUEUE_MAXSIZE = 1000
+
+
+class _RuntimeUIEventsConfig(Protocol):
+    """mixin 依赖的最小配置表面。"""
+
+    max_depth: int
+
+
+class RuntimeUIEventsHost(Protocol):
+    """RuntimeUIEventsMixin 宿主需要提供的最小能力表面。"""
+
+    _config: _RuntimeUIEventsConfig
+    _agent_event_taps: List[Any]
+
+    def _register_agent_event_tap(self, tap: Any) -> None:
+        """注册 AgentEvent tap。"""
+
+        ...
+
+    def _unregister_agent_event_tap(self, tap: Any) -> None:
+        """反注册 AgentEvent tap。"""
+
+        ...
+
+    def run_stream(
+        self,
+        capability_id: str,
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+    ) -> AsyncIterator[Any]:
+        """宿主 Runtime 的流式执行入口。"""
+
+        ...
 
 
 class RuntimeUIEventsMixin:
@@ -28,7 +62,7 @@ class RuntimeUIEventsMixin:
 
     _agent_event_taps: List[Any]
 
-    def _register_agent_event_tap(self, tap: Any) -> None:
+    def _register_agent_event_tap(self: RuntimeUIEventsHost, tap: Any) -> None:
         """
         注册一个 AgentEvent 旁路 tap（内部使用）。
 
@@ -38,12 +72,18 @@ class RuntimeUIEventsMixin:
 
         self._agent_event_taps.append(tap)
 
-    def _unregister_agent_event_tap(self, tap: Any) -> None:
+    def _unregister_agent_event_tap(self: RuntimeUIEventsHost, tap: Any) -> None:
         """反注册 AgentEvent tap（内部使用）。"""
 
         self._agent_event_taps = [t for t in self._agent_event_taps if t is not tap]
 
-    def emit_agent_event_taps(self, *, ev: AgentEvent, context: ExecutionContext, capability_id: str) -> None:
+    def emit_agent_event_taps(
+        self: RuntimeUIEventsHost,
+        *,
+        ev: AgentEvent,
+        context: ExecutionContext,
+        capability_id: str,
+    ) -> None:
         """
         将 SDK AgentEvent 分发给内部 taps（不影响对外事件流）。
 
@@ -128,7 +168,7 @@ class RuntimeUIEventsMixin:
                 )
 
     async def run_ui_events(
-        self,
+        self: RuntimeUIEventsHost,
         capability_id: str,
         *,
         input: Optional[Dict[str, Any]] = None,
@@ -151,7 +191,7 @@ class RuntimeUIEventsMixin:
         from .ui_events.projector import RuntimeUIEventProjector, _AgentCtx
         from .ui_events.v1 import StreamLevel
 
-        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth)  # type: ignore[attr-defined]
+        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth)
         lv = level if isinstance(level, StreamLevel) else StreamLevel.UI
         projector = RuntimeUIEventProjector(run_id=ctx.run_id, level=lv)
 
@@ -173,7 +213,7 @@ class RuntimeUIEventsMixin:
 
         async def _runner() -> None:
             try:
-                async for item in self.run_stream(capability_id, input=input, context=ctx):  # type: ignore[attr-defined]
+                async for item in self.run_stream(capability_id, input=input, context=ctx):
                     if isinstance(item, dict):
                         await q.put(("workflow_event", item))
                     elif isinstance(item, CapabilityResult):
@@ -235,7 +275,7 @@ class RuntimeUIEventsMixin:
             self._unregister_agent_event_tap(_tap)
 
     def start_ui_events_session(
-        self,
+        self: RuntimeUIEventsHost,
         capability_id: str,
         *,
         input: Optional[Dict[str, Any]] = None,
@@ -253,7 +293,7 @@ class RuntimeUIEventsMixin:
         from .ui_events.store import InMemoryRuntimeEventStore
         from .ui_events.v1 import StreamLevel
 
-        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth)  # type: ignore[attr-defined]
+        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth)
         lv = level if isinstance(level, StreamLevel) else StreamLevel.UI
         store_impl = store if store is not None else InMemoryRuntimeEventStore(max_events=int(store_max_events))
         return RuntimeUIEventsSession(
@@ -265,3 +305,6 @@ class RuntimeUIEventsMixin:
             store=store_impl,
             heartbeat_interval_s=float(heartbeat_interval_s),
         )
+
+
+__all__ = ["RuntimeUIEventsMixin", "RuntimeUIEventsHost"]

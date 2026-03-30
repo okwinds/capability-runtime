@@ -977,3 +977,6 @@ def _sanitize_sdk_overlay_dict_for_loader(overlay: Dict[str, Any]) -> tuple[Dict
 
     sanitized["skills"] = skills_obj
     return sanitized, issues
+
+
+__all__ = ["SdkLifecycle"]

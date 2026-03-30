@@ -23,6 +23,7 @@ from skills_runtime.llm.protocol import ChatBackend, ChatRequest
 from skills_runtime.tools.protocol import ToolSpec, tool_spec_to_openai_tool
 
 from ..logging_utils import log_suppressed_exception
+from ..utils.usage import _usage_int
 
 
 class AgentlyRequester(Protocol):
@@ -64,21 +65,6 @@ class AgentlyBackendConfig:
     """
 
     requester_factory: AgentlyRequesterFactory
-
-
-def _usage_int(value: Any) -> Optional[int]:
-    """把 usage 数值归一为非负 int；无法识别时返回 None。"""
-
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value if value >= 0 else None
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed >= 0 else None
-
 
 def _normalize_usage_payload(*, usage: Any, model: Any = None) -> Optional[Dict[str, Any]]:
     """

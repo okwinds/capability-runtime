@@ -161,3 +161,13 @@ def validate_manifest_entry_matches_spec(entry: CapabilityManifestEntry, spec: A
         )
     if entry.kind != base.kind:
         raise ValueError(f"Manifest entry kind mismatch: {entry.kind!r} != {base.kind!r}")
+
+
+__all__ = [
+    "CapabilityVisibility",
+    "CapabilityManifestEntry",
+    "CapabilityDescriptor",
+    "build_manifest_entry_from_spec",
+    "collect_capability_dependencies",
+    "validate_manifest_entry_matches_spec",
+]

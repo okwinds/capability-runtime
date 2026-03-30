@@ -407,3 +407,12 @@ class RuntimeServiceFacade:
             return
         await wait_done()
         self._handles.pop(run_id, None)
+
+
+__all__ = [
+    "RuntimeSession",
+    "RuntimeServiceRequest",
+    "RuntimeServiceHandle",
+    "RuntimeServiceFacade",
+    "build_session_context",
+]
