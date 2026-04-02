@@ -13,6 +13,7 @@ from __future__ import annotations
 """
 
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -32,30 +33,55 @@ _FORBIDDEN_SUBMODULES = (
 
 
 def _iter_user_facing_files(repo_root: Path) -> list[Path]:
+    tracked = {
+        Path(part.decode("utf-8", errors="replace"))
+        for part in subprocess.run(
+            ["git", "-C", str(repo_root), "ls-files", "-z"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ).stdout.split(b"\x00")
+        if part
+    }
     targets: list[Path] = []
     for p in [
         repo_root / "README.md",
         repo_root / "config" / "README.md",
     ]:
-        if p.exists():
+        rel = p.relative_to(repo_root)
+        if p.exists() and rel in tracked:
             targets.append(p)
 
     config_dir = repo_root / "config"
     if config_dir.exists():
         for ext in (".yaml", ".yml"):
-            targets.extend([x for x in config_dir.rglob(f"*{ext}") if x.is_file()])
+            targets.extend(
+                [
+                    x
+                    for x in config_dir.rglob(f"*{ext}")
+                    if x.is_file() and x.relative_to(repo_root) in tracked
+                ]
+            )
 
     for base in [repo_root / "examples", repo_root / "docs_for_coding_agent"]:
         if not base.exists():
             continue
         for ext in (".py", ".md", ".yaml", ".yml"):
-            targets.extend([x for x in base.rglob(f"*{ext}") if x.is_file()])
+            targets.extend(
+                [
+                    x
+                    for x in base.rglob(f"*{ext}")
+                    if x.is_file() and x.relative_to(repo_root) in tracked
+                ]
+            )
 
     docs_dir = repo_root / "docs"
     if docs_dir.exists():
         for ext in (".md", ".yaml", ".yml"):
             for x in docs_dir.rglob(f"*{ext}"):
                 if not x.is_file():
+                    continue
+                if x.relative_to(repo_root) not in tracked:
                     continue
                 # internal/legacy 文档是“历史取证/归档材料”，允许出现旧名词/旧路径（但必须在文件内显式标注）。
                 parts = x.relative_to(repo_root).parts

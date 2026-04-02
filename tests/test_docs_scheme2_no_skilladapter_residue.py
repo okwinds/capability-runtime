@@ -16,12 +16,8 @@ def _read_text(path: Path) -> str:
 @pytest.mark.parametrize(
     "relative_path",
     [
-        # canonical set：以 DOCS_INDEX.md 的 Core / Coding Agent Pack / Examples（推荐）为准
-        "DOCS_INDEX.md",
+        # public canonical set：README + 教学包 + 示例说明
         "README.md",
-        "docs/README.md",
-        "docs/spec.md",
-        "docs/SPEC_INDEX.md",
         "docs_for_coding_agent/README.md",
         "docs_for_coding_agent/cheatsheet.md",
         "docs_for_coding_agent/00-mental-model.md",

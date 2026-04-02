@@ -291,7 +291,7 @@ Host / TriggerFlow  ------------------------------->  Runtime.run("WF-*")
 
 ## 公共 API（对外承诺）
 
-按输入文档 `docs/context/refactoring-spec.md` 的 2.7 节收敛后，本仓对外推荐只从包根导入：
+按当前公共 API 收敛后，本仓对外推荐只从包根导入：
 
 ```python
 from capability_runtime import Runtime, RuntimeConfig, CustomTool

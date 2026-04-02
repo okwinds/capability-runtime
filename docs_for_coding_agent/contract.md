@@ -4,18 +4,18 @@
 
 - 不偏航：所有改动服务于“生产级能力运行时基座”的主旨
 - 可回归：变更必须可测试、可复现
-- 可追溯：关键命令/结论写入工作记录（按 `DOCS_INDEX.md` 的 canonical 入口；通常为 `docs/worklog.md`）
+- 可追溯：关键命令/结论至少体现在提交说明、任务记录或评审说明中
 
 ## 1) 最小闭环（你每次都应该走）
 
 1. 读输入文档（若本轮提供）：明确边界、验收与禁止项
-2. 写/更新 spec（至少 Goal/AC/Test Plan）
+2. 写/更新公开可读的 spec 或任务说明（至少 Goal/AC/Test Plan）
 3. 先补离线回归测试（RED）
 4. 实现最小改动（GREEN）
 5. 跑离线回归（至少 `python -m pytest tests/ -q`）
-6. 更新：工作记录（通常 `docs/worklog.md`）、`DOCS_INDEX.md`、任务总结（`docs/task-summaries/YYYY-MM-DD-*.md`）
+6. 更新：README / 示例说明 / PR 描述等公开可读交付材料
 
-> 约束提示：所有“删除”必须先归档并保持可索引追溯；未经授权不得修改 `.gitignore`。
+> 约束提示：不要提交真实密钥、本地 `.env`、私有协作文档或运行态缓存；修改 `.gitignore` 前先确认范围。
 
 ## 2) Runtime 使用契约（单一入口）
 

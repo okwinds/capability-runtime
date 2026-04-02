@@ -2,7 +2,7 @@
 
 > 面向：编码智能体 / 维护者  
 > 目标：避免把本仓误读成“另一个 Agent Framework / Prompt 工程项目”。  
-> 阅读/参考顺序（推荐）：`DOCS_INDEX.md` → `docs/specs/`（源规格/门禁依据）→ `openspec/specs/`（归档镜像/对照）→ 测试与运行证据（回归/取证）。`docs/context/refactoring-spec.md` 属于过程材料，仅用于追溯（其中的章节号可作为背景索引，而非当前验收口径）。
+> 阅读/参考顺序（推荐）：`README.md` → `docs_for_coding_agent/cheatsheet.md` → 测试与运行证据（回归/取证）。
 
 ## 1) 本仓解决的核心矛盾是什么？
 
