@@ -1,0 +1,49 @@
+name: Publish capability-runtime to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to validate before publish (for example v0.0.7)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+
+      - name: Guardrail (tag ↔ version alignment)
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
+        run: |
+          python scripts/check_release_tag_version.py --tag "${RELEASE_TAG}"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

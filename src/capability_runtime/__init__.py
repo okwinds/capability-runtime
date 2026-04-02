@@ -1,6 +1,8 @@
 """capability-runtime：统一 Runtime 入口（能力协议 + 执行 + 报告）。"""
 from __future__ import annotations
 
+__version__ = "0.0.7"
+
 # === 统一入口 ===
 from .config import CustomTool, RuntimeConfig
 from .runtime import Runtime

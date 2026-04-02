@@ -67,5 +67,5 @@ def test_public_repo_keeps_minimum_public_entrypoints() -> None:
     """断言：公共仓仍保留最小公开入口与示例模板。"""
 
     assert (_REPO_ROOT / "README.md").is_file(), "README.md 缺失"
+    assert (_REPO_ROOT / "help" / "README.md").is_file(), "help/README.md 缺失"
     assert (_REPO_ROOT / ".env.example").is_file(), ".env.example 缺失"
-

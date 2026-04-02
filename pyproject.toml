@@ -4,7 +4,7 @@ version = "0.0.7"
 description = "Bridge/glue layer that composes Agently (LLM/TriggerFlow) with skills-runtime-sdk (skills/tools/WAL/events)."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
 dependencies = [
   "PyYAML>=6",
   "pydantic>=2,<3",

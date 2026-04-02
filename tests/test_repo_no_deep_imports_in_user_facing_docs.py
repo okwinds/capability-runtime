@@ -8,7 +8,7 @@ from __future__ import annotations
 - 禁止：`from capability_runtime.<submodule> import ...`（深路径不作为对外契约面）
 
 说明：
-- 本测试只覆盖“用户可见/可复制粘贴”的入口：README、config/README、examples/、docs_for_coding_agent/。
+- 本测试只覆盖“用户可见/可复制粘贴”的入口：README、config/README、help/、examples/、docs_for_coding_agent/。
 - tests/ 与 src/ 内部实现可以使用深路径（测试内部模块或模块内相对 import），不在此护栏范围内。
 """
 
@@ -63,7 +63,7 @@ def _iter_user_facing_files(repo_root: Path) -> list[Path]:
                 ]
             )
 
-    for base in [repo_root / "examples", repo_root / "docs_for_coding_agent"]:
+    for base in [repo_root / "help", repo_root / "examples", repo_root / "docs_for_coding_agent"]:
         if not base.exists():
             continue
         for ext in (".py", ".md", ".yaml", ".yml"):

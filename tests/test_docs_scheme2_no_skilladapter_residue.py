@@ -18,6 +18,9 @@ def _read_text(path: Path) -> str:
     [
         # public canonical set：README + 教学包 + 示例说明
         "README.md",
+        "help/README.md",
+        "help/00-overview.md",
+        "help/03-python-api.md",
         "docs_for_coding_agent/README.md",
         "docs_for_coding_agent/cheatsheet.md",
         "docs_for_coding_agent/00-mental-model.md",
