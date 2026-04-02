@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 02_workflow_sequential（顺序编排：Step + InputMapping）
 
 **演示**：3 个 Agent 顺序执行，展示 `Step` + `InputMapping` 的数据流转方式。

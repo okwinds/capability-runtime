@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Framework Validation Prototype（已迁移）
 
 本目录的旧实现用于验证 v0.4.0 的 `SkillSpec/SkillAdapter`（含 `inject_to` / `dispatch_rules`）。

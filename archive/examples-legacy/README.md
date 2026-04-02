@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # examples 历史归档（非主线）
 
 本目录用于归档 `examples/` 下的历史示例（建设期早期迭代产物），它们多数基于旧入口/旧叙事，

@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 01_declare_and_run（声明 + 执行：Hello World）
 
 **演示**：最小的 `AgentSpec` 声明 + mock 执行，展示“声明 → 注册 → 校验 → 执行”的完整流程。

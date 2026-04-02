@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 2026-02-24 v0.4.0（pre-refactor）完整归档
 
 本目录用于保存 `capability-runtime` 在“统一 Runtime 入口重构”前的完整快照，以便：

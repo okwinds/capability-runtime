@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Backend（FastAPI）
 
 > 说明：该后端用于“能力验证”，默认提供离线 demo（scripted LLM stream），不依赖外网。

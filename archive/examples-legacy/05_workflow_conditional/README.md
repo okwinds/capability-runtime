@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 05_workflow_conditional（条件分支：ConditionalStep）
 
 **演示**：`ConditionalStep` 根据上一步输出选择不同分支执行。

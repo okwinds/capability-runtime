@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 07_skill_dispatch（已迁移）
 
 本目录曾用于演示 `SkillSpec.dispatch_rules`（技能内部触发调度）的旧口径。

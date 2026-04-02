@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 06_skill_injection（已迁移）
 
 本目录曾用于演示 `SkillSpec.inject_to` 自动注入技能内容到 Agent 的旧口径。

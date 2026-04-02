@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Legacy Archive：2026-02-12 repo-compliance-audit deprecation
 
 本目录归档了与当前“fork-bridge 主线”无关的历史资产，保留追溯但不再参与主线开发：

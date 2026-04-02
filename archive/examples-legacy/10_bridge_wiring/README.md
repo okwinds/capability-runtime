@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 示例 10：Bridge 接线（真实 LLM + 降级）
 
 本示例演示：

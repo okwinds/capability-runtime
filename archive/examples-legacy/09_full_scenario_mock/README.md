@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 示例 09：完整场景（离线 mock）
 
 本示例展示一个完整的“内容创作工作流”，对应典型组合模式：

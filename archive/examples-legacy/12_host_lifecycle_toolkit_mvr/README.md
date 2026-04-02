@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 12_host_lifecycle_toolkit_mvr
 
 最小可复刻示例：Host 生命周期工具箱（MVR）——TurnDelta / HistoryAssembler / SystemPromptProvider / approvals（阻塞等待）/ resume helper。

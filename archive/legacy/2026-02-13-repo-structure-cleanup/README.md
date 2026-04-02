@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Legacy Archive：2026-02-13 repo-structure-cleanup
 
 本目录用于归档“与当前桥接主线无关/已不再使用”的历史资产，保留可追溯性但不干扰主线阅读。

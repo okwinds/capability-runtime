@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 全量能力验证 Web 原型（Agently × Skills Runtime SDK）
 
 > 目的：用一个小型 Web 应用把“全量能力覆盖”落成可运行、可复刻、可回归的验证入口。  

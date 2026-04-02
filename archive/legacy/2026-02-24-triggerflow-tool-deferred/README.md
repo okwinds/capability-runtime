@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 2026-02-24 TriggerFlow tool 桥接（triggerflow_run_flow）搁置归档
 
 本目录用于归档并追溯“TriggerFlow 作为 SDK Agent tool（`triggerflow_run_flow`）”的桥接实现与对应测试。

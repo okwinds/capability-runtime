@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # archive/legacy/（历史实验线/阶段性产物）
 
 本目录用于存放**不再作为主线验收对象**的历史产物（实验线、阶段性重构快照、清理残留等），以便追溯与审计。

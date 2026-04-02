@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # 04_workflow_parallel（并行编排：ParallelStep）
 
 **演示**：`ParallelStep` 让多个 Agent 并行执行，并把并行结果交给后续步骤汇总。
