@@ -1,14 +1,17 @@
-# Recipe: 03_skill_exec_actions（Skills Actions / skill_exec）
+<div align="center">
 
-本配方示例演示 **Skills Actions（Phase 3）** 的最小可回归闭环：
+[English](README.md) | [中文](README.zh-CN.md)
 
-- overlay：`skills.actions.enabled=true`（默认 fail-closed）
-- skill bundle：在 `SKILL.md` frontmatter 里声明 `actions.<action_id>.argv`
-- agent：通过 builtin tool `skill_exec` 执行 action（带 approvals 与 tool evidence）
+</div>
 
-离线运行（用于回归）：
+# 03_skill_exec_actions
+
+This English page is the default entry for open-source readers.
+
+For full Chinese details and original context, see [README.zh-CN.md](README.zh-CN.md).
+
+## Quick Run
 
 ```bash
-python docs_for_coding_agent/examples/recipes/03_skill_exec_actions/run.py --workspace-root /tmp/caprt-recipe-03
+python docs_for_coding_agent/examples/recipes/03_skill_exec_actions/run.py
 ```
-

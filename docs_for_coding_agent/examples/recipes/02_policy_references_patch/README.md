@@ -1,14 +1,17 @@
-# Recipe: 02_policy_references_patch（Policy/References 驱动补丁）
+<div align="center">
 
-本配方演示“策略/引用驱动补丁”的最小形态（skills-first）：
+[English](README.md) | [中文](README.zh-CN.md)
 
-- Policy：以技能 bundle 的 `references/` 文件作为“受限引用”（`skill_ref_read`）
-- Patch：根据 policy 的约束执行 `apply_patch`
-- Evidence：NodeReport.tool_calls 记录 `skill_ref_read/apply_patch` 的证据
+</div>
 
-离线运行（用于回归）：
+# 02_policy_references_patch
+
+This English page is the default entry for open-source readers.
+
+For full Chinese details and original context, see [README.zh-CN.md](README.zh-CN.md).
+
+## Quick Run
 
 ```bash
-python docs_for_coding_agent/examples/recipes/02_policy_references_patch/run.py --workspace-root /tmp/caprt-recipe-02
+python docs_for_coding_agent/examples/recipes/02_policy_references_patch/run.py
 ```
-

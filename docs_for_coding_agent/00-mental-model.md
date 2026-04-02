@@ -1,75 +1,43 @@
-# 心智模型：Protocol → Runtime → Report（三件套）
+<div align="center">
 
-> 面向：编码智能体 / 维护者  
-> 目标：避免把本仓误读成“另一个 Agent Framework / Prompt 工程项目”。  
-> 阅读/参考顺序（推荐）：`README.md` → `docs_for_coding_agent/cheatsheet.md` → 测试与运行证据（回归/取证）。
+[English](00-mental-model.md) | [中文](00-mental-model.zh-CN.md)
 
-## 1) 本仓解决的核心矛盾是什么？
+</div>
 
-本仓的中心不是“怎么把 LLM 调得更聪明”，而是：
+# Mental Model: Protocol -> Runtime -> Report
 
-- **怎么声明能力**（Agent / Workflow）
-- **怎么组织与执行能力**（统一入口、可组合、可回归）
-- **怎么留下系统级证据链**（NodeReport / events / tool evidence）
+This repository is not a prompt-playground project and not a second agent
+framework. Treat it as a contract-convergence layer around a smaller public
+runtime surface.
 
-你在本仓最应该交付的核心资产通常是：**Spec（声明）+ Adapter（落地）+ Tests（护栏）**。
+## 1. Protocol
 
-## 2) 两个上游分别负责什么？
+- declare capabilities with `AgentSpec` and `WorkflowSpec`
+- define inputs, outputs, and composition edges
+- do not execute anything here
 
-本仓是 runtime/adapter/bridge 的契约收敛层，不 fork 上游引擎。
+## 2. Runtime
 
-```mermaid
-flowchart LR
-  TF[TriggerFlow] --> APP[Host code]
-  APP --> R[Runtime.run / Runtime.run_stream]
-  P[AgentSpec / WorkflowSpec] --> R
-  R --> SDK[skills_runtime engine]
-  AGT[Agently OpenAICompatible] --> SDK
-  SDK --> EVT[WAL / AgentEvent] --> NR[NodeReport]
-```
+- run everything through `Runtime.run()` or `Runtime.run_stream()`
+- switch transport/execution flavor with `RuntimeConfig.mode`
+- keep the host-facing surface stable and testable
 
-> 若你在 GitHub 上看到 Mermaid 无法渲染/报错，请直接看 `README.md` 的 ASCII 图（所有渲染器都稳定支持）。
+## 3. Report
 
-关键口径：
+- read `NodeReport` first when you need structured evidence
+- use `output` as the data plane, not as the main orchestration contract
+- expect approval/tool/WAL summaries to be aggregated into the terminal report
 
-- **skills 体系**（mention/sources/preflight/tools/approvals/WAL）由上游 `skills_runtime` 提供；本仓不再定义“第三种 skills 协议/注入原语”。
-- **Agently 在本仓的角色**：可替换的传输层（桥接 SSE streaming）+ Workflow 内部 TriggerFlow 引擎实现（对外无感）。
-- **TriggerFlow tool（`triggerflow_run_flow`）不在主线**：按输入文档 2.5 搁置归档；推荐使用 TriggerFlow 顶层编排多个 `Runtime.run()`。
+## Upstream Responsibilities
 
-## 3) 三件套各自的边界
+- `skills-runtime-sdk`: skills, tools, approvals, WAL, and event truth
+- `Agently`: OpenAI-compatible transport and workflow internals
+- `capability-runtime`: the smaller runtime contract that hosts can integrate
 
-### 3.1 Protocol：只声明，不执行
+## Suggested Code Reading Order
 
-- 只放 dataclass/Enum/类型声明
-- 不依赖上游
-- 目标是“契约可审计、可回归”
-
-### 3.2 Runtime：唯一执行入口
-
-你只通过这两个入口执行：
-
-- `await Runtime.run(capability_id, input=..., context=...)`：直接拿终态 `CapabilityResult`
-- `async for x in Runtime.run_stream(...):`
-  - Agent 路径：先转发上游事件（bridge/sdk_native），最后产出终态 `CapabilityResult`
-  - Workflow 路径：输出轻量 workflow 事件（`workflow.started`、`workflow.step.*`、`workflow.finished`），最后产出终态 `CapabilityResult`
-
-### 3.3 Report：系统级证据链（桥接模式）
-
-当 `RuntimeConfig.mode="bridge"` 或 `"sdk_native"` 时：
-
-- `run_stream()` 会转发上游 `AgentEvent`
-- 终态 `CapabilityResult.node_report` 会填入 `NodeReport`
-
-你应该把 `NodeReport` 视为：
-
-- 回归护栏的“结构化证据入口”（比对事件序列/工具证据）
-- 编排可观测性的“控制面”
-- 审计与排障的“证据链”
-
-## 4) 10 分钟读代码路径（可选）
-
-1. `src/capability_runtime/__init__.py`：公共 API 面（框架承诺什么）
-2. `src/capability_runtime/runtime.py`：统一执行入口与 run/run_stream 语义
-3. `src/capability_runtime/protocol/*`：协议与默认值
-4. `src/capability_runtime/adapters/*`：Agent/Workflow 的执行落点
-5. `src/capability_runtime/reporting/node_report.py`：事件聚合为 NodeReport
+1. `src/capability_runtime/__init__.py`
+2. `src/capability_runtime/runtime.py`
+3. `src/capability_runtime/protocol/`
+4. `src/capability_runtime/service_facade.py`
+5. `src/capability_runtime/reporting/node_report.py`

@@ -1,20 +1,17 @@
-# examples/05_workflow_skills_first
+<div align="center">
 
-本目录演示一个“组合示例”：**Workflow 编排 skills-first Agent**（离线可回归）。
+[English](README.md) | [中文](README.zh-CN.md)
 
-安装（从仓库根目录执行一次即可）：
+</div>
 
-```bash
-python -m pip install -e ".[dev]"
-```
+# 05_workflow_skills_first
 
-你将看到：
-- Workflow 仍只引用 Agent/Workflow 原语（不引入 Skill 节点）
-- 每个 Agent 以 skills 为主要驱动（system prompt 变薄）
-- 每个 Agent 运行都会产生可审计证据链（WAL + NodeReport），Workflow 通过 `context.step_results` 持有每步的控制面证据（例如遍历 `context.step_results.values()` 读取 `report`）
+This English page is the default entry for open-source readers.
 
-运行：
+For full Chinese details and original context, see [README.zh-CN.md](README.zh-CN.md).
+
+## Quick Run
 
 ```bash
-python examples/05_workflow_skills_first/run.py --workspace-root /tmp/caprt-ex-05
+python examples/05_workflow_skills_first/run.py
 ```

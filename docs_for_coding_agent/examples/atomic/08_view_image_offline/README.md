@@ -1,15 +1,17 @@
-# Atomic: 08_view_image_offline（view_image：读取本地图片）
+<div align="center">
 
-本示例只教学一个能力点：**view_image 读取本地图片并返回 base64**。
+[English](README.md) | [中文](README.zh-CN.md)
 
-你将看到：
-- 如何在 workspace 内创建图片文件
-- 如何调用 `view_image(path=...)`
-- 如何在 NodeReport.tool_calls 中读取 `mime/base64`
+</div>
 
-离线运行（用于回归）：
+# 08_view_image_offline
+
+This English page is the default entry for open-source readers.
+
+For full Chinese details and original context, see [README.zh-CN.md](README.zh-CN.md).
+
+## Quick Run
 
 ```bash
-python docs_for_coding_agent/examples/atomic/08_view_image_offline/run.py --workspace-root /tmp/caprt-atomic-08
+python docs_for_coding_agent/examples/atomic/08_view_image_offline/run.py
 ```
-

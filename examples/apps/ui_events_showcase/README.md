@@ -1,32 +1,17 @@
-# UI Events Showcase（offline-first）
+<div align="center">
 
-一个最小可运行的人类 Web app，用于展示 **Runtime UI Events v1** 的消费方式：
+[English](README.md) | [中文](README.zh-CN.md)
 
-- 左侧：Workflow 树（按 `RuntimeEvent.path` 投影）
-- 中间：Chat/过程文本
-- 右侧：事件与证据抽屉（`evidence.events_path` 等指针）
+</div>
 
-## 运行（离线）
+# ui_events_showcase
+
+This English page is the default entry for open-source readers.
+
+For full Chinese details and original context, see [README.zh-CN.md](README.zh-CN.md).
+
+## Quick Run
 
 ```bash
-python examples/apps/ui_events_showcase/run.py --mode offline
+python examples/apps/ui_events_showcase/run.py
 ```
-
-打开浏览器访问：
-
-- `http://127.0.0.1:8789/`
-
-## API
-
-- `POST /api/start?mode=offline&level=ui` → `{session_id, run_id, mode, level}`
-- `GET /api/events?session_id=...&transport=sse[&after_id=...]`
-- `GET /api/events?session_id=...&transport=jsonl[&after_id=...]`
-
-## Real 模式（默认 fail-closed；需显式 gate）
-
-当请求 `mode=real` 且环境变量 `CAPRT_TEST_E2E_BRIDGE != "1"` 时：
-
-- `/api/start` 必须返回 403
-- 且不会触发 `.env` 读取或 provider 初始化
-
-当 `CAPRT_TEST_E2E_BRIDGE == "1"` 且本地配置齐备时，real 模式可用于接入 Bridge E2E（读取 `.env`：`OPENAI_API_KEY/OPENAI_BASE_URL/MODEL_NAME`）。

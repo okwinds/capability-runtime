@@ -1,51 +1,51 @@
-# 配置示例（config/）
+<div align="center">
 
-本目录提供 `capability-runtime` 的**示例配置**，用于帮助你复刻运行环境与集成形态。
+[English](README.md) | [中文](README.zh-CN.md)
 
-重要说明：
-- 本仓对外只承诺**单一入口**：`Runtime` + `RuntimeConfig`（从包根导入）。
-- 示例只表达“形态”，不绑定任何具体业务；不要在仓库内提交真实 secrets。
+</div>
 
-## 文件说明
+# config/
 
-- `config/default.yaml`
-  - `RuntimeConfig` 的 YAML 形态示例（字段以 `src/capability_runtime/config.py` 为准）。
-  - 本仓不强制提供“YAML → RuntimeConfig”的内置装载器；建议由宿主按自己的配置系统解析后再构造 `RuntimeConfig`。
-- `config/sdk.example.yaml`
-  - 上游 `skills-runtime-sdk` overlays 示例（Strict Catalog：spaces + sources + scan/mention）。
-  - 仅用于表达形态；实际 schema 以上游 SDK 文档与实现为准。
+This directory contains example configuration shapes for `capability-runtime`.
 
-## 使用方式（示例）
+Important boundaries:
+
+- the repository exposes `Runtime` and `RuntimeConfig` as the public entrypoint
+- example YAML files describe shapes, not secrets
+- runtime-only objects such as approval providers or Agently agents are still
+  injected by host code, not by static YAML
+
+## Files
+
+- `default.yaml`
+  - Example shape for `RuntimeConfig`
+  - field names must stay aligned with `src/capability_runtime/config.py`
+- `sdk.example.yaml`
+  - Example overlay for `skills-runtime-sdk`
+  - useful for strict catalog, sources, and mention/preflight demonstrations
+
+## Example Usage
 
 ```python
-import asyncio
 from pathlib import Path
 
 import yaml
 
 from capability_runtime import Runtime, RuntimeConfig
 
-# 1) 读取 YAML（示例）
 raw = yaml.safe_load(Path("config/default.yaml").read_text(encoding="utf-8")) or {}
-sdk_paths = [Path(p) for p in (raw.get("sdk_config_paths") or [])]
-
-# 2) 构造 RuntimeConfig（Path 类型建议在宿主侧统一 expanduser/resolve）
 cfg = RuntimeConfig(
     mode=str(raw.get("mode") or "bridge"),
     workspace_root=Path(str(raw.get("workspace_root") or ".")),
-    sdk_config_paths=sdk_paths,
     preflight_mode=str(raw.get("preflight_mode") or "error"),
 )
 
-# 3) 创建 Runtime（运行期对象如 agently_agent / approval_provider 等由宿主注入）
-rt = Runtime(cfg)
-print(rt.validate())
-
-# 4) 执行（示例）
-asyncio.run(rt.run("your-capability-id", input={}))
+runtime = Runtime(cfg)
+print(runtime.validate())
 ```
 
-## 说明与约束
+## Notes
 
-- `agently_agent` / `ApprovalProvider` / `HumanIOProvider` / `ExecSessionsProvider` 等运行期对象无法在 YAML 中表达，需由宿主代码注入。
-- `preflight_mode="error"` 为生产建议默认值：发现 Skills 配置问题应 fail-closed。
+- `sdk_config_paths` should point to real overlay files controlled by the host application.
+- `preflight_mode="error"` is the safest default when you want fail-closed behavior.
+- never commit real `.env`, provider credentials, or environment-specific overlay files.

@@ -1,15 +1,17 @@
-# examples/04_triggerflow_orchestration
+<div align="center">
 
-本目录演示推荐的编排方式：**TriggerFlow 顶层编排多个 `Runtime.run()`**（不走 TriggerFlow tool）。
+[English](README.md) | [中文](README.zh-CN.md)
 
-## 运行
+</div>
+
+# 04_triggerflow_orchestration
+
+This English page is the default entry for open-source readers.
+
+For full Chinese details and original context, see [README.zh-CN.md](README.zh-CN.md).
+
+## Quick Run
 
 ```bash
-python -m pip install -e ".[dev]"
-cp examples/04_triggerflow_orchestration/.env.example examples/04_triggerflow_orchestration/.env
 python examples/04_triggerflow_orchestration/run.py
 ```
-
-说明：
-- 缺少 `.env` 或必要环境变量时，示例会打印提示并退出（exit code 0）。
-
