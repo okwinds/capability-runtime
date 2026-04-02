@@ -22,7 +22,7 @@
 本地验证命令：
 
 ```bash
-python scripts/check_release_tag_version.py --tag v0.0.7
+python scripts/check_release_tag_version.py --tag v0.1.0
 python -m build
 ```
 

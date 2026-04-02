@@ -22,11 +22,11 @@ def _load_release_guard_module():
 def test_release_guard_accepts_current_tag() -> None:
     module = _load_release_guard_module()
     tag_version, pyproject_version, module_version = module.validate_versions(
-        release_tag="v0.0.7",
+        release_tag="v0.1.0",
         pyproject_path=_REPO_ROOT / "pyproject.toml",
         init_path=_REPO_ROOT / "src" / "capability_runtime" / "__init__.py",
     )
-    assert tag_version == pyproject_version == module_version == "0.0.7"
+    assert tag_version == pyproject_version == module_version == "0.1.0"
 
 
 def test_release_guard_rejects_mismatch() -> None:

@@ -22,7 +22,7 @@ Before publish:
 Validate locally:
 
 ```bash
-python scripts/check_release_tag_version.py --tag v0.0.7
+python scripts/check_release_tag_version.py --tag v0.1.0
 python -m build
 ```
 
