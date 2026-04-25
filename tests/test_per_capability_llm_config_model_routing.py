@@ -15,8 +15,9 @@ import pytest
 
 from skills_runtime.llm.chat_sse import ChatStreamEvent
 from skills_runtime.llm.protocol import ChatRequest
+from skills_runtime.tools.protocol import ToolSpec
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, CustomTool, Runtime, RuntimeConfig
 from capability_runtime.sdk_lifecycle import (
     _ModelOverrideBackend,
     _ResponseFormatOverrideBackend,
@@ -38,6 +39,8 @@ class _RecordingBackend:
         self.models: List[Optional[str]] = []
         self.response_formats: List[Optional[Dict[str, Any]]] = []
         self.extras: List[Optional[Dict[str, Any]]] = []
+        self.messages: List[List[Dict[str, Any]]] = []
+        self.tool_names: List[List[str]] = []
 
     async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
         self.models.append(getattr(request, "model", None))
@@ -45,6 +48,10 @@ class _RecordingBackend:
         self.response_formats.append(dict(response_format) if isinstance(response_format, dict) else None)
         extra = getattr(request, "extra", None)
         self.extras.append(extra if isinstance(extra, dict) else None)
+        messages = getattr(request, "messages", None)
+        self.messages.append([dict(item) for item in messages] if isinstance(messages, list) else [])
+        tools = getattr(request, "tools", None)
+        self.tool_names.append([tool.name for tool in tools] if isinstance(tools, list) else [])
         yield ChatStreamEvent(type="text_delta", text="ok")
         yield ChatStreamEvent(type="completed")
 
@@ -86,6 +93,24 @@ def _agent_spec(*, agent_id: str, llm_config: Optional[dict]) -> AgentSpec:
             description="Just say ok.",
         ),
         llm_config=llm_config,
+    )
+
+
+def _agent_spec_with_prompt(
+    *,
+    agent_id: str,
+    prompt_render_mode: str,
+    prompt_profile: Optional[str] = None,
+) -> AgentSpec:
+    return AgentSpec(
+        base=CapabilitySpec(
+            id=agent_id,
+            kind=CapabilityKind.AGENT,
+            name=agent_id,
+            description="This structured task text must not reach provider messages.",
+        ),
+        prompt_render_mode=prompt_render_mode,  # type: ignore[arg-type]
+        prompt_profile=prompt_profile,
     )
 
 
@@ -280,3 +305,108 @@ async def test_usage_tap_backend_falls_back_to_copy_when_model_copy_fails() -> N
 
     assert backend.extras
     assert any(isinstance(extra, dict) and "_caprt_usage_sink" in extra for extra in backend.extras)
+
+
+@pytest.mark.asyncio
+async def test_precomposed_messages_override_final_backend_request_messages(tmp_path: Path) -> None:
+    """
+    Prompt Rendering v1：precomposed_messages 必须让最终 backend 看到 host 提供的 messages。
+    """
+
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(
+        _agent_spec_with_prompt(
+            agent_id="agent.messages",
+            prompt_render_mode="precomposed_messages",
+            prompt_profile="generation_direct",
+        )
+    )
+    messages = [
+        {"role": "system", "content": "You are a generation engine."},
+        {"role": "user", "content": "Write one clean sentence."},
+    ]
+
+    out = await rt.run(
+        "agent.messages",
+        input={
+            "_runtime_prompt": {
+                "messages": messages,
+                "trace": {
+                    "prompt_hash": "sha256:" + "c" * 64,
+                    "composer_version": "composer@2",
+                },
+            }
+        },
+    )
+
+    assert out.status.value == "success"
+    assert backend.messages
+    assert messages in backend.messages
+    flattened = "\n".join(item.get("content", "") for request in backend.messages for item in request)
+    assert "## 输入" not in flattened
+    assert "## 系统指令" not in flattened
+    assert "## 使用以下 Skills" not in flattened
+    assert out.node_report is not None
+    assert out.node_report.meta["prompt_render_mode"] == "precomposed_messages"
+    assert out.node_report.meta["prompt_profile"] == "generation_direct"
+    assert out.node_report.meta["prompt_hash"] == "sha256:" + "c" * 64
+    assert out.node_report.meta["prompt_messages_count"] == 2
+    assert out.node_report.meta["prompt_message_roles"] == ["system", "user"]
+    assert out.node_report.meta["prompt_composer_version"] == "composer@2"
+    assert "Write one clean sentence" not in out.node_report.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_prompt_profile_generation_direct_reaches_sdk_prompt_config_and_hides_tools(
+    tmp_path: Path,
+) -> None:
+    """
+    Prompt Rendering v1：AgentSpec.prompt_profile 必须透传给 SDK，并让 generation_direct 默认隐藏 tools。
+    """
+
+    backend = _RecordingBackend()
+
+    def _handler(**_: Any) -> Dict[str, Any]:
+        return {"ok": True}
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+            custom_tools=[
+                CustomTool(
+                    spec=ToolSpec(name="alpha_tool", description="alpha"),
+                    handler=_handler,
+                )
+            ],
+        )
+    )
+    rt.register(
+        _agent_spec_with_prompt(
+            agent_id="agent.profile",
+            prompt_render_mode="direct_task_text",
+            prompt_profile="generation_direct",
+        )
+    )
+
+    out = await rt.run(
+        "agent.profile",
+        input={"_runtime_prompt": {"task_text": "Use no tools; answer directly."}},
+    )
+
+    assert out.status.value == "success"
+    assert backend.tool_names
+    assert [] in backend.tool_names
+    overlay_dir = tmp_path / ".skills_runtime_sdk"
+    residual_overlays = list(overlay_dir.glob("caprt_prompt_profile_*.yaml")) if overlay_dir.exists() else []
+    assert residual_overlays == []

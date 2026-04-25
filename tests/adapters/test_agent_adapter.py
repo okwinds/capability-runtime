@@ -124,6 +124,31 @@ def test_build_task_includes_output_schema_and_skills_mentions() -> None:
     assert "$[acct:dm].topic-scorer" in task
 
 
+def test_build_task_strips_runtime_prompt_control_envelope_from_structured_input() -> None:
+    """Prompt Rendering v1：`_runtime_prompt` 是控制面，默认 structured task 不得渲染它。"""
+
+    rt = _mk_runtime(cfg=RuntimeConfig(mode="mock"))
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A", description="处理主题"),
+    )
+
+    task = rt._agent_adapter._build_task(  # type: ignore[attr-defined]
+        spec=spec,
+        input={
+            "_runtime_prompt": {
+                "mode": "structured_task",
+                "trace": {"prompt_hash": "sha256:" + "a" * 64},
+            },
+            "topic": "火星基地",
+        },
+    )
+
+    assert "## 输入" in task
+    assert "topic: 火星基地" in task
+    assert "_runtime_prompt" not in task
+    assert "prompt_hash" not in task
+
+
 def test_build_task_structured_output_contract_mentions_json_object_and_required_fields() -> None:
     rt = _mk_runtime(cfg=RuntimeConfig(mode="mock"))
     spec = AgentSpec(
@@ -582,3 +607,325 @@ async def test_mock_handler_zero_param_works() -> None:
     assert out.status == CapabilityStatus.SUCCESS
     assert out.output == {"no_params": True}
 
+
+@pytest.mark.asyncio
+async def test_direct_task_text_mode_passes_host_task_without_structured_wrapping() -> None:
+    """Prompt Rendering v1：direct_task_text 必须把 host 文本原样作为 SDK task。"""
+
+    from skills_runtime.core.contracts import AgentEvent
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A", description="默认描述不应进入 task"),
+        prompt_render_mode="direct_task_text",
+        prompt_profile="generation_direct",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeSdkAgent:
+        def __init__(self) -> None:
+            self.last_task: str | None = None
+
+        async def run_stream_async(self, task: str, *, run_id: str, initial_history=None):  # type: ignore[no-untyped-def]
+            _ = initial_history
+            self.last_task = task
+            yield AgentEvent(type="run_started", timestamp="t0", run_id=run_id, payload={})
+            yield AgentEvent(type="run_completed", timestamp="t1", run_id=run_id, payload={"final_output": "ok"})
+
+    fake_agent = _FakeSdkAgent()
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+            self.create_kwargs: Dict[str, Any] = {}
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            self.create_kwargs = dict(kwargs)
+            return fake_agent
+
+        def get_host_meta(self, *, context: ExecutionContext):  # type: ignore[no-untyped-def]
+            _ = context
+            return {}
+
+        def emit_agent_event_taps(self, *, ev, context: ExecutionContext, capability_id: str) -> None:  # type: ignore[no-untyped-def]
+            _ = (ev, context, capability_id)
+
+        def call_callback(self, cb, *args) -> None:  # type: ignore[no-untyped-def]
+            _ = (cb, args)
+
+        def apply_output_validation(self, *, final_output, report, context, output_schema=None) -> None:  # type: ignore[no-untyped-def]
+            _ = (final_output, report, context, output_schema)
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            raise AssertionError("not expected")
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    services = _FakeServices()
+    adapter = AgentAdapter(services=services)  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(
+        spec=spec,
+        input={
+            "_runtime_prompt": {
+                "task_text": "FINAL TASK TEXT",
+                "trace": {
+                    "prompt_hash": "sha256:" + "b" * 64,
+                    "composer_version": "composer@1",
+                },
+            },
+            "ignored": "不能进入 task",
+        },
+        context=ExecutionContext(run_id="r-direct"),
+    ):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert fake_agent.last_task == "FINAL TASK TEXT"
+    assert "## 输入" not in fake_agent.last_task
+    assert terminal is not None
+    assert terminal.node_report is not None
+    assert terminal.node_report.meta["prompt_render_mode"] == "direct_task_text"
+    assert terminal.node_report.meta["prompt_profile"] == "generation_direct"
+    assert terminal.node_report.meta["prompt_hash"] == "sha256:" + "b" * 64
+    assert terminal.node_report.meta["prompt_composer_version"] == "composer@1"
+    assert services.create_kwargs["prompt_profile"] == "generation_direct"
+
+
+@pytest.mark.asyncio
+async def test_invalid_precomposed_messages_fail_fast_before_sdk_agent_runs() -> None:
+    """Prompt Rendering v1：非法 precomposed messages 必须返回 INVALID_PROMPT_MESSAGES。"""
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="precomposed_messages",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+            self.created = False
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            _ = kwargs
+            self.created = True
+            raise AssertionError("SDK agent must not be created for invalid prompt messages")
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            from capability_runtime.reporting.node_report import build_fail_closed_report
+
+            return build_fail_closed_report(
+                run_id=run_id,
+                status=status,
+                reason=reason,
+                completion_reason=completion_reason,
+                meta=meta,
+            )
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    services = _FakeServices()
+    adapter = AgentAdapter(services=services)  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(
+        spec=spec,
+        input={"_runtime_prompt": {"messages": [{"role": "alien", "content": "x"}]}},
+        context=ExecutionContext(run_id="r-invalid"),
+    ):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "INVALID_PROMPT_MESSAGES"
+    assert terminal.node_report is not None
+    assert terminal.node_report.completion_reason == "invalid_prompt_messages"
+    assert services.created is False
+
+
+@pytest.mark.asyncio
+async def test_invalid_prompt_trace_fail_fast_before_sdk_agent_runs() -> None:
+    """Prompt Rendering v1：`trace` 若存在必须是 dict，不能把 falsey 非 dict 当缺省值。"""
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="direct_task_text",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+            self.created = False
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            _ = kwargs
+            self.created = True
+            raise AssertionError("SDK agent must not be created for invalid prompt trace")
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            from capability_runtime.reporting.node_report import build_fail_closed_report
+
+            return build_fail_closed_report(
+                run_id=run_id,
+                status=status,
+                reason=reason,
+                completion_reason=completion_reason,
+                meta=meta,
+            )
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    services = _FakeServices()
+    adapter = AgentAdapter(services=services)  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(
+        spec=spec,
+        input={"_runtime_prompt": {"task_text": "x", "trace": []}},
+        context=ExecutionContext(run_id="r-invalid-trace"),
+    ):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "INVALID_PROMPT_MESSAGES"
+    assert terminal.node_report is not None
+    assert terminal.node_report.meta["prompt_error"] == "_runtime_prompt.trace must be a dict"
+    assert services.created is False
+
+
+@pytest.mark.asyncio
+async def test_invalid_prompt_profile_fail_fast_before_sdk_agent_runs() -> None:
+    """Prompt Rendering v1：非法 prompt profile 必须在 Adapter 层 fail-fast。"""
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="direct_task_text",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+            self.created = False
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            _ = kwargs
+            self.created = True
+            raise AssertionError("SDK agent must not be created for invalid prompt profile")
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            from capability_runtime.reporting.node_report import build_fail_closed_report
+
+            return build_fail_closed_report(
+                run_id=run_id,
+                status=status,
+                reason=reason,
+                completion_reason=completion_reason,
+                meta=meta,
+            )
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    services = _FakeServices()
+    adapter = AgentAdapter(services=services)  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(
+        spec=spec,
+        input={"_runtime_prompt": {"task_text": "x", "profile": "not_a_real_profile"}},
+        context=ExecutionContext(run_id="r-invalid-profile"),
+    ):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "INVALID_PROMPT_MESSAGES"
+    assert terminal.node_report is not None
+    assert "unsupported prompt profile" in terminal.node_report.meta["prompt_error"]
+    assert services.created is False
+
+
+@pytest.mark.asyncio
+async def test_sdk_agent_creation_error_returns_fail_closed_engine_error_with_prompt_evidence() -> None:
+    """Prompt Rendering v1：SDK Agent 创建期错误也必须返回 terminal，不得从 stream 冒泡。"""
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="direct_task_text",
+        prompt_profile="generation_direct",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            _ = kwargs
+            raise ValueError("SDK config rejected prompt profile")
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            from capability_runtime.reporting.node_report import build_fail_closed_report
+
+            return build_fail_closed_report(
+                run_id=run_id,
+                status=status,
+                reason=reason,
+                completion_reason=completion_reason,
+                meta=meta,
+            )
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for it in adapter.execute_stream(
+        spec=spec,
+        input={
+            "_runtime_prompt": {
+                "task_text": "FINAL",
+                "trace": {"prompt_hash": "sha256:" + "e" * 64},
+            }
+        },
+        context=ExecutionContext(run_id="r-create-error"),
+    ):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "ENGINE_ERROR"
+    assert terminal.node_report is not None
+    assert terminal.node_report.completion_reason == "engine_exception"
+    assert terminal.node_report.meta["source"] == "sdk_agent_create"
+    assert terminal.node_report.meta["engine_exception"] == "ValueError"
+    assert terminal.node_report.meta["prompt_render_mode"] == "direct_task_text"
+    assert terminal.node_report.meta["prompt_profile"] == "generation_direct"
+    assert terminal.node_report.meta["prompt_hash"] == "sha256:" + "e" * 64

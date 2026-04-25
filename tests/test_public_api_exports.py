@@ -42,6 +42,7 @@ def test_public_api_all_exports_are_stable() -> None:
         "RuntimeServiceFacade",
         "AgentSpec",
         "AgentIOSchema",
+        "PromptRenderMode",
         "WorkflowSpec",
         "Step",
         "LoopStep",

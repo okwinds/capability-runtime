@@ -85,3 +85,50 @@ async def test_run_async_injects_session_and_turn_id_into_node_report_meta(monke
     assert out.node_report is not None
     assert out.node_report.meta["session_id"] == "SID"
     assert out.node_report.meta["host_turn_id"] == "TID"
+
+
+@pytest.mark.asyncio
+async def test_run_async_records_prompt_evidence_without_plaintext(monkeypatch, tmp_path):
+    fake_events = [
+        AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id="r1", payload={}),
+        AgentEvent(
+            type="run_completed",
+            timestamp="2026-02-10T00:00:01Z",
+            run_id="r1",
+            payload={"final_output": "ok", "wal_locator": "wal.jsonl"},
+        ),
+    ]
+    fake_agent = _FakeAgent(events=fake_events)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", lambda **_: fake_agent)
+
+    rt = Runtime(RuntimeConfig(mode="sdk_native", workspace_root=tmp_path, preflight_mode="off"))
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+            prompt_render_mode="direct_task_text",
+            prompt_profile="generation_direct",
+        )
+    )
+
+    secret_prompt = "SECRET PROMPT SHOULD NOT BE IN NODE REPORT"
+    out = await rt.run(
+        "A",
+        input={
+            "_runtime_prompt": {
+                "task_text": secret_prompt,
+                "trace": {
+                    "prompt_hash": "sha256:" + "d" * 64,
+                    "composer_version": "composer@3",
+                },
+            }
+        },
+        context=ExecutionContext(run_id="r1"),
+    )
+
+    assert fake_agent.last_task == secret_prompt
+    assert out.node_report is not None
+    assert out.node_report.meta["prompt_render_mode"] == "direct_task_text"
+    assert out.node_report.meta["prompt_profile"] == "generation_direct"
+    assert out.node_report.meta["prompt_hash"] == "sha256:" + "d" * 64
+    assert out.node_report.meta["prompt_composer_version"] == "composer@3"
+    assert secret_prompt not in out.node_report.model_dump_json()
