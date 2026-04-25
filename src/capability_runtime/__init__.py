@@ -18,7 +18,7 @@ from .host_protocol import ApprovalTicket, HostRunSnapshot, HostRunStatus, Resum
 from .manifest import CapabilityDescriptor, CapabilityManifestEntry, CapabilityVisibility
 
 # === Protocol 导出 ===
-from .protocol.agent import AgentIOSchema, AgentSpec
+from .protocol.agent import AgentIOSchema, AgentSpec, PromptRenderMode
 from .protocol.capability import (
     CapabilityKind,
     CapabilityRef,
@@ -76,6 +76,7 @@ __all__ = [
     "RuntimeServiceFacade",
     "AgentSpec",
     "AgentIOSchema",
+    "PromptRenderMode",
     "WorkflowSpec",
     "Step",
     "LoopStep",

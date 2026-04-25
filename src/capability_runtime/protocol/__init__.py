@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Protocol 层：纯能力类型定义，不依赖任何上游模块。"""
 
-from .agent import AgentIOSchema, AgentSpec
+from .agent import AgentIOSchema, AgentSpec, PromptRenderMode
 from .capability import (
     CapabilityKind,
     CapabilityRef,
@@ -30,6 +30,7 @@ __all__ = [
     "CapabilityResult",
     "AgentSpec",
     "AgentIOSchema",
+    "PromptRenderMode",
     "ChatBackendProtocol",
     "WorkflowSpec",
     "Step",

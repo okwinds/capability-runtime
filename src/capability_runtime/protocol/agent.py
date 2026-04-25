@@ -3,9 +3,12 @@ from __future__ import annotations
 """Agent 元能力声明。"""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from .capability import CapabilityRef, CapabilitySpec
+
+
+PromptRenderMode = Literal["structured_task", "direct_task_text", "precomposed_messages"]
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,8 @@ class AgentSpec:
     - output_schema: 输出 schema（可选）
     - loop_compatible: 是否可被 LoopStep 循环调用
     - llm_config: LLM 覆盖配置
+    - prompt_render_mode: prompt 渲染模式（默认 structured_task，保持兼容）
+    - prompt_profile: 可选上游 SDK prompt profile（如 generation_direct）
     - prompt_template: 可选的 prompt 模板（支持 {field} 占位符）
     - system_prompt: 可选的“Agent 级 system message”（用于该 Agent 的提示词组织）
 
@@ -58,5 +63,7 @@ class AgentSpec:
     output_schema: Optional[AgentIOSchema] = None
     loop_compatible: bool = False
     llm_config: Optional[Dict[str, Any]] = None
+    prompt_render_mode: PromptRenderMode = "structured_task"
+    prompt_profile: Optional[str] = None
     prompt_template: Optional[str] = None
     system_prompt: Optional[str] = None

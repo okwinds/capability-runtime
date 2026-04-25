@@ -2,9 +2,11 @@ from __future__ import annotations
 
 """SDK 生命周期组件：初始化、预检与 per-run Agent 创建。"""
 
+import hashlib
 import inspect
-from datetime import datetime, timezone
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, Dict, List, Optional
 
@@ -83,13 +85,22 @@ class SdkLifecycle:
                 )
             ]
 
-    def create_agent(self, *, custom_tools: List[CustomTool], llm_config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_agent(
+        self,
+        *,
+        custom_tools: List[CustomTool],
+        llm_config: Optional[Dict[str, Any]] = None,
+        prompt_profile: Optional[str] = None,
+        precomposed_messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> Any:
         """
         创建 per-run SDK Agent 实例（避免跨 run 共享可变状态）。
 
         参数：
         - custom_tools：每次创建 Agent 时要注册的自定义工具列表
         - llm_config：可选 LLM 覆写配置（当前支持 `model`、`tool_choice` 与 `response_format` 字段覆写）
+        - prompt_profile：可选 SDK prompt profile，通过 per-run config overlay 透传给上游
+        - precomposed_messages：可选最终 provider messages 覆写
         """
 
         from skills_runtime.core.agent import Agent
@@ -106,12 +117,23 @@ class SdkLifecycle:
         override_response_format = _extract_response_format_override(llm_config)
         if override_response_format is not None:
             backend = _ResponseFormatOverrideBackend(backend=backend, response_format=override_response_format)
+        if precomposed_messages is not None:
+            backend = _PrecomposedMessagesBackend(backend=backend, messages=precomposed_messages)
         usage_bridge_backend = _UsageTapBackend(backend=backend)
         backend = usage_bridge_backend
 
+        config_paths = list(self._state.config_paths)
+        prompt_profile_overlay: Optional[Path] = None
+        if prompt_profile is not None:
+            prompt_profile_overlay = _write_prompt_profile_overlay(
+                workspace_root=self._state.workspace_root,
+                prompt_profile=prompt_profile,
+            )
+            config_paths.append(prompt_profile_overlay)
+
         kwargs: Dict[str, Any] = {
             "workspace_root": self._state.workspace_root,
-            "config_paths": list(self._state.config_paths),
+            "config_paths": config_paths,
             "env_vars": dict(self._config.env_vars),
             "backend": backend,
             "human_io": self._config.human_io,
@@ -124,7 +146,18 @@ class SdkLifecycle:
             "wal_backend": self._config.wal_backend,
         }
 
-        agent = Agent(**kwargs)
+        try:
+            agent = Agent(**kwargs)
+        finally:
+            if prompt_profile_overlay is not None:
+                try:
+                    prompt_profile_overlay.unlink(missing_ok=True)
+                except Exception as exc:
+                    log_suppressed_exception(
+                        context="prompt_profile_overlay_cleanup",
+                        exc=exc,
+                        extra={"path": str(prompt_profile_overlay)},
+                    )
         diagnostics: Dict[str, Dict[str, bool]] = {}
         for t in custom_tools:
             diagnostics[t.spec.name] = _register_custom_tool_compat(agent, t)
@@ -558,6 +591,39 @@ class _ResponseFormatOverrideBackend:
             yield ev
 
 
+class _PrecomposedMessagesBackend:
+    """
+    ChatBackend 薄代理：仅覆写 request.messages，然后委托给底层 backend。
+
+    说明：
+    - 该包装不绕过 SDK Agent / WAL / events，只在 provider request 出口替换 messages；
+    - messages 做浅拷贝转发，避免下游 backend 修改 host 输入。
+    """
+
+    def __init__(self, *, backend: ChatBackendProtocol, messages: List[Dict[str, Any]]) -> None:
+        self._backend: ChatBackendProtocol = backend
+        self._messages: List[Dict[str, Any]] = [dict(item) for item in messages]
+
+    async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
+        """
+        覆写 request.messages 并转发 `stream_chat`。
+
+        参数：
+        - request：上游 SDK 生成的 ChatRequest（或兼容对象）
+        """
+
+        forwarded = _clone_request_with_field_update(
+            request,
+            field_name="messages",
+            value=[dict(item) for item in self._messages],
+            dataclasses_context="precomposed_messages_dataclasses_replace",
+            clone_context="precomposed_messages_override",
+        )
+
+        async for ev in self._backend.stream_chat(forwarded):
+            yield ev
+
+
 class _UsageTapBackend:
     """
     ChatBackend 薄代理：通过 request.extra 注入 usage sink，best-effort 收集 bridge usage。
@@ -735,6 +801,36 @@ def _clone_request_with_extra(request: Any, update_extra: Any) -> Any:
         raise TypeError("request 对象不支持 extra 覆写：既非 dict，也不支持 dataclasses.replace / model_copy / copy")
 
     return forwarded
+
+
+def _write_prompt_profile_overlay(*, workspace_root: Path, prompt_profile: str) -> Path:
+    """
+    写入 per-run prompt profile SDK overlay，并返回 overlay 路径。
+
+    说明：
+    - 只写 profile 名称，不写 prompt 明文；
+    - 文件名使用 profile 摘要，避免 profile 字符串直接进入路径。
+    """
+
+    import yaml
+
+    profile = str(prompt_profile).strip()
+    if not profile:
+        raise ValueError("prompt_profile must be a non-empty string")
+
+    digest = hashlib.sha256(profile.encode("utf-8")).hexdigest()[:16]
+    overlay_dir = Path(workspace_root) / ".skills_runtime_sdk"
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+    overlay_path = overlay_dir / f"caprt_prompt_profile_{digest}_{uuid.uuid4().hex}.yaml"
+    overlay_path.write_text(
+        yaml.safe_dump(
+            {"prompt": {"profile": profile}},
+            allow_unicode=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return overlay_path
 
 
 def _load_yaml_dict(path: Path) -> Dict[str, Any]:

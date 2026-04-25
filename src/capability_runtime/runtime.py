@@ -914,17 +914,30 @@ class Runtime(RuntimeUIEventsMixin):
             return []
         return self._sdk.preflight()
 
-    def create_sdk_agent(self, *, llm_config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_sdk_agent(
+        self,
+        *,
+        llm_config: Optional[Dict[str, Any]] = None,
+        prompt_profile: Optional[str] = None,
+        precomposed_messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> Any:
         """
         RuntimeServices 协议方法：创建 per-run SDK Agent。
 
         参数：
-        - llm_config：可选 LLM 覆写配置（当前仅支持 `model` 字段覆写）
+        - llm_config：可选 LLM 覆写配置
+        - prompt_profile：可选 SDK prompt profile
+        - precomposed_messages：可选最终 provider messages 覆写
         """
 
         if self._sdk is None:
             raise RuntimeError("SDK lifecycle is not initialized")
-        return self._sdk.create_agent(custom_tools=list(self._config.custom_tools), llm_config=llm_config)
+        return self._sdk.create_agent(
+            custom_tools=list(self._config.custom_tools),
+            llm_config=llm_config,
+            prompt_profile=prompt_profile,
+            precomposed_messages=precomposed_messages,
+        )
 
 
 __all__ = ["Runtime"]

@@ -10,8 +10,11 @@ AgentAdapter：AgentSpec 的执行适配器（统一 mock/bridge/sdk_native）�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
+import re
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from skills_runtime.core.contracts import AgentEvent
@@ -30,6 +33,34 @@ _SECTION_TASK = "## 任务"
 _SECTION_INPUT = "## 输入"
 _SECTION_OUTPUT_PREFIX = "## 输出要求"
 _SECTION_SKILLS = "## 使用以下 Skills"
+_RUNTIME_PROMPT_KEY = "_runtime_prompt"
+_PROMPT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_ALLOWED_PROMPT_ROLES = {"system", "developer", "user", "assistant", "tool"}
+_ALLOWED_PROMPT_PROFILES = {"default_agent", "generation_direct", "structured_transform"}
+
+
+class _InvalidPromptMessages(ValueError):
+    """prompt control envelope 非法。"""
+
+
+@dataclass(frozen=True)
+class _PromptRenderPlan:
+    """
+    AgentAdapter 内部 prompt 渲染计划。
+
+    字段：
+    - mode：三种 prompt rendering strategy 之一；
+    - task：传给 SDK Agent.run_stream_async 的 task 文本；
+    - prompt_profile：透传给上游 SDK 的 prompt profile；
+    - precomposed_messages：最终 provider messages 覆写；
+    - evidence：写入 NodeReport.meta 的最小披露摘要。
+    """
+
+    mode: str
+    task: str
+    prompt_profile: Optional[str]
+    precomposed_messages: Optional[List[Dict[str, Any]]]
+    evidence: Dict[str, Any]
 
 
 class AgentAdapter:
@@ -168,6 +199,29 @@ class AgentAdapter:
         真实执行（bridge/sdk_native）：驱动 SDK Agent.run_stream_async 并聚合 NodeReport。
         """
 
+        try:
+            prompt_plan = self._resolve_prompt_render_plan(spec=spec, input=input)
+        except _InvalidPromptMessages as exc:
+            report = self._services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="invalid_prompt_messages",
+                completion_reason="invalid_prompt_messages",
+                meta={
+                    "capability_id": spec.base.id,
+                    "source": "prompt_rendering",
+                    "prompt_error": str(exc),
+                },
+            )
+            yield CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=str(exc),
+                error_code="INVALID_PROMPT_MESSAGES",
+                report=report,
+                node_report=report,
+            )
+            return
+
         # preflight gate（生产默认 fail-closed）
         issues: List[FrameworkIssue] = []
         if getattr(self._services.config, "preflight_mode", "error") != "off":
@@ -184,6 +238,7 @@ class AgentAdapter:
                         "code": "SKILL_PREFLIGHT_FAILED",
                         "details": {"issues": [self._services.redact_issue(i) for i in issues]},
                     },
+                    **prompt_plan.evidence,
                 },
             )
             yield CapabilityResult(
@@ -196,8 +251,34 @@ class AgentAdapter:
             )
             return
 
-        task = self._build_task(spec=spec, input=input)
-        agent = self._services.create_sdk_agent(llm_config=spec.llm_config)
+        task = prompt_plan.task
+        create_agent_kwargs: Dict[str, Any] = {"llm_config": spec.llm_config}
+        if prompt_plan.prompt_profile is not None:
+            create_agent_kwargs["prompt_profile"] = prompt_plan.prompt_profile
+        if prompt_plan.precomposed_messages is not None:
+            create_agent_kwargs["precomposed_messages"] = prompt_plan.precomposed_messages
+        try:
+            agent = self._services.create_sdk_agent(**create_agent_kwargs)
+        except Exception as exc:
+            report = self._services.build_fail_closed_report(
+                run_id=context.run_id,
+                status="failed",
+                reason="engine_error",
+                completion_reason="engine_exception",
+                meta={
+                    "source": "sdk_agent_create",
+                    "engine_exception": type(exc).__name__,
+                    **prompt_plan.evidence,
+                },
+            )
+            yield CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error=str(exc),
+                error_code="ENGINE_ERROR",
+                report=report,
+                node_report=report,
+            )
+            return
 
         events: List[AgentEvent] = []
         host_meta = self._services.get_host_meta(context=context)
@@ -241,6 +322,7 @@ class AgentAdapter:
                 completion_reason="run_cancelled",
                 meta={"capability_id": spec.base.id, "source": "sdk_agent"},
             )
+            self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
             yield CapabilityResult(
                 status=CapabilityStatus.CANCELLED,
                 error="execution cancelled",
@@ -255,7 +337,7 @@ class AgentAdapter:
                 status="failed",
                 reason="engine_error",
                 completion_reason="engine_exception",
-                meta={"engine_exception": type(exc).__name__},
+                meta={"engine_exception": type(exc).__name__, **prompt_plan.evidence},
             )
             yield CapabilityResult(
                 status=CapabilityStatus.FAILED,
@@ -267,6 +349,7 @@ class AgentAdapter:
             return
 
         report = NodeReportBuilder().build(events=events)
+        self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
         if issues and getattr(self._services.config, "preflight_mode", "error") == "warn":
             report.meta["preflight_mode"] = "warn"
             report.meta["preflight_issues"] = [self._services.redact_issue(i) for i in issues]
@@ -306,6 +389,166 @@ class AgentAdapter:
             artifacts=list(report.artifacts),
         )
 
+    def _resolve_prompt_render_plan(self, *, spec: AgentSpec, input: Dict[str, Any]) -> _PromptRenderPlan:
+        """
+        解析 AgentSpec + run-level `_runtime_prompt`，生成 prompt 渲染计划。
+
+        参数：
+        - spec：Agent 声明
+        - input：run 输入，其中 `_runtime_prompt` 为保留控制面
+
+        返回：
+        - `_PromptRenderPlan`
+
+        异常：
+        - `_InvalidPromptMessages`：控制面非法，调用方应 fail-fast。
+        """
+
+        envelope_raw = input.get(_RUNTIME_PROMPT_KEY)
+        if envelope_raw is None:
+            envelope: Dict[str, Any] = {}
+        elif isinstance(envelope_raw, dict):
+            envelope = dict(envelope_raw)
+        else:
+            raise _InvalidPromptMessages("_runtime_prompt must be a dict")
+
+        raw_mode = envelope.get("mode") if "mode" in envelope else getattr(spec, "prompt_render_mode", "structured_task")
+        if raw_mode is None:
+            raw_mode = "structured_task"
+        if not isinstance(raw_mode, str) or not raw_mode.strip():
+            raise _InvalidPromptMessages("prompt render mode must be a non-empty string")
+        mode = raw_mode.strip()
+        if mode not in {"structured_task", "direct_task_text", "precomposed_messages"}:
+            raise _InvalidPromptMessages(
+                "unsupported prompt render mode; allowed: direct_task_text, precomposed_messages, structured_task"
+            )
+
+        prompt_profile = envelope.get("profile")
+        if prompt_profile is None:
+            prompt_profile = getattr(spec, "prompt_profile", None)
+        if prompt_profile is not None:
+            if not isinstance(prompt_profile, str) or not prompt_profile.strip():
+                raise _InvalidPromptMessages("prompt profile must be a non-empty string")
+            prompt_profile = prompt_profile.strip()
+            if prompt_profile not in _ALLOWED_PROMPT_PROFILES:
+                allowed = ", ".join(sorted(_ALLOWED_PROMPT_PROFILES))
+                raise _InvalidPromptMessages(f"unsupported prompt profile; allowed: {allowed}")
+
+        trace = envelope.get("trace") if "trace" in envelope else {}
+        if trace is None:
+            trace = {}
+        if not isinstance(trace, dict):
+            raise _InvalidPromptMessages("_runtime_prompt.trace must be a dict")
+        prompt_hash = trace.get("prompt_hash")
+        if prompt_hash is not None:
+            if not isinstance(prompt_hash, str) or _PROMPT_HASH_RE.fullmatch(prompt_hash.strip()) is None:
+                raise _InvalidPromptMessages("trace.prompt_hash must match sha256:<64 lowercase hex>")
+            prompt_hash = prompt_hash.strip()
+        composer_version = trace.get("composer_version")
+        if composer_version is not None and not isinstance(composer_version, str):
+            raise _InvalidPromptMessages("trace.composer_version must be a string")
+
+        if mode == "structured_task":
+            business_input = self._strip_runtime_prompt(input)
+            task = self._build_task(spec=spec, input=business_input)
+            evidence = self._build_prompt_evidence(
+                mode=mode,
+                prompt_profile=prompt_profile,
+                prompt_hash=prompt_hash or _hash_text(task),
+                composer_version=composer_version,
+                messages=None,
+            )
+            return _PromptRenderPlan(
+                mode=mode,
+                task=task,
+                prompt_profile=prompt_profile,
+                precomposed_messages=None,
+                evidence=evidence,
+            )
+
+        if mode == "direct_task_text":
+            task_text = envelope.get("task_text")
+            if not isinstance(task_text, str) or not task_text.strip():
+                raise _InvalidPromptMessages("_runtime_prompt.task_text must be a non-empty string")
+            task = task_text
+            evidence = self._build_prompt_evidence(
+                mode=mode,
+                prompt_profile=prompt_profile,
+                prompt_hash=prompt_hash or _hash_text(task),
+                composer_version=composer_version,
+                messages=None,
+            )
+            return _PromptRenderPlan(
+                mode=mode,
+                task=task,
+                prompt_profile=prompt_profile,
+                precomposed_messages=None,
+                evidence=evidence,
+            )
+
+        messages = _validate_precomposed_messages(envelope.get("messages"))
+        evidence = self._build_prompt_evidence(
+            mode=mode,
+            prompt_profile=prompt_profile,
+            prompt_hash=prompt_hash or _hash_messages(messages),
+            composer_version=composer_version,
+            messages=messages,
+        )
+        return _PromptRenderPlan(
+            mode=mode,
+            task="",
+            prompt_profile=prompt_profile,
+            precomposed_messages=messages,
+            evidence=evidence,
+        )
+
+    def _build_prompt_evidence(
+        self,
+        *,
+        mode: str,
+        prompt_profile: Optional[str],
+        prompt_hash: str,
+        composer_version: Any,
+        messages: Optional[List[Dict[str, Any]]],
+    ) -> Dict[str, Any]:
+        """
+        构造 NodeReport.meta 的 prompt 最小披露摘要。
+
+        参数：
+        - mode：prompt render mode
+        - prompt_profile：可选 SDK prompt profile
+        - prompt_hash：`sha256:<hex>` 摘要
+        - composer_version：可选 composer 版本
+        - messages：precomposed messages；仅用于 count/roles 摘要
+        """
+
+        evidence: Dict[str, Any] = {
+            "prompt_render_mode": mode,
+            "prompt_hash": prompt_hash,
+        }
+        if prompt_profile:
+            evidence["prompt_profile"] = prompt_profile
+        if isinstance(composer_version, str) and composer_version:
+            evidence["prompt_composer_version"] = composer_version
+        if messages is not None:
+            evidence["prompt_messages_count"] = len(messages)
+            evidence["prompt_message_roles"] = [str(item["role"]) for item in messages]
+        return evidence
+
+    def _strip_runtime_prompt(self, input: Dict[str, Any]) -> Dict[str, Any]:
+        """从业务 input 中剥离 runtime prompt 控制面。"""
+
+        if _RUNTIME_PROMPT_KEY not in input:
+            return input
+        return {k: v for k, v in input.items() if k != _RUNTIME_PROMPT_KEY}
+
+    def _apply_prompt_evidence(self, *, report: Any, evidence: Dict[str, Any]) -> None:
+        """把 prompt evidence 写入 NodeReport.meta；兼容测试中的 dict fake report。"""
+
+        meta = getattr(report, "meta", None)
+        if isinstance(meta, dict):
+            meta.update(evidence)
+
     def _build_task(self, *, spec: AgentSpec, input: Dict[str, Any]) -> str:
         """
         将 AgentSpec + input 转换为 SDK Agent 的 task 文本（结构化拼接）。
@@ -323,9 +566,10 @@ class AgentAdapter:
         if spec.base.description:
             parts.append(f"{_SECTION_TASK}\n{spec.base.description}")
 
-        if input:
+        business_input = self._strip_runtime_prompt(input)
+        if business_input:
             lines: List[str] = []
-            for k, v in input.items():
+            for k, v in business_input.items():
                 if isinstance(v, str):
                     lines.append(f"- {k}: {v}")
                 else:
@@ -437,3 +681,48 @@ class AgentAdapter:
             if account and domain:
                 return f"[{account}:{domain}]"
         return None
+
+
+def _hash_text(text: str) -> str:
+    """生成 prompt 文本的 sha256 摘要。"""
+
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _hash_messages(messages: List[Dict[str, Any]]) -> str:
+    """对 provider messages 做稳定 JSON canonicalization 后生成摘要。"""
+
+    canonical = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return _hash_text(canonical)
+
+
+def _validate_precomposed_messages(raw: Any) -> List[Dict[str, Any]]:
+    """
+    校验 host 提供的最终 provider messages。
+
+    约束：
+    - 只接受非空 list[dict]；
+    - 每条消息必须有合法 role 与字符串 content；
+    - 返回浅拷贝，避免后续执行链路修改调用方输入。
+    """
+
+    if not isinstance(raw, list):
+        raise _InvalidPromptMessages("_runtime_prompt.messages must be a list")
+    if not raw:
+        raise _InvalidPromptMessages("_runtime_prompt.messages must not be empty")
+
+    out: List[Dict[str, Any]] = []
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise _InvalidPromptMessages(f"_runtime_prompt.messages[{idx}] must be a dict")
+        role = item.get("role")
+        content = item.get("content")
+        if not isinstance(role, str) or role not in _ALLOWED_PROMPT_ROLES:
+            raise _InvalidPromptMessages(f"_runtime_prompt.messages[{idx}].role is invalid")
+        if not isinstance(content, str):
+            raise _InvalidPromptMessages(f"_runtime_prompt.messages[{idx}].content must be a string")
+        copied = dict(item)
+        copied["role"] = role
+        copied["content"] = content
+        out.append(copied)
+    return out

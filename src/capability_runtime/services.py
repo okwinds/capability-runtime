@@ -36,12 +36,20 @@ class RuntimeServices(Protocol):
     ) -> CapabilityResult:
         """执行能力（Runtime 内部分发）。"""
 
-    def create_sdk_agent(self, *, llm_config: Optional[Dict[str, Any]] = None) -> Any:
+    def create_sdk_agent(
+        self,
+        *,
+        llm_config: Optional[Dict[str, Any]] = None,
+        prompt_profile: Optional[str] = None,
+        precomposed_messages: Optional[list[dict[str, Any]]] = None,
+    ) -> Any:
         """
         创建 per-run SDK Agent。
 
         参数：
-        - llm_config：可选 LLM 覆写配置（当前仅支持 `model` 字段覆写）
+        - llm_config：可选 LLM 覆写配置
+        - prompt_profile：可选 SDK prompt profile
+        - precomposed_messages：可选最终 provider messages 覆写
         """
 
     def preflight(self) -> list[FrameworkIssue]:
