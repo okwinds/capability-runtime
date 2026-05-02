@@ -48,6 +48,7 @@ class NodeUsageReport(BaseModel):
 
     字段说明：
     - `model`：best-effort 记录本次运行最后一次可识别的模型名。
+    - `request_id` / `provider`：provider/gateway 请求元数据，用于宿主观测、对账与追踪。
     - token 字段缺失时保持 None，禁止伪造 0。
     """
 
@@ -57,6 +58,8 @@ class NodeUsageReport(BaseModel):
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
+    request_id: Optional[str] = None
+    provider: Optional[str] = None
 
 
 class NodeReport(BaseModel):

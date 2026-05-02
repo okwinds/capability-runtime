@@ -55,6 +55,59 @@ def test_report_aggregates_llm_usage_summary() -> None:
     assert rep.usage.total_tokens == 23
 
 
+def test_report_preserves_last_llm_usage_request_metadata() -> None:
+    events = [
+        _ev("run_started"),
+        _ev(
+            "llm_usage",
+            payload={
+                "model": "gpt-4.1-mini",
+                "input_tokens": 11,
+                "output_tokens": 7,
+                "total_tokens": 18,
+                "request_id": "req_old",
+                "provider": "gateway-a",
+            },
+        ),
+        _ev(
+            "llm_usage",
+            payload={
+                "model": "gpt-4.1-mini",
+                "prompt_tokens": 2,
+                "completion_tokens": 3,
+                "total_tokens": 5,
+                "request_id": "req_123",
+                "provider": "gateway-b",
+            },
+        ),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
+    ]
+
+    rep = NodeReportBuilder().build(events=events)
+
+    assert rep.usage is not None
+    assert rep.usage.input_tokens == 13
+    assert rep.usage.output_tokens == 10
+    assert rep.usage.total_tokens == 23
+    assert rep.usage.request_id == "req_123"
+    assert rep.usage.provider == "gateway-b"
+
+
+def test_report_accepts_llm_usage_without_request_id() -> None:
+    events = [
+        _ev("run_started"),
+        _ev("llm_usage", payload={"model": "gpt-4.1-mini", "input_tokens": 1, "output_tokens": 2, "total_tokens": 3}),
+        _ev("run_completed", payload={"final_output": "ok", "wal_locator": "wal.jsonl"}),
+    ]
+
+    rep = NodeReportBuilder().build(events=events)
+
+    assert rep.usage is not None
+    assert rep.usage.total_tokens == 3
+    assert rep.usage.request_id is None
+    assert rep.usage.provider is None
+
+
 def test_report_collects_artifacts_from_run_completed_payload():
     events = [
         _ev("run_started"),

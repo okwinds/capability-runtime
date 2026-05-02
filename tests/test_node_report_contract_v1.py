@@ -89,6 +89,18 @@ def test_node_usage_report_extra_fields_are_rejected() -> None:
     with pytest.raises(ValidationError):
         NodeUsageReport.model_validate({"model": "m", "total_tokens": 1, "unexpected": True})
 
+    ok = NodeUsageReport.model_validate(
+        {"model": "m", "total_tokens": 1, "request_id": "req_123", "provider": "openai-compatible"}
+    )
+    assert set(ok.model_dump().keys()) == {
+        "model",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "request_id",
+        "provider",
+    }
+
 
 def test_events_path_must_come_from_terminal_run_event() -> None:
     # 非终态事件携带 wal_locator/events_path 不应被采纳；只有 run_* 终态事件可提供 locator。

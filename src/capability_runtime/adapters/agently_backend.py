@@ -66,13 +66,19 @@ class AgentlyBackendConfig:
 
     requester_factory: AgentlyRequesterFactory
 
-def _normalize_usage_payload(*, usage: Any, model: Any = None) -> Optional[Dict[str, Any]]:
+def _normalize_usage_payload(
+    *,
+    usage: Any,
+    model: Any = None,
+    request_id: Any = None,
+    provider: Any = None,
+) -> Optional[Dict[str, Any]]:
     """
     把 provider usage 归一为 capability-runtime 的 `llm_usage` payload 形状。
 
     返回：
     - `None`：无法提取任何有效 usage 字段
-    - `dict`：`model/input_tokens/output_tokens/total_tokens`
+    - `dict`：`model/input_tokens/output_tokens/total_tokens/request_id/provider`
     """
 
     if not isinstance(usage, dict):
@@ -93,6 +99,8 @@ def _normalize_usage_payload(*, usage: Any, model: Any = None) -> Optional[Dict[
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "total_tokens": total_tokens,
+        "request_id": request_id.strip() if isinstance(request_id, str) and request_id.strip() else None,
+        "provider": provider.strip() if isinstance(provider, str) and provider.strip() else None,
     }
     return payload if any(value is not None for value in payload.values()) else None
 
@@ -120,7 +128,15 @@ def _extract_usage_payload_from_sse_data(data: str) -> Optional[Dict[str, Any]]:
         return None
     if not isinstance(obj, dict):
         return None
-    return _normalize_usage_payload(usage=obj.get("usage"), model=obj.get("model"))
+    request_id = obj.get("request_id")
+    if not (isinstance(request_id, str) and request_id.strip()):
+        request_id = obj.get("id")
+    return _normalize_usage_payload(
+        usage=obj.get("usage"),
+        model=obj.get("model"),
+        request_id=request_id,
+        provider=obj.get("provider"),
+    )
 
 
 def _merge_stream_options_for_usage(value: Any) -> Dict[str, Any]:

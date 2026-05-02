@@ -1,5 +1,6 @@
 import pytest
 
+from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
 from capability_runtime.adapters.agently_backend import AgentlyBackendConfig, AgentlyChatBackend
 from skills_runtime.llm.protocol import ChatRequest
 
@@ -77,7 +78,7 @@ async def test_agently_backend_reports_usage_via_caprt_usage_sink():
             ("message", '{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}'),
             (
                 "message",
-                '{"choices":[{"delta":{},"finish_reason":"stop"}],"model":"bridge-usage-model","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}',
+                '{"id":"req_123","provider":"openai-compatible","choices":[{"delta":{},"finish_reason":"stop"}],"model":"bridge-usage-model","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}',
             ),
             ("message", "[DONE]"),
         ]
@@ -102,8 +103,91 @@ async def test_agently_backend_reports_usage_via_caprt_usage_sink():
             "input_tokens": 11,
             "output_tokens": 7,
             "total_tokens": 18,
+            "request_id": "req_123",
+            "provider": "openai-compatible",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_agently_backend_usage_sink_accepts_missing_request_metadata():
+    usage_events = []
+    backend = _backend_from_items(
+        [
+            (
+                "message",
+                '{"choices":[{"delta":{},"finish_reason":"stop"}],"model":"bridge-usage-model","usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}',
+            ),
+            ("message", "[DONE]"),
+        ]
+    )
+
+    out = [
+        ev
+        async for ev in backend.stream_chat(
+            ChatRequest(
+                model="m",
+                messages=[{"role": "user", "content": "x"}],
+                tools=[],
+                extra={"_caprt_usage_sink": usage_events.append},
+            )
+        )
+    ]
+
+    assert [e.type for e in out] == ["completed"]
+    assert usage_events == [
+        {
+            "model": "bridge-usage-model",
+            "input_tokens": 1,
+            "output_tokens": 2,
+            "total_tokens": 3,
+            "request_id": None,
+            "provider": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agently_sse_usage_request_metadata_reaches_runtime_node_report(tmp_path):
+    backend = _backend_from_items(
+        [
+            ("message", '{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}'),
+            (
+                "message",
+                '{"id":"req_123","choices":[{"delta":{},"finish_reason":"stop"}],"model":"bridge-usage-model","usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}',
+            ),
+            ("message", "[DONE]"),
+        ]
+    )
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            sdk_config_paths=[],
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(
+                id="agent.sse_usage_metadata",
+                kind=CapabilityKind.AGENT,
+                name="SSEUsageMetadata",
+                description="离线：SSE completed usage metadata 透传。",
+            ),
+        )
+    )
+
+    result = await rt.run("agent.sse_usage_metadata", input={"prompt": "x"})
+
+    assert result.node_report is not None
+    assert result.node_report.usage is not None
+    assert result.node_report.usage.input_tokens == 11
+    assert result.node_report.usage.output_tokens == 7
+    assert result.node_report.usage.total_tokens == 18
+    assert result.node_report.usage.request_id == "req_123"
+    assert result.node_report.usage.provider == "openai"
 
 
 @pytest.mark.asyncio

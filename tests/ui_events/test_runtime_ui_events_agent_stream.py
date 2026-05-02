@@ -30,7 +30,16 @@ class _UsageAwareBackend:
             if callable(candidate):
                 sink = candidate
         if sink is not None:
-            sink({"model": "usage-test-model", "input_tokens": 11, "output_tokens": 7, "total_tokens": 18})
+            sink(
+                {
+                    "model": "usage-test-model",
+                    "input_tokens": 11,
+                    "output_tokens": 7,
+                    "total_tokens": 18,
+                    "request_id": "req_ui_123",
+                    "provider": "test-provider",
+                }
+            )
         yield ChatStreamEvent(type="text_delta", text="done")
         yield ChatStreamEvent(type="completed", finish_reason="stop")
 
@@ -127,6 +136,8 @@ async def test_run_ui_events_agent_emits_metrics_when_bridge_usage_available(tmp
     assert terminal.node_report.usage.input_tokens == 11
     assert terminal.node_report.usage.output_tokens == 7
     assert terminal.node_report.usage.total_tokens == 18
+    assert terminal.node_report.usage.request_id == "req_ui_123"
+    assert terminal.node_report.usage.provider == "test-provider"
 
     out: List = []
     async for ev in rt.run_ui_events("agent.metrics", input={}, level=StreamLevel.UI):
@@ -140,6 +151,8 @@ async def test_run_ui_events_agent_emits_metrics_when_bridge_usage_available(tmp
         "input_tokens": 11,
         "output_tokens": 7,
         "total_tokens": 18,
+        "request_id": "req_ui_123",
+        "provider": "test-provider",
     }
 
 

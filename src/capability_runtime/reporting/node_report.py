@@ -161,6 +161,8 @@ class NodeReportBuilder:
         usage_input_seen = False
         usage_output_seen = False
         usage_total_seen = False
+        usage_request_id: Optional[str] = None
+        usage_provider: Optional[str] = None
 
         def _ensure_tool(call_id: str, *, name: str) -> Dict[str, Any]:
             """获取/初始化工具调用聚合槽位（以 call_id 为主键）。"""
@@ -216,6 +218,14 @@ class NodeReportBuilder:
                 model_name = usage_summary.get("model")
                 if isinstance(model_name, str) and model_name.strip():
                     usage_model = model_name.strip()
+
+                request_id = usage_summary.get("request_id")
+                if isinstance(request_id, str) and request_id.strip():
+                    usage_request_id = request_id.strip()
+
+                provider = usage_summary.get("provider")
+                if isinstance(provider, str) and provider.strip():
+                    usage_provider = provider.strip()
 
                 input_tokens = usage_summary.get("input_tokens")
                 if isinstance(input_tokens, int):
@@ -378,12 +388,21 @@ class NodeReportBuilder:
             NodeToolCallReport.model_validate(item) for item in tool_calls.values() if isinstance(item, dict)
         ]
         usage_report: Optional[NodeUsageReport] = None
-        if usage_model is not None or usage_input_seen or usage_output_seen or usage_total_seen:
+        if (
+            usage_model is not None
+            or usage_input_seen
+            or usage_output_seen
+            or usage_total_seen
+            or usage_request_id is not None
+            or usage_provider is not None
+        ):
             usage_report = NodeUsageReport(
                 model=usage_model,
                 input_tokens=usage_input_total if usage_input_seen else None,
                 output_tokens=usage_output_total if usage_output_seen else None,
                 total_tokens=usage_total_total if usage_total_seen else None,
+                request_id=usage_request_id,
+                provider=usage_provider,
             )
 
         report = NodeReport(
