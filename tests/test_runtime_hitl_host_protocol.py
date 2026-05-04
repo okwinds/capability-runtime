@@ -176,6 +176,47 @@ def test_runtime_summarize_host_run_truncates_message_preview_and_falls_back_to_
     assert unknown_snapshot.message_preview is None
 
 
+def test_runtime_summarize_host_run_escapes_and_redacts_message_preview() -> None:
+    """message_preview 必须后端防御性转义并脱敏常见 token/password 片段。"""
+
+    rt = _build_runtime()
+    message = (
+        '<script data-x="1&2">alert(1)</script> api_key = sk-secret '
+        'password="my secret" token=\'abc 123\' Bearer abc.def '
+        + ("padding " * 40)
+    )
+    snapshot = rt.summarize_host_run(_waiting_host_input_result(message=message), capability_id="agent.ask")
+
+    assert snapshot.message_preview is not None
+    assert len(snapshot.message_preview) <= 120
+    assert "<script>" not in snapshot.message_preview
+    assert '"' not in snapshot.message_preview
+    assert "&amp;" in snapshot.message_preview
+    assert "&quot;" in snapshot.message_preview
+    assert "&lt;script" in snapshot.message_preview
+    assert "sk-secret" not in snapshot.message_preview
+    assert "my secret" not in snapshot.message_preview
+    assert "abc 123" not in snapshot.message_preview
+    assert "abc.def" not in snapshot.message_preview
+    assert "[REDACTED]" in snapshot.message_preview
+
+
+def test_runtime_summarize_host_run_redacts_secret_before_truncation() -> None:
+    """长消息中的敏感值在裁剪前必须脱敏，不能因截断泄漏。"""
+
+    rt = _build_runtime()
+    secret = "sk-" + ("x" * 180)
+    snapshot = rt.summarize_host_run(
+        _waiting_host_input_result(message=f"api_key = {secret} after"),
+        capability_id="agent.ask",
+    )
+
+    assert snapshot.message_preview is not None
+    assert len(snapshot.message_preview) <= 120
+    assert secret[:80] not in snapshot.message_preview
+    assert "[REDACTED]" in snapshot.message_preview
+
+
 def test_build_resume_intent_and_host_resume_state_expose_waiting_approval_key() -> None:
     """回归：宿主 resume helper 需要恢复 waiting approval key，并构造 ResumeIntent。"""
 

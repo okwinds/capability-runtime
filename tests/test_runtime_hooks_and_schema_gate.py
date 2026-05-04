@@ -78,6 +78,66 @@ async def test_on_event_callback_is_called(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_on_event_callback_errors_are_recorded_in_node_report_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    """on_event 保持 fail-open，但回调异常必须写入 terminal NodeReport.meta。"""
+
+    def on_event(_event: Any, _ctx: Dict[str, Any]) -> None:
+        raise RuntimeError("observer down")
+
+    rt = _mk_runtime(monkeypatch, on_event=on_event)
+    out = await rt.run("A", context=ExecutionContext(run_id="r-on-event-error"))
+
+    assert out.status == CapabilityStatus.SUCCESS
+    assert out.node_report is not None
+    assert out.node_report.meta["on_event_error_count"] >= 1
+    assert out.node_report.meta["on_event_last_error_type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_on_event_callback_errors_are_preserved_when_sdk_run_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """on_event 异常后若 SDK run 失败，失败 terminal 仍必须保留回调错误摘要。"""
+
+    class _FailingAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            _ = kwargs
+
+        async def run_stream_async(
+            self,
+            task: str,
+            *,
+            run_id: Optional[str] = None,
+            initial_history: Optional[List[Dict[str, Any]]] = None,
+        ):
+            _ = task
+            _ = initial_history
+            yield AgentEvent(type="run_started", timestamp="2026-02-10T00:00:00Z", run_id=run_id or "r1", payload={})
+            raise RuntimeError("sdk down")
+
+    def on_event(_event: Any, _ctx: Dict[str, Any]) -> None:
+        raise ValueError("observer down")
+
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FailingAgent)
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=Path("."),
+            preflight_mode="off",
+            on_event=on_event,
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+
+    out = await rt.run("A", context=ExecutionContext(run_id="r-on-event-sdk-error"))
+
+    assert out.status == CapabilityStatus.FAILED
+    assert out.node_report is not None
+    assert out.node_report.meta["on_event_error_count"] == 1
+    assert out.node_report.meta["on_event_last_error_type"] == "ValueError"
+
+
+@pytest.mark.asyncio
 async def test_output_validator_warn_records_meta_but_does_not_override_status(monkeypatch: pytest.MonkeyPatch) -> None:
     def validator(*, final_output: str, node_report, context: Dict[str, Any]) -> Dict[str, Any]:
         _ = final_output
