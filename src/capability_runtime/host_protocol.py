@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """HITL / wait-resume / approval 的宿主协议收敛层。"""
 
+import html
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -397,4 +399,10 @@ def _build_message_preview(value: Any) -> str | None:
     normalized = " ".join(value.split())
     if not normalized:
         return None
-    return normalized[:120]
+    secret_pattern = re.compile(
+        r"(?i)\b(password|passwd|api_key|apikey|token|access_token|secret)\s*=\s*"
+        r"(\"[^\"]*\"|'[^']*'|[^\s&]+)"
+    )
+    redacted = secret_pattern.sub(lambda m: f"{m.group(1)}=[REDACTED]", normalized)
+    redacted = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", redacted)
+    return html.escape(redacted, quote=True)[:120]
