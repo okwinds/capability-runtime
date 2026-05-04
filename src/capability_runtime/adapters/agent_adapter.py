@@ -80,6 +80,7 @@ class AgentAdapter:
         spec: AgentSpec,
         input: Dict[str, Any],
         context: ExecutionContext,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Union[AgentEvent, CapabilityResult]]:
         """
         流式执行 AgentSpec：先 yield AgentEvent（若为真实执行），最后 yield CapabilityResult。
@@ -93,6 +94,7 @@ class AgentAdapter:
 
         备注：
         - 每条 `AgentEvent` 也会通过 Runtime 的内部 tap 旁路分发（用于 UI events 投影；不改变对外 `AgentEvent` 转发语义）。
+        - `prompt_control` 为显式 prompt 控制面，优先于兼容入口 `input["_runtime_prompt"]`。
         """
 
         mode = str(getattr(self._services.config, "mode", "mock"))
@@ -100,7 +102,12 @@ class AgentAdapter:
             yield await self._mock_execute(spec=spec, input=input, context=context)
             return
 
-        async for item in self._bridge_execute_stream(spec=spec, input=input, context=context):
+        async for item in self._bridge_execute_stream(
+            spec=spec,
+            input=input,
+            context=context,
+            prompt_control=prompt_control,
+        ):
             yield item
 
     async def _mock_execute(self, *, spec: AgentSpec, input: Dict[str, Any], context: ExecutionContext) -> CapabilityResult:
@@ -193,14 +200,26 @@ class AgentAdapter:
             )
 
     async def _bridge_execute_stream(
-        self, *, spec: AgentSpec, input: Dict[str, Any], context: ExecutionContext
+        self,
+        *,
+        spec: AgentSpec,
+        input: Dict[str, Any],
+        context: ExecutionContext,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Union[AgentEvent, CapabilityResult]]:
         """
         真实执行（bridge/sdk_native）：驱动 SDK Agent.run_stream_async 并聚合 NodeReport。
+
+        参数：
+        - prompt_control：显式 prompt 控制面；为空时回退读取 `input["_runtime_prompt"]`。
         """
 
         try:
-            prompt_plan = self._resolve_prompt_render_plan(spec=spec, input=input)
+            prompt_plan = self._resolve_prompt_render_plan(
+                spec=spec,
+                input=input,
+                prompt_control=prompt_control,
+            )
         except _InvalidPromptMessages as exc:
             report = self._services.build_fail_closed_report(
                 run_id=context.run_id,
@@ -283,6 +302,19 @@ class AgentAdapter:
         events: List[AgentEvent] = []
         host_meta = self._services.get_host_meta(context=context)
         initial_history = host_meta.get("initial_history") if isinstance(host_meta.get("initial_history"), list) else None
+        on_event_error_count = 0
+        on_event_last_error_type: Optional[str] = None
+
+        def _apply_on_event_error_evidence(report: Any) -> None:
+            """把 on_event fail-open 错误摘要写入 NodeReport.meta。"""
+
+            if on_event_error_count <= 0:
+                return
+            meta = getattr(report, "meta", None)
+            if isinstance(meta, dict):
+                meta["on_event_error_count"] = on_event_error_count
+                if on_event_last_error_type:
+                    meta["on_event_last_error_type"] = on_event_last_error_type
 
         try:
             async for ev in agent.run_stream_async(task, run_id=context.run_id, initial_history=initial_history):
@@ -306,6 +338,8 @@ class AgentAdapter:
                             {"run_id": context.run_id, "capability_id": spec.base.id},
                         )
                     except Exception as cb_exc:
+                        on_event_error_count += 1
+                        on_event_last_error_type = type(cb_exc).__name__
                         log_suppressed_exception(
                             context="on_event_callback",
                             exc=cb_exc,
@@ -323,6 +357,7 @@ class AgentAdapter:
                 meta={"capability_id": spec.base.id, "source": "sdk_agent"},
             )
             self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
+            _apply_on_event_error_evidence(report)
             yield CapabilityResult(
                 status=CapabilityStatus.CANCELLED,
                 error="execution cancelled",
@@ -339,6 +374,7 @@ class AgentAdapter:
                 completion_reason="engine_exception",
                 meta={"engine_exception": type(exc).__name__, **prompt_plan.evidence},
             )
+            _apply_on_event_error_evidence(report)
             yield CapabilityResult(
                 status=CapabilityStatus.FAILED,
                 error=str(exc),
@@ -350,6 +386,7 @@ class AgentAdapter:
 
         report = NodeReportBuilder().build(events=events)
         self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
+        _apply_on_event_error_evidence(report)
         if issues and getattr(self._services.config, "preflight_mode", "error") == "warn":
             report.meta["preflight_mode"] = "warn"
             report.meta["preflight_issues"] = [self._services.redact_issue(i) for i in issues]
@@ -389,13 +426,20 @@ class AgentAdapter:
             artifacts=list(report.artifacts),
         )
 
-    def _resolve_prompt_render_plan(self, *, spec: AgentSpec, input: Dict[str, Any]) -> _PromptRenderPlan:
+    def _resolve_prompt_render_plan(
+        self,
+        *,
+        spec: AgentSpec,
+        input: Dict[str, Any],
+        prompt_control: Optional[Dict[str, Any]] = None,
+    ) -> _PromptRenderPlan:
         """
         解析 AgentSpec + run-level `_runtime_prompt`，生成 prompt 渲染计划。
 
         参数：
         - spec：Agent 声明
         - input：run 输入，其中 `_runtime_prompt` 为保留控制面
+        - prompt_control：显式控制面；若提供则优先于 input 内兼容保留键
 
         返回：
         - `_PromptRenderPlan`
@@ -404,13 +448,14 @@ class AgentAdapter:
         - `_InvalidPromptMessages`：控制面非法，调用方应 fail-fast。
         """
 
-        envelope_raw = input.get(_RUNTIME_PROMPT_KEY)
+        envelope_raw = prompt_control if prompt_control is not None else input.get(_RUNTIME_PROMPT_KEY)
+        envelope_name = "prompt_control" if prompt_control is not None else "_runtime_prompt"
         if envelope_raw is None:
             envelope: Dict[str, Any] = {}
         elif isinstance(envelope_raw, dict):
             envelope = dict(envelope_raw)
         else:
-            raise _InvalidPromptMessages("_runtime_prompt must be a dict")
+            raise _InvalidPromptMessages(f"{envelope_name} must be a dict")
 
         raw_mode = envelope.get("mode") if "mode" in envelope else getattr(spec, "prompt_render_mode", "structured_task")
         if raw_mode is None:
@@ -570,10 +615,9 @@ class AgentAdapter:
         if business_input:
             lines: List[str] = []
             for k, v in business_input.items():
-                if isinstance(v, str):
-                    lines.append(f"- {k}: {v}")
-                else:
-                    lines.append(f"- {k}: {json.dumps(v, ensure_ascii=False)}")
+                key_text = json.dumps(str(k), ensure_ascii=False)
+                value_text = json.dumps(v, ensure_ascii=False)
+                lines.append(f"- {key_text}: {value_text}")
             parts.append(f"{_SECTION_INPUT}\n" + "\n".join(lines))
 
         if spec.output_schema and spec.output_schema.fields:
