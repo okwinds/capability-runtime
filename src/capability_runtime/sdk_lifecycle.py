@@ -19,6 +19,7 @@ from skills_runtime.skills.manager import SkillsManager
 from .config import CustomTool, RuntimeConfig, RuntimeMode, normalize_workspace_root
 from .logging_utils import log_suppressed_exception
 from .protocol.chat_backend import ChatBackendProtocol
+from .utils.usage import extract_usage_metrics
 
 
 @dataclass(frozen=True)
@@ -668,7 +669,7 @@ class _UsageTapBackend:
 
 class _AgentUsageEventBridge:
     """
-    Agent 薄代理：在底层未主动发出 `llm_usage` 时，补发 bridge 收集到的 usage AgentEvent。
+    Agent 薄代理：补齐 bridge usage metadata，或在底层未主动发出 `llm_usage` 时补发 usage 事件。
     """
 
     def __init__(self, *, agent: Any, usage_bridge_backend: _UsageTapBackend) -> None:
@@ -683,16 +684,32 @@ class _AgentUsageEventBridge:
         initial_history: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncIterator[AgentEvent]:
         """
-        转发 SDK Agent 事件流；若未见上游 `llm_usage`，在流结束后补发 bridge usage 事件。
+        转发 SDK Agent 事件流，并按 token usage bridge 规格处理 supplemental usage。
+
+        参数：
+        - task：传给上游 Agent 的任务文本
+        - run_id：可选 run 标识
+        - initial_history：可选初始历史
+
+        返回：
+        - AgentEvent 异步流；上游 `llm_usage` 存在时只补齐缺失 metadata，不重复补 token
         """
 
         saw_llm_usage = False
+        pending_supplemental_usage: List[Dict[str, Any]] = []
         last_run_id = run_id or ""
         last_turn_id: Optional[str] = None
 
         async for ev in self._agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
             if ev.type == "llm_usage":
                 saw_llm_usage = True
+                pending_supplemental_usage.extend(self._usage_bridge_backend.drain_usage_payloads())
+                if pending_supplemental_usage:
+                    ev = _merge_supplemental_usage_metadata_event(
+                        ev=ev,
+                        supplemental_payloads=pending_supplemental_usage,
+                    )
+                    pending_supplemental_usage.clear()
             if isinstance(ev.run_id, str) and ev.run_id:
                 last_run_id = ev.run_id
             if isinstance(ev.turn_id, str) and ev.turn_id:
@@ -700,10 +717,12 @@ class _AgentUsageEventBridge:
             yield ev
 
         if saw_llm_usage:
+            # 上游 usage 已是 token 权威来源；清空未配对 payload，避免作为新 usage 事件造成双计。
             self._usage_bridge_backend.drain_usage_payloads()
             return
 
-        for payload in self._usage_bridge_backend.drain_usage_payloads():
+        pending_supplemental_usage.extend(self._usage_bridge_backend.drain_usage_payloads())
+        for payload in pending_supplemental_usage:
             yield AgentEvent(
                 type="llm_usage",
                 timestamp=_now_rfc3339(),
@@ -717,6 +736,50 @@ def _now_rfc3339() -> str:
     """生成 UTC RFC3339 时间戳（秒级 suffices for synthetic llm_usage events）。"""
 
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_payloads: List[Dict[str, Any]]) -> AgentEvent:
+    """
+    把 sink payload 作为 supplemental metadata patch 合并到上游 `llm_usage` 事件。
+
+    参数：
+    - ev：上游 SDK / agent loop 已发出的 `llm_usage` AgentEvent
+    - supplemental_payloads：`_caprt_usage_sink` 收集到的 provider/gateway usage payload 列表
+
+    返回：
+    - 新 AgentEvent；仅在上游 metadata 缺失时补 `model/request_id/provider`，不写入 token 字段
+    """
+
+    upstream_payload = dict(ev.payload) if isinstance(ev.payload, dict) else {}
+    merged_payload = dict(upstream_payload)
+
+    for supplemental_payload in supplemental_payloads:
+        supplemental_summary = extract_usage_metrics(supplemental_payload)
+        for field in ("model", "request_id", "provider"):
+            current_value = extract_usage_metrics(merged_payload).get(field)
+            if isinstance(current_value, str) and current_value.strip():
+                continue
+            supplemental_value = supplemental_summary.get(field)
+            if isinstance(supplemental_value, str) and supplemental_value.strip():
+                merged_payload[field] = supplemental_value.strip()
+
+    if merged_payload == upstream_payload:
+        return ev
+    try:
+        return ev.model_copy(update={"payload": merged_payload})
+    except Exception as exc:  # pragma: no cover - 当前 AgentEvent 为 Pydantic v2，保留兼容兜底。
+        log_suppressed_exception(
+            context="supplemental_usage_event_model_copy",
+            exc=exc,
+        )
+        return AgentEvent(
+            type=ev.type,
+            timestamp=ev.timestamp,
+            run_id=ev.run_id,
+            turn_id=ev.turn_id,
+            step_id=ev.step_id,
+            payload=merged_payload,
+        )
 
 
 def _merge_usage_sink(*, extra: Dict[str, Any], sink: Any) -> Dict[str, Any]:
