@@ -118,6 +118,13 @@ def _backend_from_items(items):
 async def _run_usage_backend(backend, tmp_path):
     """用 sdk_native Runtime 运行测试 backend，并返回 CapabilityResult。"""
 
+    rt = _make_usage_runtime(backend, tmp_path)
+    return await rt.run("agent.upstream_usage_with_sink", input={"prompt": "x"})
+
+
+def _make_usage_runtime(backend, tmp_path):
+    """构造注册了 usage 测试 Agent 的 sdk_native Runtime。"""
+
     rt = Runtime(
         RuntimeConfig(
             mode="sdk_native",
@@ -137,7 +144,7 @@ async def _run_usage_backend(backend, tmp_path):
             ),
         )
     )
-    return await rt.run("agent.upstream_usage_with_sink", input={"prompt": "x"})
+    return rt
 
 
 @pytest.mark.asyncio
@@ -382,6 +389,150 @@ def test_supplemental_usage_metadata_helper_does_not_overwrite_existing_model() 
         "request_id": "req_model",
         "provider": "sink-provider",
     }
+
+
+@pytest.mark.parametrize("placeholder_provider", ["openai", "openai-compatible"])
+def test_supplemental_usage_metadata_helper_overwrites_placeholder_provider(placeholder_provider: str) -> None:
+    ev = AgentEvent(
+        type="llm_usage",
+        timestamp="2026-05-05T00:00:00Z",
+        run_id="run_1",
+        payload={
+            "model": "upstream-model",
+            "input_tokens": 5,
+            "output_tokens": 6,
+            "total_tokens": 11,
+            "request_id": "req_upstream",
+            "provider": placeholder_provider,
+        },
+    )
+
+    merged = _merge_supplemental_usage_metadata_event(
+        ev=ev,
+        supplemental_payloads=[
+            {
+                "model": "sink-model",
+                "input_tokens": 99,
+                "output_tokens": 99,
+                "total_tokens": 198,
+                "request_id": "req_sink",
+                "provider": "gateway-provider",
+            }
+        ],
+    )
+
+    assert merged.payload == {
+        "model": "upstream-model",
+        "input_tokens": 5,
+        "output_tokens": 6,
+        "total_tokens": 11,
+        "request_id": "req_upstream",
+        "provider": "gateway-provider",
+        "provider_upstream": placeholder_provider,
+    }
+
+
+@pytest.mark.parametrize("sink_provider", ["", "   ", "openai", "openai-compatible"])
+def test_supplemental_usage_metadata_helper_keeps_placeholder_when_sink_is_not_effective(
+    sink_provider: str,
+) -> None:
+    ev = AgentEvent(
+        type="llm_usage",
+        timestamp="2026-05-05T00:00:00Z",
+        run_id="run_1",
+        payload={
+            "input_tokens": 5,
+            "output_tokens": 6,
+            "total_tokens": 11,
+            "provider": "openai",
+        },
+    )
+
+    merged = _merge_supplemental_usage_metadata_event(
+        ev=ev,
+        supplemental_payloads=[{"provider": sink_provider}],
+    )
+
+    assert merged.payload == {
+        "input_tokens": 5,
+        "output_tokens": 6,
+        "total_tokens": 11,
+        "provider": "openai",
+    }
+
+
+@pytest.mark.parametrize("placeholder_provider", ["openai", "openai-compatible"])
+@pytest.mark.asyncio
+async def test_upstream_placeholder_provider_is_replaced_by_sink_effective_provider(
+    tmp_path,
+    placeholder_provider: str,
+):
+    backend = _UpstreamUsageWithSinkBackend(
+        sink_payload={
+            "input_tokens": 99,
+            "output_tokens": 99,
+            "total_tokens": 198,
+            "request_id": "req_sink_gateway",
+            "provider": "gateway-provider",
+        },
+        completed_usage={"input_tokens": 5, "output_tokens": 6, "total_tokens": 11},
+        completed_request_id="req_gateway",
+        completed_provider=placeholder_provider,
+    )
+    rt = _make_usage_runtime(backend, tmp_path)
+
+    items = [
+        item
+        async for item in rt.run_stream("agent.upstream_usage_with_sink", input={"prompt": "x"})
+    ]
+    usage_events = [item for item in items if isinstance(item, AgentEvent) and item.type == "llm_usage"]
+    result = items[-1]
+
+    assert usage_events
+    assert usage_events[-1].payload["provider"] == "gateway-provider"
+    assert usage_events[-1].payload["provider_upstream"] == placeholder_provider
+    assert result.node_report is not None
+    assert result.node_report.usage is not None
+    assert result.node_report.usage.input_tokens == 5
+    assert result.node_report.usage.output_tokens == 6
+    assert result.node_report.usage.total_tokens == 11
+    assert result.node_report.usage.request_id == "req_gateway"
+    assert result.node_report.usage.provider == "gateway-provider"
+
+
+@pytest.mark.asyncio
+async def test_upstream_placeholder_provider_keeps_placeholder_when_sink_is_placeholder(tmp_path):
+    backend = _UpstreamUsageWithSinkBackend(
+        sink_payload={
+            "input_tokens": 99,
+            "output_tokens": 99,
+            "total_tokens": 198,
+            "request_id": "req_sink_gateway",
+            "provider": "openai-compatible",
+        },
+        completed_usage={"input_tokens": 5, "output_tokens": 6, "total_tokens": 11},
+        completed_request_id="req_gateway",
+        completed_provider="openai",
+    )
+    rt = _make_usage_runtime(backend, tmp_path)
+
+    items = [
+        item
+        async for item in rt.run_stream("agent.upstream_usage_with_sink", input={"prompt": "x"})
+    ]
+    usage_events = [item for item in items if isinstance(item, AgentEvent) and item.type == "llm_usage"]
+    result = items[-1]
+
+    assert usage_events
+    assert usage_events[-1].payload["provider"] == "openai"
+    assert "provider_upstream" not in usage_events[-1].payload
+    assert result.node_report is not None
+    assert result.node_report.usage is not None
+    assert result.node_report.usage.input_tokens == 5
+    assert result.node_report.usage.output_tokens == 6
+    assert result.node_report.usage.total_tokens == 11
+    assert result.node_report.usage.request_id == "req_gateway"
+    assert result.node_report.usage.provider == "openai"
 
 
 @pytest.mark.asyncio

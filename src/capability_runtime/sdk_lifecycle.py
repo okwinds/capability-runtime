@@ -738,6 +738,9 @@ def _now_rfc3339() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+_USAGE_PROVIDER_PLACEHOLDERS = {"openai", "openai-compatible"}
+
+
 def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_payloads: List[Dict[str, Any]]) -> AgentEvent:
     """
     把 sink payload 作为 supplemental metadata patch 合并到上游 `llm_usage` 事件。
@@ -747,7 +750,8 @@ def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_pay
     - supplemental_payloads：`_caprt_usage_sink` 收集到的 provider/gateway usage payload 列表
 
     返回：
-    - 新 AgentEvent；仅在上游 metadata 缺失时补 `model/request_id/provider`，不写入 token 字段
+    - 新 AgentEvent；仅在上游 metadata 缺失时补 `model/request_id/provider`，不写入 token 字段；
+      `provider` 可在上游为 OpenAI-compatible 占位值时被 effective provider 受控覆盖。
     """
 
     upstream_payload = dict(ev.payload) if isinstance(ev.payload, dict) else {}
@@ -755,13 +759,30 @@ def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_pay
 
     for supplemental_payload in supplemental_payloads:
         supplemental_summary = extract_usage_metrics(supplemental_payload)
-        for field in ("model", "request_id", "provider"):
+        for field in ("model", "request_id"):
             current_value = extract_usage_metrics(merged_payload).get(field)
             if isinstance(current_value, str) and current_value.strip():
                 continue
             supplemental_value = supplemental_summary.get(field)
             if isinstance(supplemental_value, str) and supplemental_value.strip():
                 merged_payload[field] = supplemental_value.strip()
+        current_provider = extract_usage_metrics(merged_payload).get("provider")
+        supplemental_provider = supplemental_summary.get("provider")
+        if not (isinstance(supplemental_provider, str) and supplemental_provider.strip()):
+            continue
+        supplemental_provider = supplemental_provider.strip()
+        supplemental_provider_is_placeholder = supplemental_provider in _USAGE_PROVIDER_PLACEHOLDERS
+        if not (isinstance(current_provider, str) and current_provider.strip()):
+            merged_payload["provider"] = supplemental_provider
+            continue
+        current_provider = current_provider.strip()
+        if (
+            current_provider in _USAGE_PROVIDER_PLACEHOLDERS
+            and not supplemental_provider_is_placeholder
+            and current_provider != supplemental_provider
+        ):
+            merged_payload.setdefault("provider_upstream", current_provider)
+            merged_payload["provider"] = supplemental_provider
 
     if merged_payload == upstream_payload:
         return ev
