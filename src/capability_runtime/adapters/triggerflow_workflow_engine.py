@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any, AsyncIterator, Dict, List, Optional, cast
 
@@ -598,8 +598,7 @@ class TriggerFlowWorkflowEngine:
                 completion_reason="loop_iteration_failed",
                 meta={"step_id": step.id, "capability_id": step.capability.id},
             )
-            result.report = report
-            result.node_report = report
+            result = replace(result, report=report, node_report=report)
 
         context.step_outputs[step.id] = result.output
         context.step_results[step.id] = _to_step_result_dict(result)

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 """结构化输出桥接：`output_schema` 校验、摘要留痕与结果收敛。"""
 
+import copy
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 from .config import OutputValidationMode
@@ -183,26 +184,51 @@ def finalize_structured_result(
     validation: StructuredOutputValidation,
     fail_on_error: bool,
 ) -> CapabilityResult:
-    """把普通 CapabilityResult 收敛为结构化结果。"""
+    """把普通 CapabilityResult 收敛为结构化结果，并返回新的 terminal 对象。"""
 
-    result.metadata["raw_output"] = validation.raw_output
-    result.metadata["structured_output"] = dict(validation.summary)
+    metadata = copy.deepcopy(result.metadata or {})
+    metadata["raw_output"] = validation.raw_output
+    metadata["structured_output"] = dict(validation.summary)
 
-    if result.node_report is not None:
+    node_report = copy.deepcopy(result.node_report) if result.node_report is not None else None
+    if node_report is not None:
         apply_structured_output_summary(
-            report=result.node_report,
+            report=node_report,
             validation=validation,
             fail_on_error=fail_on_error,
         )
 
-    if not validation.ok:
-        result.status = CapabilityStatus.FAILED
-        result.output = None
-        result.error = "Structured output contract violated"
-        result.error_code = "STRUCTURED_OUTPUT_INVALID"
-        return result
+    if result.report is result.node_report:
+        report = node_report
+    else:
+        report = copy.deepcopy(result.report) if result.report is not None else None
+        if isinstance(report, NodeReport):
+            apply_structured_output_summary(
+                report=report,
+                validation=validation,
+                fail_on_error=fail_on_error,
+            )
 
-    result.output = dict(validation.normalized_output or {})
-    result.error = None
-    result.error_code = None
-    return result
+    if not validation.ok:
+        return replace(
+            result,
+            status=CapabilityStatus.FAILED,
+            output=None,
+            error="Structured output contract violated",
+            error_code="STRUCTURED_OUTPUT_INVALID",
+            report=report,
+            node_report=node_report,
+            artifacts=list(result.artifacts or []),
+            metadata=metadata,
+        )
+
+    return replace(
+        result,
+        output=dict(validation.normalized_output or {}),
+        error=None,
+        error_code=None,
+        report=report,
+        node_report=node_report,
+        artifacts=list(result.artifacts or []),
+        metadata=metadata,
+    )

@@ -10,6 +10,7 @@ from __future__ import annotations
 """
 
 import asyncio
+import copy
 import time
 import uuid
 from dataclasses import replace
@@ -344,6 +345,7 @@ class Runtime(RuntimeUIEventsMixin):
         *,
         input: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> CapabilityResult:
         """
         非流式执行（等待完成后返回）。
@@ -352,10 +354,14 @@ class Runtime(RuntimeUIEventsMixin):
         - capability_id：能力 ID
         - input：输入参数 dict
         - context：可选执行上下文（宿主控制；若不传则由 Runtime 创建）
+        - prompt_control：可选 prompt 控制面；优先于兼容入口 `input["_runtime_prompt"]`
         """
 
         result: Optional[CapabilityResult] = None
-        async for item in self.run_stream(capability_id, input=input, context=context):
+        stream_kwargs: Dict[str, Any] = {"input": input, "context": context}
+        if prompt_control is not None:
+            stream_kwargs["prompt_control"] = prompt_control
+        async for item in self.run_stream(capability_id, **stream_kwargs):
             if isinstance(item, CapabilityResult):
                 result = item
         if result is None:
@@ -373,6 +379,7 @@ class Runtime(RuntimeUIEventsMixin):
         *,
         input: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> CapabilityResult:
         """
         强结构输出入口：成功时返回 `dict` 输出。
@@ -380,11 +387,12 @@ class Runtime(RuntimeUIEventsMixin):
         约束：
         - 仅支持带 `output_schema` 的 Agent capability；
         - 不改变 `run()` 的既有语义，而是在其之上做强结构收口。
+        - `prompt_control` 透传给底层 `run()`，用于显式控制 prompt rendering。
         """
 
         spec = self._registry.get(capability_id)
         if spec is None:
-            return await self.run(capability_id, input=input, context=context)
+            return await self.run(capability_id, input=input, context=context, prompt_control=prompt_control)
         if not isinstance(spec, AgentSpec):
             run_id = context.run_id if context is not None else uuid.uuid4().hex
             return self._build_fail_closed_result(
@@ -408,7 +416,7 @@ class Runtime(RuntimeUIEventsMixin):
                 completion_reason="structured_output_schema_missing",
             )
 
-        result = await self.run(capability_id, input=input, context=context)
+        result = await self.run(capability_id, input=input, context=context, prompt_control=prompt_control)
         if result.status != CapabilityStatus.SUCCESS:
             return result
 
@@ -426,6 +434,7 @@ class Runtime(RuntimeUIEventsMixin):
         *,
         input: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[StructuredStreamEvent]:
         """
         结构化输出流式消费入口。
@@ -433,6 +442,7 @@ class Runtime(RuntimeUIEventsMixin):
         说明：
         - 面向业务代码，不透传 mixed stream / UI events 的全部细节；
         - 仅在观察到 `llm_response_delta(text)` 时产出中途快照与字段更新。
+        - `prompt_control` 透传给底层 `run_stream()`，优先于 `input["_runtime_prompt"]`。
         """
 
         spec = self._registry.get(capability_id)
@@ -474,7 +484,10 @@ class Runtime(RuntimeUIEventsMixin):
         previous_snapshot: Optional[Dict[str, Any]] = None
         terminal: Optional[CapabilityResult] = None
 
-        async for item in self.run_stream(capability_id, input=input, context=ctx):
+        stream_kwargs: Dict[str, Any] = {"input": input, "context": ctx}
+        if prompt_control is not None:
+            stream_kwargs["prompt_control"] = prompt_control
+        async for item in self.run_stream(capability_id, **stream_kwargs):
             if isinstance(item, CapabilityResult):
                 terminal = item
                 continue
@@ -564,6 +577,7 @@ class Runtime(RuntimeUIEventsMixin):
         *,
         input: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Union[AgentEvent, WorkflowStreamEvent, CapabilityResult]]:
         """
         流式执行（执行层混合流）：过程中可能产出事件，最后产出终态 CapabilityResult。
@@ -610,15 +624,30 @@ class Runtime(RuntimeUIEventsMixin):
 
         started = time.monotonic()
         if _get_base(spec).kind == CapabilityKind.AGENT:
-            async for x in self._execute_agent_stream(spec=spec, input=input or {}, context=ctx):
+            async for x in self._execute_agent_stream(
+                spec=spec,
+                input=input or {},
+                context=ctx,
+                prompt_control=prompt_control,
+            ):
                 if isinstance(x, CapabilityResult):
-                    x.duration_ms = (time.monotonic() - started) * 1000
+                    x = replace(
+                        x,
+                        duration_ms=(time.monotonic() - started) * 1000,
+                        artifacts=list(x.artifacts or []),
+                        metadata=copy.deepcopy(x.metadata or {}),
+                    )
                 yield x
             return
 
         async for x in self._execute_workflow_stream(spec=spec, input=input or {}, context=ctx):
             if isinstance(x, CapabilityResult):
-                x.duration_ms = (time.monotonic() - started) * 1000
+                x = replace(
+                    x,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    artifacts=list(x.artifacts or []),
+                    metadata=copy.deepcopy(x.metadata or {}),
+                )
             yield x
         return
 
@@ -826,7 +855,12 @@ class Runtime(RuntimeUIEventsMixin):
             yield item
 
     async def _execute_agent_stream(
-        self, *, spec: AnySpec, input: Dict[str, Any], context: ExecutionContext
+        self,
+        *,
+        spec: AnySpec,
+        input: Dict[str, Any],
+        context: ExecutionContext,
+        prompt_control: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Union[AgentEvent, CapabilityResult]]:
         """
         执行 AgentSpec（流式）。
@@ -849,7 +883,10 @@ class Runtime(RuntimeUIEventsMixin):
             )
             return
 
-        async for item in self._agent_adapter.execute_stream(spec=spec, input=input, context=context):
+        execute_kwargs: Dict[str, Any] = {"spec": spec, "input": input, "context": context}
+        if prompt_control is not None:
+            execute_kwargs["prompt_control"] = prompt_control
+        async for item in self._agent_adapter.execute_stream(**execute_kwargs):
             yield item
 
     def build_fail_closed_report(
