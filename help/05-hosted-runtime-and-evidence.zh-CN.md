@@ -14,6 +14,25 @@
 - `events_path`：尽力指向 WAL events 的定位符
 - tool-call summaries：审批、状态、错误类别的聚合摘要
 
+对于多模态 `precomposed_messages`，`NodeReport.meta` 只记录安全的 prompt
+摘要：
+
+- `prompt_modalities`
+- `prompt_content_part_counts`
+- `prompt_media_count`
+
+它不会记录完整 `messages[]`、URL、base64 载荷、媒体字节、prompt 明文、
+`tool_calls` 或 `tool_call_id`。Runtime UI events 仍然只是投影事件，不是审计真相源，
+也不会投影这些多模态 prompt 摘要字段。
+
+媒体或文件输出继续表示为 artifact locator：
+
+- `CapabilityResult.artifacts`
+- `NodeReport.artifacts`
+
+不要把 UI event evidence 当成完整 artifact 真相源。稳定证据面是终态结果与
+`NodeReport`。
+
 ## 宿主协议
 
 - `ApprovalTicket`

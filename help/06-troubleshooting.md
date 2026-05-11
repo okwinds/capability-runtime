@@ -12,6 +12,13 @@
   - Check `sdk_config_paths`, `skills_config`, and the requested mode.
 - missing `NodeReport`
   - `mock` mode may not produce the same evidence depth as `bridge` / `sdk_native`.
+- `INVALID_PROMPT_MESSAGES`
+  - Check `_runtime_prompt.messages` when using `precomposed_messages`.
+  - For multimodal input, `content` must be either a string or a non-empty list
+    of supported content parts.
+  - v1 supports only `text` and `image_url` parts. Unknown fields, unknown part
+    types, invalid `image_url.detail`, empty URLs, non-finite numbers, and
+    non-JSON-compatible message values fail fast.
 - waiting for approval
   - inspect `HostRunSnapshot` or `NodeReport` for the approval key and tool metadata.
 - doc drift suspicion
