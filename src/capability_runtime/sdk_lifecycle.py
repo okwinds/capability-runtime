@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -598,12 +599,12 @@ class _PrecomposedMessagesBackend:
 
     说明：
     - 该包装不绕过 SDK Agent / WAL / events，只在 provider request 出口替换 messages；
-    - messages 做浅拷贝转发，避免下游 backend 修改 host 输入。
+    - messages 做嵌套结构副本转发，避免 host/backend 后续修改共享可变对象。
     """
 
     def __init__(self, *, backend: ChatBackendProtocol, messages: List[Dict[str, Any]]) -> None:
         self._backend: ChatBackendProtocol = backend
-        self._messages: List[Dict[str, Any]] = [dict(item) for item in messages]
+        self._messages: List[Dict[str, Any]] = deepcopy(messages)
 
     async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """
@@ -616,7 +617,7 @@ class _PrecomposedMessagesBackend:
         forwarded = _clone_request_with_field_update(
             request,
             field_name="messages",
-            value=[dict(item) for item in self._messages],
+            value=deepcopy(self._messages),
             dataclasses_context="precomposed_messages_dataclasses_replace",
             clone_context="precomposed_messages_override",
         )

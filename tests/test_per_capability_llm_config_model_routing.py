@@ -8,6 +8,7 @@ from __future__ import annotations
 - 当 llm_config 缺失/不含 model 时：不得做覆写（保持 runtime 默认行为）。
 """
 
+import copy
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
@@ -20,6 +21,7 @@ from skills_runtime.tools.protocol import ToolSpec
 from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, CustomTool, Runtime, RuntimeConfig
 from capability_runtime.sdk_lifecycle import (
     _ModelOverrideBackend,
+    _PrecomposedMessagesBackend,
     _ResponseFormatOverrideBackend,
     _ToolChoiceOverrideBackend,
     _UsageTapBackend,
@@ -52,6 +54,28 @@ class _RecordingBackend:
         self.messages.append([dict(item) for item in messages] if isinstance(messages, list) else [])
         tools = getattr(request, "tools", None)
         self.tool_names.append([tool.name for tool in tools] if isinstance(tools, list) else [])
+        yield ChatStreamEvent(type="text_delta", text="ok")
+        yield ChatStreamEvent(type="completed")
+
+
+class _MutatingMessagesBackend:
+    """
+    测试用 ChatBackend：记录收到的 request.messages，然后故意篡改嵌套字段。
+
+    该 backend 用于证明 `_PrecomposedMessagesBackend` 每次转发都生成独立嵌套副本，
+    下游 backend 的原地修改不会污染 lifecycle 缓存或下一次 provider request。
+    """
+
+    def __init__(self) -> None:
+        self.messages_before_mutation: List[List[Dict[str, Any]]] = []
+
+    async def stream_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        messages = getattr(request, "messages", None)
+        if isinstance(messages, list):
+            self.messages_before_mutation.append(copy.deepcopy(messages))
+            messages[1]["content"][1]["image_url"]["url"] = "https://mutated.example/image.png"
+            messages[2]["tool_calls"][0]["function"]["arguments"] = '{"mutated": true}'
+            messages[3]["metadata"]["score"] = 0
         yield ChatStreamEvent(type="text_delta", text="ok")
         yield ChatStreamEvent(type="completed")
 
@@ -112,6 +136,45 @@ def _agent_spec_with_prompt(
         prompt_render_mode=prompt_render_mode,  # type: ignore[arg-type]
         prompt_profile=prompt_profile,
     )
+
+
+def _multimodal_messages() -> List[Dict[str, Any]]:
+    """
+    构造覆盖多模态 content parts 与 assistant/tool extra fields 的 provider messages。
+
+    返回：
+    - 可直接作为 precomposed_messages 使用的 JSON-serializable message 列表。
+    """
+
+    return [
+        {"role": "system", "content": "You inspect multimodal context."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Compare the images."},
+                {"type": "image_url", "image_url": {"url": "https://example.test/a.png", "detail": "high"}},
+                {"type": "image_url", "image_url": {"url": "https://example.test/b.png"}},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "I need the image metadata.",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "inspect_image", "arguments": '{"image": "a"}'},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "inspect_image",
+            "content": '{"width": 1280}',
+            "metadata": {"score": 1, "labels": ["diagram"]},
+        },
+    ]
 
 
 @pytest.mark.asyncio
@@ -362,6 +425,86 @@ async def test_precomposed_messages_override_final_backend_request_messages(tmp_
     assert out.node_report.meta["prompt_message_roles"] == ["system", "user"]
     assert out.node_report.meta["prompt_composer_version"] == "composer@2"
     assert "Write one clean sentence" not in out.node_report.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_precomposed_multimodal_messages_override_final_backend_request_messages(tmp_path: Path) -> None:
+    """
+    Multimodal Boundary v1：多模态 messages 与 assistant/tool extra fields 必须等价到达 backend。
+    """
+
+    backend = _RecordingBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(
+        _agent_spec_with_prompt(
+            agent_id="agent.multimodal.messages",
+            prompt_render_mode="precomposed_messages",
+            prompt_profile="generation_direct",
+        )
+    )
+    messages = _multimodal_messages()
+
+    out = await rt.run(
+        "agent.multimodal.messages",
+        input={"_runtime_prompt": {"messages": messages}},
+    )
+
+    assert out.status.value == "success"
+    assert backend.messages
+    assert messages in backend.messages
+    observed = backend.messages[-1]
+    assert observed[1]["content"] == messages[1]["content"]
+    assert observed[2]["tool_calls"] == messages[2]["tool_calls"]
+    assert observed[3]["tool_call_id"] == "call_1"
+    assert observed[3]["name"] == "inspect_image"
+    assert observed[3]["metadata"] == {"score": 1, "labels": ["diagram"]}
+
+
+@pytest.mark.asyncio
+async def test_precomposed_multimodal_messages_host_mutation_does_not_affect_request() -> None:
+    """
+    Multimodal Boundary v1：host 后续修改 nested content parts 不得污染 provider request。
+    """
+
+    backend = _RecordingBackend()
+    messages = _multimodal_messages()
+    expected = copy.deepcopy(messages)
+    wrapped = _PrecomposedMessagesBackend(backend=backend, messages=messages)
+
+    messages[1]["content"][1]["image_url"]["url"] = "https://host-mutated.example/a.png"
+    messages[2]["tool_calls"][0]["function"]["arguments"] = '{"image": "mutated"}'
+    messages[3]["metadata"]["labels"].append("host-mutated")
+
+    async for _ in wrapped.stream_chat(ChatRequest(model="test-model", messages=[])):
+        pass
+
+    assert backend.messages == [expected]
+
+
+@pytest.mark.asyncio
+async def test_precomposed_multimodal_messages_backend_mutation_does_not_pollute_next_request() -> None:
+    """
+    Multimodal Boundary v1：backend 原地修改 request.messages 不得污染 lifecycle 缓存或下一次请求。
+    """
+
+    backend = _MutatingMessagesBackend()
+    messages = _multimodal_messages()
+    expected = copy.deepcopy(messages)
+    wrapped = _PrecomposedMessagesBackend(backend=backend, messages=messages)
+
+    async for _ in wrapped.stream_chat(ChatRequest(model="test-model", messages=[])):
+        pass
+    async for _ in wrapped.stream_chat(ChatRequest(model="test-model", messages=[])):
+        pass
+
+    assert backend.messages_before_mutation == [expected, expected]
 
 
 @pytest.mark.asyncio

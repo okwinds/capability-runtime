@@ -18,7 +18,7 @@ from capability_runtime.protocol.capability import (
 from capability_runtime.protocol.context import ExecutionContext
 from capability_runtime.runtime import Runtime
 
-from capability_runtime.adapters.agent_adapter import AgentAdapter
+from capability_runtime.adapters.agent_adapter import AgentAdapter, _InvalidPromptMessages
 
 
 def _mk_runtime(*, cfg: RuntimeConfig) -> Runtime:
@@ -950,3 +950,408 @@ async def test_sdk_agent_creation_error_returns_fail_closed_engine_error_with_pr
     assert terminal.node_report.meta["prompt_render_mode"] == "direct_task_text"
     assert terminal.node_report.meta["prompt_profile"] == "generation_direct"
     assert terminal.node_report.meta["prompt_hash"] == "sha256:" + "e" * 64
+
+
+def _resolve_precomposed_plan(messages: list[dict[str, Any]]):
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="precomposed_messages",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeServices:
+        config = cfg
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+    return adapter._resolve_prompt_render_plan(  # type: ignore[attr-defined]
+        spec=spec,
+        input={"_runtime_prompt": {"messages": messages}},
+    )
+
+
+def _assert_invalid_precomposed_messages(messages: list[dict[str, Any]]) -> None:
+    with pytest.raises(_InvalidPromptMessages):
+        _resolve_precomposed_plan(messages)
+
+
+def test_precomposed_messages_accepts_text_and_image_url_parts() -> None:
+    messages = [
+        {"role": "system", "content": "System text."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Compare these images."},
+                {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg", "detail": "auto"}},
+            ],
+        },
+    ]
+
+    plan = _resolve_precomposed_plan(messages)
+
+    assert plan.precomposed_messages == messages
+    assert plan.precomposed_messages is not messages
+    assert plan.precomposed_messages[1]["content"] is not messages[1]["content"]
+    assert plan.precomposed_messages[1]["content"][1]["image_url"] is not messages[1]["content"][1]["image_url"]
+    assert plan.evidence["prompt_modalities"] == ["image", "text"]
+    assert plan.evidence["prompt_content_part_counts"] == [0, 2]
+    assert plan.evidence["prompt_media_count"] == 1
+
+    messages[1]["content"][1]["image_url"]["url"] = "https://example.test/mutated.jpg"
+    assert plan.precomposed_messages[1]["content"][1]["image_url"]["url"] == "https://example.test/a.jpg"
+
+
+def test_precomposed_messages_accepts_multiple_image_url_parts() -> None:
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Compare."},
+                {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg"}},
+                {"type": "image_url", "image_url": {"url": "https://example.test/b.jpg", "detail": "high"}},
+            ],
+        }
+    ]
+
+    plan = _resolve_precomposed_plan(messages)
+
+    assert plan.precomposed_messages == messages
+    assert plan.evidence["prompt_modalities"] == ["image", "text"]
+    assert plan.evidence["prompt_content_part_counts"] == [3]
+    assert plan.evidence["prompt_media_count"] == 2
+
+
+def test_precomposed_messages_accepts_image_url_only_content_parts() -> None:
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg"}},
+                {"type": "image_url", "image_url": {"url": "https://example.test/b.jpg", "detail": "low"}},
+            ],
+        }
+    ]
+
+    plan = _resolve_precomposed_plan(messages)
+
+    assert plan.precomposed_messages == messages
+    assert plan.evidence["prompt_modalities"] == ["image"]
+    assert plan.evidence["prompt_content_part_counts"] == [2]
+    assert plan.evidence["prompt_media_count"] == 2
+
+
+def test_precomposed_messages_allows_empty_text_part() -> None:
+    messages = [{"role": "user", "content": [{"type": "text", "text": ""}]}]
+
+    plan = _resolve_precomposed_plan(messages)
+
+    assert plan.precomposed_messages == messages
+    assert plan.evidence["prompt_modalities"] == ["text"]
+    assert plan.evidence["prompt_content_part_counts"] == [1]
+    assert plan.evidence["prompt_media_count"] == 0
+
+
+def test_precomposed_messages_rejects_empty_content_part_list() -> None:
+    _assert_invalid_precomposed_messages([{"role": "user", "content": []}])
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        123,
+        None,
+        {"type": "text", "text": "not a list"},
+    ],
+)
+def test_precomposed_messages_rejects_non_string_non_list_content(content: Any) -> None:
+    _assert_invalid_precomposed_messages([{"role": "user", "content": content}])
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        "text",
+        123,
+        None,
+        {},
+        {"text": "missing type"},
+    ],
+)
+def test_precomposed_messages_rejects_invalid_content_part_shape(part: Any) -> None:
+    _assert_invalid_precomposed_messages([{"role": "user", "content": [part]}])
+
+
+def test_precomposed_messages_rejects_unknown_content_part_type() -> None:
+    _assert_invalid_precomposed_messages([{"role": "user", "content": [{"type": "file", "file": {"id": "f1"}}]}])
+
+
+def test_precomposed_messages_rejects_unknown_text_part_fields() -> None:
+    _assert_invalid_precomposed_messages(
+        [{"role": "user", "content": [{"type": "text", "text": "x", "cache_control": {}}]}]
+    )
+
+
+def test_precomposed_messages_rejects_unknown_image_url_fields() -> None:
+    _assert_invalid_precomposed_messages(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "https://example.test/a.jpg", "mime_type": "image/jpeg"},
+                    }
+                ],
+            }
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"type": "image_url"},
+        {"type": "image_url", "image_url": None},
+        {"type": "image_url", "image_url": {"url": ""}},
+        {"type": "image_url", "image_url": {"url": "   "}},
+        {"type": "image_url", "image_url": {"url": 123}},
+        {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg"}, "cache_control": {}},
+    ],
+)
+def test_precomposed_messages_rejects_invalid_image_url_part_shape(part: dict[str, Any]) -> None:
+    _assert_invalid_precomposed_messages([{"role": "user", "content": [part]}])
+
+
+def test_precomposed_messages_rejects_invalid_image_detail() -> None:
+    _assert_invalid_precomposed_messages(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg", "detail": "full"}}
+                ],
+            }
+        ]
+    )
+
+
+def test_precomposed_messages_rejects_non_json_canonicalizable_values() -> None:
+    _assert_invalid_precomposed_messages([{"role": "assistant", "content": "ok", "tool_calls": object()}])
+
+
+def test_precomposed_messages_rejects_non_finite_numbers() -> None:
+    _assert_invalid_precomposed_messages([{"role": "assistant", "content": "ok", "score": float("nan")}])
+
+
+def test_precomposed_messages_rejects_uncopyable_extra_values_as_invalid_prompt_messages() -> None:
+    class _Uncopyable:
+        def __deepcopy__(self, memo):  # type: ignore[no-untyped-def]
+            _ = memo
+            raise RuntimeError("cannot copy")
+
+    _assert_invalid_precomposed_messages([{"role": "assistant", "content": "ok", "tool_calls": _Uncopyable()}])
+
+
+def test_precomposed_messages_does_not_deepcopy_non_json_extra_values() -> None:
+    deepcopy_called = False
+
+    class _NonJsonExtra:
+        def __deepcopy__(self, memo):  # type: ignore[no-untyped-def]
+            nonlocal deepcopy_called
+            _ = memo
+            deepcopy_called = True
+            return self
+
+    _assert_invalid_precomposed_messages([{"role": "assistant", "content": "ok", "tool_calls": _NonJsonExtra()}])
+    assert deepcopy_called is False
+
+
+def test_precomposed_messages_normalizes_extra_values_to_json_structures() -> None:
+    messages = [{"role": "assistant", "content": "ok", "tool_calls": ({"id": "call_1", "type": "function"},)}]
+
+    plan = _resolve_precomposed_plan(messages)
+
+    assert plan.precomposed_messages == [
+        {"role": "assistant", "content": "ok", "tool_calls": [{"id": "call_1", "type": "function"}]}
+    ]
+
+
+def test_precomposed_messages_hash_is_stable_for_equivalent_key_order() -> None:
+    left = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg", "detail": "low"}},
+                {"type": "text", "text": "caption"},
+            ],
+        }
+    ]
+    right = [
+        {
+            "content": [
+                {"image_url": {"detail": "low", "url": "https://example.test/a.jpg"}, "type": "image_url"},
+                {"text": "caption", "type": "text"},
+            ],
+            "role": "user",
+        }
+    ]
+
+    assert _resolve_precomposed_plan(left).evidence["prompt_hash"] == _resolve_precomposed_plan(right).evidence[
+        "prompt_hash"
+    ]
+
+
+def test_precomposed_messages_evidence_counts_string_and_list_content() -> None:
+    messages = [
+        {"role": "system", "content": "System text."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Look."},
+                {"type": "image_url", "image_url": {"url": "https://example.test/a.jpg"}},
+            ],
+        },
+        {"role": "assistant", "content": ""},
+    ]
+
+    plan = _resolve_precomposed_plan(messages)
+
+    assert plan.evidence["prompt_modalities"] == ["image", "text"]
+    assert plan.evidence["prompt_content_part_counts"] == [0, 2, 0]
+    assert plan.evidence["prompt_media_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_precomposed_messages_evidence_redacts_urls_and_messages() -> None:
+    from skills_runtime.core.contracts import AgentEvent
+
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="precomposed_messages",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+    secret_url = "https://example.test/private/path.png?token=secret"
+    secret_text = "do not leak prompt text"
+
+    class _FakeSdkAgent:
+        async def run_stream_async(self, task: str, *, run_id: str, initial_history=None):  # type: ignore[no-untyped-def]
+            _ = (task, initial_history)
+            yield AgentEvent(type="run_started", timestamp="t0", run_id=run_id, payload={})
+            yield AgentEvent(type="run_completed", timestamp="t1", run_id=run_id, payload={"final_output": "ok"})
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            _ = kwargs
+            return _FakeSdkAgent()
+
+        def get_host_meta(self, *, context: ExecutionContext):  # type: ignore[no-untyped-def]
+            _ = context
+            return {}
+
+        def emit_agent_event_taps(self, *, ev, context: ExecutionContext, capability_id: str) -> None:  # type: ignore[no-untyped-def]
+            _ = (ev, context, capability_id)
+
+        def call_callback(self, cb, *args) -> None:  # type: ignore[no-untyped-def]
+            _ = (cb, args)
+
+        def apply_output_validation(self, *, final_output, report, context, output_schema=None) -> None:  # type: ignore[no-untyped-def]
+            _ = (final_output, report, context, output_schema)
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            raise AssertionError("not expected")
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for item in adapter.execute_stream(
+        spec=spec,
+        input={
+            "_runtime_prompt": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": secret_text},
+                            {"type": "image_url", "image_url": {"url": secret_url}},
+                        ],
+                    }
+                ]
+            }
+        },
+        context=ExecutionContext(run_id="r-redact"),
+    ):
+        if isinstance(item, CapabilityResult):
+            terminal = item
+
+    assert terminal is not None
+    assert terminal.node_report is not None
+    assert terminal.node_report.meta["prompt_modalities"] == ["image", "text"]
+    assert terminal.node_report.meta["prompt_content_part_counts"] == [2]
+    assert terminal.node_report.meta["prompt_media_count"] == 1
+    report_json = terminal.node_report.model_dump_json()
+    assert secret_url not in report_json
+    assert secret_text not in report_json
+    assert "image_url" not in terminal.node_report.meta
+
+
+@pytest.mark.asyncio
+async def test_invalid_multimodal_precomposed_messages_fail_fast_before_sdk_agent_runs() -> None:
+    spec = AgentSpec(
+        base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"),
+        prompt_render_mode="precomposed_messages",
+    )
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+            self.created = False
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, **kwargs):  # type: ignore[no-untyped-def]
+            _ = kwargs
+            self.created = True
+            raise AssertionError("SDK agent must not be created for invalid multimodal prompt messages")
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            from capability_runtime.reporting.node_report import build_fail_closed_report
+
+            return build_fail_closed_report(
+                run_id=run_id,
+                status=status,
+                reason=reason,
+                completion_reason=completion_reason,
+                meta=meta,
+            )
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    services = _FakeServices()
+    adapter = AgentAdapter(services=services)  # type: ignore[arg-type]
+
+    terminal: CapabilityResult | None = None
+    async for item in adapter.execute_stream(
+        spec=spec,
+        input={"_runtime_prompt": {"messages": [{"role": "user", "content": [{"type": "text", "text": 123}]}]}},
+        context=ExecutionContext(run_id="r-invalid-multimodal"),
+    ):
+        if isinstance(item, CapabilityResult):
+            terminal = item
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "INVALID_PROMPT_MESSAGES"
+    assert terminal.node_report is not None
+    assert terminal.node_report.completion_reason == "invalid_prompt_messages"
+    assert services.created is False

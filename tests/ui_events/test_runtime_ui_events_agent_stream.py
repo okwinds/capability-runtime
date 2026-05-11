@@ -10,7 +10,18 @@ from skills_runtime.llm.chat_sse import ChatStreamEvent, ToolCall as LlmToolCall
 from skills_runtime.llm.fake import FakeChatBackend, FakeChatCall
 from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
 
-from capability_runtime import AgentIOSchema, AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import (
+    AgentIOSchema,
+    AgentSpec,
+    CapabilityKind,
+    CapabilityResult,
+    CapabilitySpec,
+    CapabilityStatus,
+    NodeReport,
+    Runtime,
+    RuntimeConfig,
+)
+from capability_runtime.ui_events.projector import RuntimeUIEventProjector
 from capability_runtime.ui_events.v1 import StreamLevel
 
 
@@ -285,3 +296,116 @@ async def test_run_ui_events_agent_emits_pending_terminal_for_waiting_human(tmp_
     assert isinstance(host_runtime["message_preview"], str)
     assert host_runtime["message_preview"]
     assert "question" not in host_runtime["message_preview"]
+
+
+@pytest.mark.asyncio
+async def test_multimodal_prompt_summary_not_projected_to_ui_events(tmp_path: Path) -> None:
+    backend = FakeChatBackend(
+        calls=[FakeChatCall(events=[ChatStreamEvent(type="text_delta", text="done"), ChatStreamEvent(type="completed")])]
+    )
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="sdk_native",
+            workspace_root=tmp_path,
+            sdk_config_paths=[],
+            preflight_mode="off",
+            sdk_backend=backend,
+        )
+    )
+    rt.register(
+        AgentSpec(
+            base=CapabilitySpec(
+                id="agent.multimodal-ui",
+                kind=CapabilityKind.AGENT,
+                name="AgentMultimodalUI",
+                description="离线：验证多模态 prompt 的 UI events 最小披露。",
+            ),
+        )
+    )
+
+    image_url = "https://example.test/private/full/path/image.png?token=SECRET_URL_TOKEN"
+    base64_url = "data:image/png;base64,SECRET_BASE64_PAYLOAD"
+    prompt_text = "compare private prompt text"
+    tool_call_id = "call_private_extra"
+    tool_name = "private_extra_tool"
+    messages = [
+        {"role": "system", "content": "private system prompt"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": image_url, "detail": "high"}},
+                {"type": "image_url", "image_url": {"url": base64_url}},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {"name": tool_name, "arguments": '{"secret":"OPENAI_EXTRA_SECRET"}'},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": tool_call_id, "content": "private tool result", "name": tool_name},
+    ]
+
+    out: List = []
+    async for ev in rt.run_ui_events(
+        "agent.multimodal-ui",
+        input={"_runtime_prompt": {"mode": "precomposed_messages", "messages": messages}},
+        level=StreamLevel.UI,
+    ):
+        out.append(ev)
+        if ev.type == "run.status" and ev.data.get("status") in {"completed", "failed", "cancelled", "pending"}:
+            break
+
+    terminal = next(e for e in reversed(out) if e.type == "run.status")
+    assert terminal.data.get("status") == "completed"
+    assert "prompt_modalities" not in terminal.data
+    assert "prompt_media_count" not in terminal.data
+    assert "prompt_content_part_counts" not in terminal.data
+
+    dumped_events = "\n".join(str(e.model_dump(by_alias=True)) for e in out)
+    assert "messages" not in dumped_events
+    assert "content" not in dumped_events
+    assert "content_part" not in dumped_events
+    assert image_url not in dumped_events
+    assert base64_url not in dumped_events
+    assert "SECRET_URL_TOKEN" not in dumped_events
+    assert "SECRET_BASE64_PAYLOAD" not in dumped_events
+    assert prompt_text not in dumped_events
+    assert "private system prompt" not in dumped_events
+    assert "private tool result" not in dumped_events
+    assert "tool_calls" not in dumped_events
+    assert "tool_call_id" not in dumped_events
+    assert tool_call_id not in dumped_events
+    assert tool_name not in dumped_events
+    assert "OPENAI_EXTRA_SECRET" not in dumped_events
+
+
+def test_ui_evidence_keeps_first_artifact_locator_only_for_multiple_artifacts() -> None:
+    projector = RuntimeUIEventProjector(run_id="run-artifacts", level=StreamLevel.UI)
+    result = CapabilityResult(
+        status=CapabilityStatus.SUCCESS,
+        output="done",
+        artifacts=["artifacts/first.png", "artifacts/second.png"],
+        node_report=NodeReport(
+            status="success",
+            completion_reason="stop",
+            run_id="run-artifacts",
+            events_path="wal://run-artifacts",
+            artifacts=["artifacts/first.png", "artifacts/second.png"],
+        ),
+    )
+
+    terminal = projector.on_terminal(result)[0]
+
+    assert terminal.type == "run.status"
+    assert terminal.evidence is not None
+    assert terminal.evidence.artifact_path == "artifacts/first.png"
+    dumped_terminal = str(terminal.model_dump(by_alias=True))
+    assert "artifacts/second.png" not in dumped_terminal

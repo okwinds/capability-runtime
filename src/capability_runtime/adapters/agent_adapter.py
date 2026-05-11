@@ -37,6 +37,7 @@ _RUNTIME_PROMPT_KEY = "_runtime_prompt"
 _PROMPT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ALLOWED_PROMPT_ROLES = {"system", "developer", "user", "assistant", "tool"}
 _ALLOWED_PROMPT_PROFILES = {"default_agent", "generation_direct", "structured_transform"}
+_ALLOWED_IMAGE_DETAILS = {"auto", "low", "high"}
 
 
 class _InvalidPromptMessages(ValueError):
@@ -578,6 +579,10 @@ class AgentAdapter:
         if messages is not None:
             evidence["prompt_messages_count"] = len(messages)
             evidence["prompt_message_roles"] = [str(item["role"]) for item in messages]
+            modalities, content_part_counts, media_count = _summarize_precomposed_message_content(messages)
+            evidence["prompt_modalities"] = modalities
+            evidence["prompt_content_part_counts"] = content_part_counts
+            evidence["prompt_media_count"] = media_count
         return evidence
 
     def _strip_runtime_prompt(self, input: Dict[str, Any]) -> Dict[str, Any]:
@@ -736,8 +741,17 @@ def _hash_text(text: str) -> str:
 def _hash_messages(messages: List[Dict[str, Any]]) -> str:
     """对 provider messages 做稳定 JSON canonicalization 后生成摘要。"""
 
-    canonical = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical = _canonicalize_messages(messages)
     return _hash_text(canonical)
+
+
+def _canonicalize_messages(messages: List[Dict[str, Any]]) -> str:
+    """对 provider messages 做稳定 JSON canonicalization。"""
+
+    try:
+        return json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise _InvalidPromptMessages("_runtime_prompt.messages must be JSON canonicalizable") from exc
 
 
 def _validate_precomposed_messages(raw: Any) -> List[Dict[str, Any]]:
@@ -746,8 +760,8 @@ def _validate_precomposed_messages(raw: Any) -> List[Dict[str, Any]]:
 
     约束：
     - 只接受非空 list[dict]；
-    - 每条消息必须有合法 role 与字符串 content；
-    - 返回浅拷贝，避免后续执行链路修改调用方输入。
+    - 每条消息必须有合法 role 与字符串或稳定 content parts；
+    - 返回深拷贝，避免后续执行链路修改调用方输入。
     """
 
     if not isinstance(raw, list):
@@ -763,10 +777,92 @@ def _validate_precomposed_messages(raw: Any) -> List[Dict[str, Any]]:
         content = item.get("content")
         if not isinstance(role, str) or role not in _ALLOWED_PROMPT_ROLES:
             raise _InvalidPromptMessages(f"_runtime_prompt.messages[{idx}].role is invalid")
-        if not isinstance(content, str):
-            raise _InvalidPromptMessages(f"_runtime_prompt.messages[{idx}].content must be a string")
         copied = dict(item)
         copied["role"] = role
-        copied["content"] = content
+        copied["content"] = _validate_precomposed_message_content(content, message_index=idx)
         out.append(copied)
+    return json.loads(_canonicalize_messages(out))
+
+
+def _validate_precomposed_message_content(content: Any, *, message_index: int) -> Union[str, List[Dict[str, Any]]]:
+    """校验单条 precomposed message 的 content 字段。"""
+
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        raise _InvalidPromptMessages(
+            f"_runtime_prompt.messages[{message_index}].content must be a string or content part list"
+        )
+    if not content:
+        raise _InvalidPromptMessages(f"_runtime_prompt.messages[{message_index}].content must not be an empty list")
+
+    out: List[Dict[str, Any]] = []
+    for part_index, part in enumerate(content):
+        out.append(_validate_precomposed_content_part(part, message_index=message_index, part_index=part_index))
     return out
+
+
+def _validate_precomposed_content_part(part: Any, *, message_index: int, part_index: int) -> Dict[str, Any]:
+    """校验 v1 稳定支持的 OpenAI-compatible content part。"""
+
+    path = f"_runtime_prompt.messages[{message_index}].content[{part_index}]"
+    if not isinstance(part, dict):
+        raise _InvalidPromptMessages(f"{path} must be a dict")
+    part_type = part.get("type")
+    if not isinstance(part_type, str) or not part_type:
+        raise _InvalidPromptMessages(f"{path}.type is required")
+    if part_type == "text":
+        if set(part.keys()) != {"type", "text"}:
+            raise _InvalidPromptMessages(f"{path} has unsupported text part fields")
+        text = part.get("text")
+        if not isinstance(text, str):
+            raise _InvalidPromptMessages(f"{path}.text must be a string")
+        return {"type": "text", "text": text}
+    if part_type == "image_url":
+        if set(part.keys()) != {"type", "image_url"}:
+            raise _InvalidPromptMessages(f"{path} has unsupported image_url part fields")
+        image_url = part.get("image_url")
+        if not isinstance(image_url, dict):
+            raise _InvalidPromptMessages(f"{path}.image_url must be a dict")
+        allowed_image_keys = {"url", "detail"}
+        if not set(image_url.keys()).issubset(allowed_image_keys):
+            raise _InvalidPromptMessages(f"{path}.image_url has unsupported fields")
+        url = image_url.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise _InvalidPromptMessages(f"{path}.image_url.url must be a non-empty string")
+        copied_image_url: Dict[str, Any] = {"url": url}
+        if "detail" in image_url:
+            detail = image_url.get("detail")
+            if detail not in _ALLOWED_IMAGE_DETAILS:
+                raise _InvalidPromptMessages(f"{path}.image_url.detail is invalid")
+            copied_image_url["detail"] = detail
+        return {"type": "image_url", "image_url": copied_image_url}
+    raise _InvalidPromptMessages(f"{path}.type is unsupported")
+
+
+def _summarize_precomposed_message_content(
+    messages: List[Dict[str, Any]],
+) -> tuple[List[str], List[int], int]:
+    """生成 precomposed messages 的最小披露多模态摘要。"""
+
+    modalities: set[str] = set()
+    content_part_counts: List[int] = []
+    media_count = 0
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str):
+            modalities.add("text")
+            content_part_counts.append(0)
+            continue
+        if isinstance(content, list):
+            content_part_counts.append(len(content))
+            for part in content:
+                part_type = part.get("type") if isinstance(part, dict) else None
+                if part_type == "text":
+                    modalities.add("text")
+                elif part_type == "image_url":
+                    modalities.add("image")
+                    media_count += 1
+            continue
+        content_part_counts.append(0)
+    return sorted(modalities), content_part_counts, media_count
