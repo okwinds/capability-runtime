@@ -216,6 +216,44 @@ async def test_backend_tool_choice_string_is_passthrough_and_tools_not_filtered(
 
 
 @pytest.mark.asyncio
+async def test_backend_does_not_invent_tool_choice_when_tools_are_present():
+    captured = {}
+
+    class _CapturingRequester(_FakeRequester):
+        async def request_model(self, request_data):
+            captured["options"] = dict(getattr(request_data, "request_options", {}) or {})
+            async for x in super().request_model(request_data):
+                yield x
+
+    def factory():
+        return _CapturingRequester([("message", "[DONE]")])
+
+    backend = AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=factory))
+    tool_spec = ToolSpec(
+        name="lookup",
+        description="lookup docs",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        requires_approval=False,
+    )
+
+    out = [
+        ev
+        async for ev in backend.stream_chat(
+            ChatRequest(
+                model="m",
+                messages=[{"role": "user", "content": "x"}],
+                tools=[tool_spec],
+            )
+        )
+    ]
+
+    assert out and out[-1].type == "completed"
+    opts = captured.get("options") or {}
+    assert "tools" in opts
+    assert "tool_choice" not in opts
+
+
+@pytest.mark.asyncio
 async def test_backend_named_tool_choice_missing_target_fails_closed_before_request() -> None:
     captured = {"requested": False}
 

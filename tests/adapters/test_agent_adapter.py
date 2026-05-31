@@ -8,6 +8,7 @@ from typing import Any, Dict
 import pytest
 
 from capability_runtime.config import RuntimeConfig
+from capability_runtime.errors import ProviderStreamTerminalError
 from capability_runtime.protocol.agent import AgentIOSchema, AgentSpec
 from capability_runtime.protocol.capability import (
     CapabilityKind,
@@ -16,6 +17,7 @@ from capability_runtime.protocol.capability import (
     CapabilityStatus,
 )
 from capability_runtime.protocol.context import ExecutionContext
+from capability_runtime.reporting.node_report import build_fail_closed_report
 from capability_runtime.runtime import Runtime
 
 from capability_runtime.adapters.agent_adapter import AgentAdapter, _InvalidPromptMessages
@@ -325,6 +327,83 @@ async def test_agent_adapter_can_run_in_sdk_native_mode_with_fake_runtime_servic
     assert terminal is not None
     assert terminal.status == CapabilityStatus.SUCCESS
     assert terminal.output == "ok"
+
+
+@pytest.mark.asyncio
+async def test_provider_stream_terminal_error_short_circuit_keeps_public_error_clean() -> None:
+    """回归：provider terminal 异常短路路径也必须保留结构化证据且不泄漏内部哨兵。"""
+
+    spec = AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A"))
+    cfg = RuntimeConfig(mode="sdk_native", preflight_mode="off")
+
+    class _FakeSdkAgent:
+        async def run_stream_async(self, task: str, *, run_id: str, initial_history=None):  # type: ignore[no-untyped-def]
+            _ = (task, run_id, initial_history)
+            if False:
+                yield None
+            raise ProviderStreamTerminalError(
+                message="model_error: provider failed",
+                status="failed",
+                reason="model_error",
+                completion_reason="response_failed",
+                error_code="PROVIDER_STREAM_TERMINAL",
+                request_id="resp-direct",
+                provider="openai-responses",
+                model="gpt-responses",
+            )
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self.config = cfg
+
+        def preflight(self):  # type: ignore[no-untyped-def]
+            return []
+
+        def create_sdk_agent(self, *, llm_config=None):  # type: ignore[no-untyped-def]
+            _ = llm_config
+            return _FakeSdkAgent()
+
+        def get_host_meta(self, *, context: ExecutionContext):  # type: ignore[no-untyped-def]
+            _ = context
+            return {}
+
+        def emit_agent_event_taps(self, *, ev, context: ExecutionContext, capability_id: str) -> None:  # type: ignore[no-untyped-def]
+            _ = (ev, context, capability_id)
+
+        def call_callback(self, cb, *args) -> None:  # type: ignore[no-untyped-def]
+            _ = (cb, args)
+
+        def build_fail_closed_report(self, *, run_id: str, status: str, reason, completion_reason: str, meta: Dict[str, Any]):  # type: ignore[no-untyped-def]
+            return build_fail_closed_report(
+                run_id=run_id,
+                status=status,
+                reason=reason,
+                completion_reason=completion_reason,
+                meta=meta,
+            )
+
+        def redact_issue(self, issue):  # type: ignore[no-untyped-def]
+            return {"issue": str(issue)}
+
+    adapter = AgentAdapter(services=_FakeServices())  # type: ignore[arg-type]
+
+    terminal = None
+    async for it in adapter.execute_stream(spec=spec, input={}, context=ExecutionContext(run_id="r-provider-terminal")):
+        if isinstance(it, CapabilityResult):
+            terminal = it
+
+    assert terminal is not None
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error == "model_error: provider failed"
+    assert "CAPRT_PROVIDER_STREAM_TERMINAL" not in str(terminal.error)
+    assert terminal.error_code == "PROVIDER_STREAM_TERMINAL"
+    assert terminal.node_report is not None
+    assert terminal.node_report.usage is not None
+    assert terminal.node_report.usage.model == "gpt-responses"
+    provider_terminal = terminal.node_report.meta["provider_terminal"]
+    assert provider_terminal["message"] == "model_error: provider failed"
+    assert provider_terminal["error_code"] == "PROVIDER_STREAM_TERMINAL"
+    assert provider_terminal["request_id"] == "resp-direct"
 
 
 @pytest.mark.asyncio

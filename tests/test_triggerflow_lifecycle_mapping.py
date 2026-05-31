@@ -66,6 +66,7 @@ async def test_triggerflow_lifecycle_events_are_additive_and_snapshot_safe() -> 
     started = next(ev for ev in workflow_events if ev.get("type") == "workflow.started")
     finished = next(ev for ev in workflow_events if ev.get("type") == "workflow.finished")
     lifecycle_events = [ev for ev in workflow_events if ev.get("type") == "workflow.lifecycle.changed"]
+    unsupported = [ev for ev in workflow_events if ev.get("type") == "workflow.intervention.unsupported"]
 
     assert started["lifecycle_state"] == "open"
     assert isinstance(started["execution_id"], str) and started["execution_id"]
@@ -75,6 +76,7 @@ async def test_triggerflow_lifecycle_events_are_additive_and_snapshot_safe() -> 
     assert finished["execution_id"] == started["execution_id"]
     assert finished["state_version"] > started["state_version"]
     assert lifecycle_events, "expected additive lifecycle change events"
+    assert unsupported == []
 
     snapshot = rt.summarize_workflow_run(workflow_id="wf.lifecycle", items=workflow_events, terminal=terminal)
     assert snapshot.status == WorkflowRunStatus.COMPLETED
@@ -82,6 +84,7 @@ async def test_triggerflow_lifecycle_events_are_additive_and_snapshot_safe() -> 
     assert snapshot.execution_id == started["execution_id"]
     assert snapshot.close_reason == "success"
     assert snapshot.state_version == finished["state_version"]
+    assert snapshot.intervention_mode is None
     assert snapshot.pending_interventions == []
 
     dumped = repr(snapshot) + "\n".join(str(ev) for ev in workflow_events)
@@ -168,7 +171,11 @@ async def test_triggerflow_lifecycle_failure_keeps_legacy_event_subsequence() ->
     items = [item async for item in rt.run_workflow_observable("wf.lifecycle", input={})]
     workflow_events = [item for item in items if isinstance(item, dict)]
     terminal = next(item for item in items if isinstance(item, CapabilityResult))
-    legacy_types = [ev["type"] for ev in workflow_events if ev["type"] != "workflow.lifecycle.changed"]
+    legacy_types = [
+        ev["type"]
+        for ev in workflow_events
+        if ev["type"] not in {"workflow.lifecycle.changed", "workflow.intervention.unsupported"}
+    ]
 
     assert terminal.status == CapabilityStatus.FAILED
     assert legacy_types == [
@@ -187,6 +194,34 @@ async def test_triggerflow_lifecycle_failure_keeps_legacy_event_subsequence() ->
     assert snapshot.status == WorkflowRunStatus.FAILED
     assert snapshot.lifecycle_state == "closed"
     assert snapshot.close_reason == "failed"
+
+
+@pytest.mark.asyncio
+async def test_triggerflow_step_exception_fails_closed_with_step_evidence() -> None:
+    """普通 step 异常不能折叠成顶层 ENGINE_ERROR。"""
+
+    rt = _runtime()
+    rt.register(
+        WorkflowSpec(
+            base=CapabilitySpec(id="wf.lifecycle", kind=CapabilityKind.WORKFLOW, name="Lifecycle Workflow"),
+            steps=[Step(id="draft", capability=CapabilityRef(id="agent.missing"))],
+        )
+    )
+
+    items = [item async for item in rt.run_workflow_observable("wf.lifecycle", input={})]
+    workflow_events = [item for item in items if isinstance(item, dict)]
+    terminal = next(item for item in items if isinstance(item, CapabilityResult))
+
+    assert terminal.status == CapabilityStatus.FAILED
+    assert terminal.error_code == "WORKFLOW_STEP_EXCEPTION"
+    assert terminal.node_report is not None
+    assert terminal.node_report.reason == "workflow_step_failed"
+    assert terminal.node_report.meta["step_id"] == "draft"
+    assert terminal.node_report.meta["capability_id"] == "agent.missing"
+    assert terminal.node_report.meta["exception_type"]
+    assert any(ev.get("type") == "workflow.step.finished" and ev.get("step_id") == "draft" for ev in workflow_events)
+    assert workflow_events[-1]["type"] == "workflow.finished"
+    assert workflow_events[-1]["status"] == "failed"
 
 
 def test_projector_maps_workflow_intervention_unsupported_without_native_type_leak() -> None:

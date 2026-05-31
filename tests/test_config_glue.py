@@ -18,6 +18,29 @@ def test_runtime_config_defaults():
     assert cfg.sdk_config_paths == []
     assert cfg.preflight_mode == "error"
     assert cfg.env_vars == {}
+    assert cfg.requester_strategy == "chat_completions"
+    assert cfg.agently_requester is None
+    assert cfg.effective_requester_strategy == "chat_completions"
+    assert cfg.tool_choice_after_tool_result is None
+
+
+def test_runtime_config_legacy_requester_alias_takes_precedence():
+    cfg = RuntimeConfig(requester_strategy="chat_completions", agently_requester="responses")
+
+    assert cfg.effective_requester_strategy == "responses"
+
+
+def test_runtime_config_tool_choice_after_tool_result_is_explicit_opt_in():
+    cfg = RuntimeConfig(tool_choice_after_tool_result="none")
+
+    assert cfg.tool_choice_after_tool_result == "none"
+
+
+def test_runtime_config_rejects_invalid_tool_choice_after_tool_result():
+    import pytest
+
+    with pytest.raises(ValueError, match="tool_choice_after_tool_result"):
+        RuntimeConfig(tool_choice_after_tool_result="required")  # type: ignore[arg-type]
 
 
 def test_normalize_workspace_root_default_is_cwd(tmp_path, monkeypatch):

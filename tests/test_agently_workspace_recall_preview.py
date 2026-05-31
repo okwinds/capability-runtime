@@ -113,8 +113,32 @@ async def test_node_report_summary_written_to_workspace_uses_sanitized_reference
     assert workspace.put_calls
     dumped = repr(workspace.put_calls)
     assert "run-secret" in dumped
-    assert "wal://run-secret" in dumped
-    assert "artifact://safe-ref" in dumped
+    assert "wal://run-secret" not in dumped
+    assert "artifact://safe-ref" not in dumped
+    assert "events_path_hash" in dumped
+    assert "artifact_ref_count" in dumped
     assert "SECRET_KEY" not in dumped
     assert "Bearer SECRET" not in dumped
     assert "provider_request" not in dumped
+
+
+def test_context_record_ref_preserves_identifier_fields_but_redacts_summary() -> None:
+    """record id/collection 是稳定引用，不能因关键词脱敏被改写。"""
+
+    from capability_runtime.adapters.agently_workspace import _record_ref_from_value
+
+    ref = _record_ref_from_value(
+        {
+            "id": "token-record-1",
+            "collection": "secret-notes",
+            "kind": "credential-summary",
+            "summary": "Authorization: Bearer SHOULD_NOT_LEAK",
+        }
+    )
+
+    assert ref.id == "token-record-1"
+    assert ref.collection == "secret-notes"
+    assert ref.kind == "credential-summary"
+    assert ref.summary is not None
+    assert "SHOULD_NOT_LEAK" not in ref.summary
+    assert "Authorization" not in ref.summary

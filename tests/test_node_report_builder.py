@@ -2,6 +2,7 @@ import pytest
 
 from skills_runtime.core.contracts import AgentEvent
 
+from capability_runtime.errors import ProviderStreamTerminalError
 from capability_runtime.reporting.node_report import NodeReportBuilder
 
 
@@ -276,6 +277,64 @@ def test_report_terminated_maps_to_incomplete_and_cancelled_reason():
     rep = NodeReportBuilder().build(events=events)
     assert rep.status == "incomplete"
     assert rep.reason == "cancelled"
+
+
+def test_provider_stream_terminal_error_str_is_human_readable() -> None:
+    exc = ProviderStreamTerminalError(
+        message="model_error: provider failed (request_id=resp_failed)",
+        status="failed",
+        reason="model_error",
+        completion_reason="response_failed",
+        error_code="PROVIDER_STREAM_TERMINAL",
+        request_id="resp_failed",
+        provider="openai-responses",
+        model="gpt-responses",
+    )
+
+    assert str(exc) == "model_error: provider failed (request_id=resp_failed)"
+    assert "CAPRT_PROVIDER_STREAM_TERMINAL" not in str(exc)
+    assert exc.to_control_payload() == {
+        "message": "model_error: provider failed (request_id=resp_failed)",
+        "status": "failed",
+        "reason": "model_error",
+        "completion_reason": "response_failed",
+        "error_code": "PROVIDER_STREAM_TERMINAL",
+        "request_id": "resp_failed",
+        "provider": "openai-responses",
+        "model": "gpt-responses",
+    }
+
+
+def test_report_uses_structured_provider_terminal_event() -> None:
+    events = [
+        _ev("run_started"),
+        _ev(
+            "provider_stream_terminal",
+            payload={
+                "message": "model_error: provider failed (request_id=resp_failed)",
+                "status": "failed",
+                "reason": "model_error",
+                "completion_reason": "response_failed",
+                "error_code": "PROVIDER_STREAM_TERMINAL",
+                "request_id": "resp_failed",
+                "provider": "openai-responses",
+                "model": "gpt-responses",
+            },
+        ),
+        _ev("run_failed", payload={"error_kind": "engine_error", "message": "provider failed"}),
+    ]
+
+    rep = NodeReportBuilder().build(events=events)
+
+    assert rep.status == "failed"
+    assert rep.reason == "model_error"
+    assert rep.completion_reason == "response_failed"
+    assert rep.usage is not None
+    assert rep.usage.model == "gpt-responses"
+    assert rep.usage.request_id == "resp_failed"
+    assert rep.usage.provider == "openai-responses"
+    assert rep.meta["provider_terminal"]["error_code"] == "PROVIDER_STREAM_TERMINAL"
+    assert "CAPRT_PROVIDER_STREAM_TERMINAL" not in rep.model_dump_json()
 
 
 def test_report_missing_events_path_sets_meta_flag():

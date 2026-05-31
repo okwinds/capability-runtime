@@ -25,6 +25,7 @@ from capability_runtime.sdk_lifecycle import (
     _ResponseFormatOverrideBackend,
     _ToolChoiceOverrideBackend,
     _UsageTapBackend,
+    _extract_tool_choice_override,
 )
 
 
@@ -233,6 +234,11 @@ async def test_agent_spec_llm_config_absent_does_not_override_backend_request_mo
     assert sentinel not in backend.models[before:after]
 
 
+def test_llm_config_tool_choice_invalid_type_fails_closed() -> None:
+    with pytest.raises(ValueError, match="llm_config.tool_choice must be a string or dict"):
+        _extract_tool_choice_override({"tool_choice": ["required"]})
+
+
 @pytest.mark.asyncio
 async def test_agent_spec_llm_config_tool_choice_overrides_backend_request_extra(tmp_path: Path) -> None:
     backend = _RecordingBackend()
@@ -341,6 +347,77 @@ async def test_tool_choice_override_request_clone_failure_fails_closed_and_does_
             pass
 
     assert backend.extras == []
+
+
+@pytest.mark.asyncio
+async def test_tool_choice_required_is_preserved_after_tool_result_by_default() -> None:
+    backend = _RecordingBackend()
+    wrapped = _ToolChoiceOverrideBackend(backend=backend, tool_choice="required")
+
+    async for _ in wrapped.stream_chat(
+        ChatRequest(
+            model="gpt-test",
+            messages=[{"role": "user", "content": "call tool"}],
+            tools=[],
+        )
+    ):
+        pass
+    async for _ in wrapped.stream_chat(
+        ChatRequest(
+            model="gpt-test",
+            messages=[
+                {"role": "user", "content": "call tool"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_emit_marker",
+                            "type": "function",
+                            "function": {"name": "emit_marker", "arguments": '{"marker":"ok"}'},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_emit_marker", "content": '{"ok":true}'},
+            ],
+            tools=[],
+        )
+    ):
+        pass
+
+    assert backend.extras[0]["tool_choice"] == "required"
+    assert backend.extras[1]["tool_choice"] == "required"
+
+
+@pytest.mark.asyncio
+async def test_tool_choice_after_tool_result_compatibility_is_explicit_opt_in() -> None:
+    backend = _RecordingBackend()
+    wrapped = _ToolChoiceOverrideBackend(backend=backend, tool_choice="required", after_tool_result="none")
+
+    async for _ in wrapped.stream_chat(
+        ChatRequest(
+            model="gpt-test",
+            messages=[
+                {"role": "user", "content": "call tool"},
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_emit_marker",
+                            "type": "function",
+                            "function": {"name": "emit_marker", "arguments": '{"marker":"ok"}'},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call_emit_marker", "content": '{"ok":true}'},
+            ],
+            tools=[],
+        )
+    ):
+        pass
+
+    assert backend.extras[0]["tool_choice"] == "none"
 
 
 @pytest.mark.asyncio

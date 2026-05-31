@@ -63,7 +63,7 @@ def test_action_artifact_reference_summary_enters_node_report_without_raw_conten
     report = NodeReportBuilder().build(events=events)
 
     assert report.artifacts == ["agently-action://art-1"]
-    assert report.meta["agently_action_artifacts"] == [
+    assert report.meta["action_artifacts"] == [
         {
             "artifact_id": "art-1",
             "action_call_id": "action-call-1",
@@ -73,9 +73,12 @@ def test_action_artifact_reference_summary_enters_node_report_without_raw_conten
             "source": "runtime_action",
         }
     ]
-    assert report.meta["agently_action_artifact_diagnostics"] == [
+    assert report.meta["runtime_action_artifact_refs"] == ["runtime-action://art-1"]
+    assert report.meta["agently_action_artifacts"] == report.meta["action_artifacts"]
+    assert report.meta["action_artifact_diagnostics"] == [
         {"code": "ACTION_ARTIFACT_INVALID", "index": 2, "source": "tool_call_finished"}
     ]
+    assert report.meta["agently_action_artifact_diagnostics"] == report.meta["action_artifact_diagnostics"]
     assert report.tool_calls[0].data == {
         "artifact_refs": [
             {
@@ -128,7 +131,7 @@ def test_invalid_only_action_artifact_payload_never_falls_back_to_raw_data() -> 
 
     assert report.artifacts == []
     assert report.tool_calls[0].data == {"artifact_refs": []}
-    assert report.meta["agently_action_artifact_diagnostics"] == [
+    assert report.meta["action_artifact_diagnostics"] == [
         {"code": "ACTION_ARTIFACT_INVALID", "index": 0, "source": "tool_call_finished"}
     ]
     dumped = report.model_dump_json()
@@ -151,7 +154,8 @@ def test_ui_evidence_projects_action_artifact_reference_without_body() -> None:
                 events_path="wal://run-action",
                 artifacts=["agently-action://art-1"],
                 meta={
-                    "agently_action_artifacts": [
+                    "runtime_action_artifact_refs": ["runtime-action://art-1"],
+                    "action_artifacts": [
                         {
                             "artifact_id": "art-1",
                             "action_call_id": "action-call-1",
@@ -168,7 +172,29 @@ def test_ui_evidence_projects_action_artifact_reference_without_body() -> None:
     )[0]
 
     assert terminal.evidence is not None
-    assert terminal.evidence.artifact_ref == "agently-action://art-1"
+    assert terminal.evidence.artifact_ref == "runtime-action://art-1"
     dumped = terminal.model_dump_json(by_alias=True)
     assert "RAW_UI_PREVIEW_SHOULD_NOT_LEAK" not in dumped
     assert "preview" not in dumped
+
+
+def test_ui_evidence_accepts_legacy_action_artifact_reference() -> None:
+    """兼容旧 evidence locator，但新写入不再使用上游品牌 scheme。"""
+
+    projector = RuntimeUIEventProjector(run_id="run-action", level=StreamLevel.UI)
+    terminal = projector.on_terminal(
+        result=CapabilityResult(
+            status=CapabilityStatus.SUCCESS,
+            node_report=NodeReport(
+                status="success",
+                completion_reason="run_completed",
+                run_id="run-action",
+                events_path="wal://run-action",
+                artifacts=["agently-action://legacy-art"],
+                meta={},
+            ),
+        )
+    )[0]
+
+    assert terminal.evidence is not None
+    assert terminal.evidence.artifact_ref == "agently-action://legacy-art"

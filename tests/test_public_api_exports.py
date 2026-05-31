@@ -13,10 +13,13 @@ def test_public_api_all_exports_are_stable() -> None:
         "RuntimeConfig",
         "ProviderRequesterStrategy",
         "AgentlyRequesterStrategy",
+        "ToolChoiceAfterToolResult",
         "CustomTool",
         "StructuredStreamEvent",
         "RuntimeContextRecordRef",
         "RuntimeRecallContextPack",
+        "build_recall_context_pack",
+        "write_node_report_summary",
         # Reports
         "NodeReport",
         "NodeResult",
@@ -89,6 +92,16 @@ def test_public_api_does_not_expose_internal_impl_details() -> None:
         legacy_config,
         "CapabilityRuntime",
         "BridgeConfigModel",
+        "NodeReportBuilder",
     ]
     for name in forbidden:
         assert not hasattr(caprt, name), name
+
+
+def test_legacy_agently_requester_strategy_import_remains_available() -> None:
+    """旧根包导入与 import-star 仍可用；新文档推荐 ProviderRequesterStrategy。"""
+
+    import capability_runtime as caprt
+
+    assert "AgentlyRequesterStrategy" in caprt.__all__
+    assert caprt.AgentlyRequesterStrategy == caprt.ProviderRequesterStrategy
