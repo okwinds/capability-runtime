@@ -17,9 +17,13 @@
 Provider bridge 新增面：
 
 - `ProviderRequesterStrategy`：`"chat_completions"` 或 `"responses"`。
+- `ToolChoiceAfterToolResult`：工具结果回注后的显式 provider 兼容覆写，
+  当前为 `"none"` 或 `"auto"`。
 - `RuntimeConfig.requester_strategy`：requester strategy，默认
   `"chat_completions"`，用于 legacy 兼容。
 - `RuntimeConfig.max_dynamic_nodes`：Dynamic DAG preview 硬上限。
+- `build_recall_context_pack` / `write_node_report_summary`：从根包导出的中立
+  Workspace/Recall preview helper。
 
 requester selection 不负责选择业务模型。runtime 模型应通过
 `AgentSpec.llm_config["model"]` 设置；lifecycle 层会把它复制到 SDK

@@ -14,9 +14,13 @@ for path in (REPO_ROOT, SRC_ROOT):
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
 
-from capability_runtime import RuntimeContextRecordRef, RuntimeRecallContextPack
-from capability_runtime.context_pack import build_recall_context_pack, write_node_report_summary
-from capability_runtime.types import NodeReport
+from capability_runtime import (
+    NodeReport,
+    RuntimeContextRecordRef,
+    RuntimeRecallContextPack,
+    build_recall_context_pack,
+    write_node_report_summary,
+)
 
 
 class FakeWorkspace:

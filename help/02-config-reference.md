@@ -20,6 +20,8 @@ Core fields:
 - `runtime_client` / `runtime_server`: optional RPC surfaces
 - `requester_strategy`: `chat_completions` or `responses`; default is
   `chat_completions`
+- `tool_choice_after_tool_result`: optional bridge compatibility override for
+  follow-up LLM turns after a tool result; allowed values are `none` or `auto`
 - `max_dynamic_nodes`: hard limit for Dynamic DAG preview compilation/execution
 
 See [config/README.md](../config/README.md) and `config/default.yaml` for example shapes.
@@ -49,3 +51,9 @@ Model priority is independent from transport selection:
 Agently settings should contain transport details such as `base_url`, `auth`,
 headers, timeout, and requester plugin configuration. Do not rely on Agently
 settings alone to set the runtime request model.
+
+`AgentSpec.llm_config["tool_choice"]` is passed through by default. If a specific
+provider repeatedly calls the same tool after a forced first tool call, set
+`RuntimeConfig.tool_choice_after_tool_result="none"` explicitly for that runtime.
+Do not rely on the runtime to silently reinterpret provider `tool_choice`
+semantics.

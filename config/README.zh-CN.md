@@ -61,5 +61,8 @@ print(runtime.validate())
   的请求模型；请求模型应使用 `AgentSpec.llm_config.model`。
 - 真实 provider 审计时，`NodeReport.usage` 应尽量保留 `model`、
   `request_id`、`provider` 与 token 计数。
+- 默认情况下，`AgentSpec.llm_config.tool_choice` 会原样透传。只有当某个
+  provider 在强制首轮工具调用后持续循环时，才显式使用
+  `RuntimeConfig.tool_choice_after_tool_result="none"` 作为兼容开关。
 - `max_dynamic_nodes` 用于约束 Dynamic DAG preview；不要接受无上限的模型生成图。
 - 不要提交真实 `.env`、provider 凭证或环境专属 overlay 文件。

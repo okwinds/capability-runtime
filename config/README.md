@@ -64,6 +64,9 @@ print(runtime.validate())
   override per-agent request models; use `AgentSpec.llm_config.model`.
 - For real provider audit, `NodeReport.usage` should preserve `model`,
   `request_id`, `provider`, and token counts when available.
+- `AgentSpec.llm_config.tool_choice` is passed through by default. Use
+  `RuntimeConfig.tool_choice_after_tool_result="none"` only as an explicit
+  provider compatibility switch when a forced first tool call keeps looping.
 - `max_dynamic_nodes` bounds Dynamic DAG preview. Do not accept unbounded model
   generated graphs.
 - never commit real `.env`, provider credentials, or environment-specific overlay files.

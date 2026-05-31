@@ -17,9 +17,13 @@ The supported public API is the package root import surface.
 Provider bridge additions:
 
 - `ProviderRequesterStrategy`: `"chat_completions"` or `"responses"`.
+- `ToolChoiceAfterToolResult`: explicit provider compatibility override after a
+  tool result, currently `"none"` or `"auto"`.
 - `RuntimeConfig.requester_strategy`: requester strategy, defaulting to
   `"chat_completions"` for legacy compatibility.
 - `RuntimeConfig.max_dynamic_nodes`: Dynamic DAG preview hard limit.
+- `build_recall_context_pack` / `write_node_report_summary`: neutral
+  Workspace/Recall preview helpers exposed from the package root.
 
 Requester selection does not select the business model. Use
 `AgentSpec.llm_config["model"]` to set the runtime model; the lifecycle layer

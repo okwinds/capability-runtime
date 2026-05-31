@@ -20,6 +20,8 @@
 - `runtime_client` / `runtime_server`：可选 RPC 表面
 - `requester_strategy`：`chat_completions` 或 `responses`；默认是
   `chat_completions`
+- `tool_choice_after_tool_result`：可选 bridge 兼容覆写；当工具结果已回注后的后续
+  LLM turn 需要改写 `tool_choice` 时，可显式设为 `none` 或 `auto`
 - `max_dynamic_nodes`：Dynamic DAG preview 编译/执行硬上限
 
 示例形态见 [config/README.md](../config/README.md) 与 `config/default.yaml`。
@@ -47,3 +49,8 @@
 
 Agently settings 应只放 `base_url`、`auth`、headers、timeout、requester
 plugin 配置等 transport 信息。不要只靠 Agently settings 设置 runtime 请求模型。
+
+默认情况下，`AgentSpec.llm_config["tool_choice"]` 会原样透传。若某个 provider
+在强制首轮工具调用后反复调用同一工具，可以为该 runtime 显式设置
+`RuntimeConfig.tool_choice_after_tool_result="none"`。不要依赖 runtime 静默改写
+provider 的 `tool_choice` 语义。

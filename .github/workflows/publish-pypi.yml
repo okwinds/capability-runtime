@@ -7,6 +7,18 @@ on:
         description: "Release tag to validate before publish (for example v0.1.0)"
         required: true
         type: string
+      real_provider_smoke_override_reason:
+        description: "Emergency-only override when real provider bridge smoke was already run externally"
+        required: false
+        type: string
+      real_provider_smoke_override_url:
+        description: "URL of the external real provider bridge smoke run"
+        required: false
+        type: string
+      real_provider_smoke_override_commit:
+        description: "Commit SHA verified by the external real provider bridge smoke run"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -28,9 +40,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install build tooling
+      - name: Install project and build tooling
         run: |
           python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
           python -m pip install build
 
       - name: Guardrail (tag ↔ version alignment)
@@ -38,6 +51,80 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
         run: |
           python scripts/check_release_tag_version.py --tag "${RELEASE_TAG}"
+
+      - name: Release regression guardrails
+        run: |
+          timeout 300s nice -n 19 ionice -c3 python -m pytest -q \
+            tests/test_dependency_pins.py \
+            tests/test_public_api_exports.py \
+            tests/test_repo_no_deep_imports_in_user_facing_docs.py \
+            tests/test_examples_smoke.py \
+            tests/test_backend_mode.py \
+            tests/test_integration_agently_requester_smoke.py \
+            tests/test_agently_backend.py \
+            tests/test_agently_backend_replay.py \
+            tests/test_openai_responses_compatible_bridge.py \
+            tests/test_agently_backend_authorization_header_contract.py \
+            tests/test_agently_bridge_diagnostics.py \
+            tests/test_dynamic_workflow_plan_contract.py \
+            tests/test_dynamic_workflow_runtime.py \
+            tests/test_triggerflow_lifecycle_mapping.py \
+            tests/test_agently_workspace_recall_preview.py \
+            tests/test_agently_action_artifact_evidence.py \
+            tests/test_node_report_builder.py \
+            tests/test_node_report_contract_v1.py \
+            tests/test_per_capability_llm_config_model_routing.py \
+            tests/adapters/test_agent_adapter.py \
+            tests/test_publish_real_provider_gate.py
+
+      - name: Real provider bridge release gate
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          MODEL_NAME: ${{ secrets.MODEL_NAME }}
+          OVERRIDE_REASON: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.real_provider_smoke_override_reason || '' }}
+          OVERRIDE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.real_provider_smoke_override_url || '' }}
+          OVERRIDE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.real_provider_smoke_override_commit || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "${OPENAI_API_KEY}" ] && [ -n "${OPENAI_BASE_URL}" ] && [ -n "${MODEL_NAME}" ]; then
+            CAPRT_REAL_PROVIDER_TESTS=1 timeout 240s nice -n 19 ionice -c3 python -m pytest -q \
+              --junitxml /tmp/caprt-real-provider-smoke.xml \
+              tests/integration/test_runtime_real_provider_bridge.py
+            python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("/tmp/caprt-real-provider-smoke.xml").getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
+          tests = sum(int(suite.attrib.get("tests", "0")) for suite in suites)
+          failures = sum(int(suite.attrib.get("failures", "0")) for suite in suites)
+          errors = sum(int(suite.attrib.get("errors", "0")) for suite in suites)
+          skipped = sum(int(suite.attrib.get("skipped", "0")) for suite in suites)
+          passed = tests - failures - errors - skipped
+          if failures or errors:
+              print("::error::Real provider bridge smoke reported failures or errors.")
+              sys.exit(1)
+          if skipped:
+              print("::error::Real provider bridge smoke skipped tests; release gate requires actual executed tests.")
+              sys.exit(1)
+          if passed < 5:
+              print("::error::Real provider bridge smoke must execute at least five passing tests.")
+              sys.exit(1)
+          print(f"real provider bridge smoke passed={passed} skipped={skipped} failures={failures} errors={errors}")
+          PY
+            exit 0
+          fi
+
+          expected_run_url_prefix="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
+          if [ -n "${OVERRIDE_REASON}" ] && [[ "${OVERRIDE_URL}" == "${expected_run_url_prefix}"* ]] && [ "${OVERRIDE_COMMIT}" = "${GITHUB_SHA}" ]; then
+            echo "::warning::real provider bridge smoke override accepted for ${GITHUB_SHA}; external evidence URL recorded."
+            exit 0
+          fi
+
+          echo "::error::Real provider bridge smoke is required before publishing. Configure OPENAI_API_KEY, OPENAI_BASE_URL, and MODEL_NAME secrets, or provide workflow_dispatch override reason, GitHub evidence URL, and matching commit SHA."
+          exit 1
 
       - name: Build sdist and wheel
         run: |

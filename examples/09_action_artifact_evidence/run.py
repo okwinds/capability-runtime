@@ -12,53 +12,38 @@ for path in (REPO_ROOT, SRC_ROOT):
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
 
-from capability_runtime.reporting.node_report import NodeReportBuilder
-from skills_runtime.core.contracts import AgentEvent
-
-
-def ev(event_type: str, payload: dict) -> AgentEvent:
-    return AgentEvent(type=event_type, timestamp="2026-05-31T00:00:00Z", run_id="run-artifact", payload=payload)
+from capability_runtime import NodeReport
 
 
 def main() -> None:
     raw_body = "RAW_ARTIFACT_BODY_SHOULD_NOT_APPEAR"
-    report = NodeReportBuilder().build(
-        events=[
-            ev("tool_call_requested", {"call_id": "call-1", "name": "runtime_action", "arguments": {}}),
-            ev(
-                "tool_call_finished",
+    report = NodeReport(
+        status="success",
+        completion_reason="run_completed",
+        run_id="run-artifact",
+        events_path="wal://run-artifact",
+        artifacts=["agently-action://artifact-1"],
+        meta={
+            "runtime_action_artifact_refs": ["runtime-action://artifact-1"],
+            "action_artifacts": [
                 {
-                    "call_id": "call-1",
-                    "tool": "runtime_action",
-                    "result": {
-                        "ok": True,
-                        "data": {
-                            "model_digest": "pwd completed",
-                            "raw_body": raw_body,
-                            "artifact_refs": [
-                                {
-                                    "artifact_id": "artifact-1",
-                                    "action_call_id": "call-1",
-                                    "artifact_type": "stdout",
-                                    "label": "pwd stdout",
-                                    "media_type": "text/plain",
-                                    "source": "runtime_action",
-                                    "preview": raw_body,
-                                    "value": raw_body,
-                                }
-                            ],
-                        },
-                    },
-                },
-            ),
-        ]
+                    "artifact_id": "artifact-1",
+                    "action_call_id": "call-1",
+                    "artifact_type": "stdout",
+                    "label": "pwd stdout",
+                    "media_type": "text/plain",
+                    "source": "runtime_action",
+                }
+            ],
+        },
     )
     dumped = repr(report)
     assert raw_body not in dumped
 
     print("=== 09_action_artifact_evidence ===")
     print(f"artifact_refs={report.artifacts}")
-    print(f"summary_count={len(report.meta.get('agently_action_artifacts', []))}")
+    print(f"runtime_artifact_refs={report.meta.get('runtime_action_artifact_refs', [])}")
+    print(f"summary_count={len(report.meta.get('action_artifacts', []))}")
     print(f"raw_body_present={raw_body in dumped}")
     print("tools_execution_model_replaced=false")
 
