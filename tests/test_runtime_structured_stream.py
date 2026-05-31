@@ -35,6 +35,23 @@ def _register_structured_agent(rt: Runtime) -> None:
     )
 
 
+def test_responses_bridge_does_not_add_second_structured_output_public_api() -> None:
+    """
+    Responses mode 只能增强既有 structured stream surface，不允许新增第二套结构化输出 API。
+    """
+
+    import capability_runtime as caprt
+
+    forbidden = [
+        "ResponseParser",
+        "ResponsesStructuredParser",
+        "run_responses_structured",
+        "run_responses_structured_stream",
+    ]
+    for name in forbidden:
+        assert not hasattr(caprt, name), name
+
+
 @pytest.mark.asyncio
 async def test_run_structured_stream_emits_started_text_snapshot_field_updates_and_terminal(tmp_path: Path) -> None:
     rt = _mk_runtime(

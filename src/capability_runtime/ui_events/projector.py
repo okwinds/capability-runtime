@@ -80,6 +80,31 @@ def _normalize_terminal_status(status: CapabilityStatus) -> str:
     return "pending"
 
 
+def _workflow_lifecycle_summary(ev: Dict[str, Any]) -> Dict[str, Any]:
+    """从 workflow 轻量事件中提取可公开的中立 lifecycle 摘要。"""
+
+    data: Dict[str, Any] = {}
+    for key in ("lifecycle_state", "execution_id", "state_version", "intervention_mode", "close_reason"):
+        value = ev.get(key)
+        if isinstance(value, (str, int)) and str(value).strip():
+            data[key] = value
+    pending = ev.get("pending_interventions")
+    if isinstance(pending, list):
+        safe_pending: List[Dict[str, Any]] = []
+        for item in pending:
+            if not isinstance(item, dict):
+                continue
+            safe_item: Dict[str, Any] = {}
+            for key in ("id", "target", "status", "version"):
+                value = item.get(key)
+                if isinstance(value, (str, int, float, bool)) or value is None:
+                    safe_item[key] = value
+            if safe_item:
+                safe_pending.append(safe_item)
+        data["pending_interventions"] = safe_pending
+    return data
+
+
 @dataclass
 class _AgentCtx:
     run_id: str
@@ -246,6 +271,7 @@ class RuntimeUIEventProjector:
 
         out: List[RuntimeEvent] = []
         if typ == "workflow.started" and workflow_id:
+            lifecycle = _workflow_lifecycle_summary(ev)
             wf_seg = PathSegment(
                 kind="workflow",
                 id=workflow_instance_id or workflow_id,
@@ -256,7 +282,12 @@ class RuntimeUIEventProjector:
                 self._emit(
                     type="node.started",
                     path=[PathSegment(kind="run", id=self._run_id), wf_seg],
-                    data={"node_kind": "workflow", "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id},
+                    data={
+                        "node_kind": "workflow",
+                        "workflow_id": workflow_id,
+                        "workflow_instance_id": workflow_instance_id,
+                        **lifecycle,
+                    },
                 )
             )
             if self._level != StreamLevel.LITE:
@@ -264,9 +295,86 @@ class RuntimeUIEventProjector:
                     self._emit(
                         type="node.phase",
                         path=[PathSegment(kind="run", id=self._run_id), wf_seg],
-                        data={"phase": "RUNNING"},
+                        data={"phase": "RUNNING", **lifecycle},
                     )
                 )
+            return out
+
+        if typ == "workflow.dynamic_dag.planned" and workflow_id:
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
+            path = [PathSegment(kind="run", id=self._run_id), wf_seg]
+            out.append(
+                self._emit(
+                    type="node.started",
+                    path=path,
+                    data={
+                        "node_kind": "dynamic_dag",
+                        "workflow_id": workflow_id,
+                        "workflow_instance_id": workflow_instance_id,
+                        "graph_id": ev.get("graph_id") or workflow_id,
+                        "plan_hash": ev.get("plan_hash"),
+                        "node_count": ev.get("node_count"),
+                    },
+                )
+            )
+            if self._level != StreamLevel.LITE:
+                out.append(self._emit(type="node.phase", path=path, data={"phase": "RUNNING"}))
+            return out
+
+        if typ in {"workflow.dynamic_dag.node.started", "workflow.dynamic_dag.node.finished"} and workflow_id:
+            dag_node_id = str(ev.get("dag_node_id") or "").strip()
+            if not dag_node_id:
+                return []
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
+            path = [
+                PathSegment(kind="run", id=self._run_id),
+                wf_seg,
+                PathSegment(kind="dynamic_node", id=dag_node_id),
+            ]
+            if typ.endswith(".started"):
+                out.append(
+                    self._emit(
+                        type="node.started",
+                        path=path,
+                        data={
+                            "node_kind": "dynamic_node",
+                            "workflow_id": workflow_id,
+                            "workflow_instance_id": workflow_instance_id,
+                            "graph_id": ev.get("graph_id") or workflow_id,
+                            "dag_node_id": dag_node_id,
+                            "capability_id": ev.get("capability_id"),
+                        },
+                    )
+                )
+                if self._level != StreamLevel.LITE:
+                    out.append(self._emit(type="node.phase", path=path, data={"phase": "RUNNING"}))
+                return out
+
+            status_raw = str(ev.get("status") or "").strip()
+            status = status_raw if status_raw in {"success", "failed", "pending", "cancelled", "skipped"} else "pending"
+            data: Dict[str, Any] = {
+                "status": status,
+                "workflow_id": workflow_id,
+                "workflow_instance_id": workflow_instance_id,
+                "graph_id": ev.get("graph_id") or workflow_id,
+                "dag_node_id": dag_node_id,
+                "capability_id": ev.get("capability_id"),
+            }
+            if isinstance(ev.get("error_code"), str) and str(ev.get("error_code")).strip():
+                data["error_code"] = str(ev.get("error_code")).strip()
+            if self._level != StreamLevel.LITE:
+                out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
+            out.append(self._emit(type="node.finished", path=path, data=data))
             return out
 
         if typ == "workflow.step.started" and workflow_id and step_id:
@@ -320,6 +428,7 @@ class RuntimeUIEventProjector:
         if typ == "workflow.finished" and workflow_id:
             status_raw = str(ev.get("status") or "").strip()
             status = status_raw if status_raw in {"success", "failed", "pending", "cancelled"} else "pending"
+            lifecycle = _workflow_lifecycle_summary(ev)
             wf_seg = PathSegment(
                 kind="workflow",
                 id=workflow_instance_id or workflow_id,
@@ -328,14 +437,66 @@ class RuntimeUIEventProjector:
             )
             path = [PathSegment(kind="run", id=self._run_id), wf_seg]
             if self._level != StreamLevel.LITE:
-                out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
+                out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE", **lifecycle}))
             out.append(
                 self._emit(
                     type="node.finished",
                     path=path,
-                    data={"status": status, "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id},
+                    data={
+                        "status": status,
+                        "workflow_id": workflow_id,
+                        "workflow_instance_id": workflow_instance_id,
+                        **lifecycle,
+                    },
                 )
             )
+            return out
+
+        if typ == "workflow.lifecycle.changed" and workflow_id:
+            lifecycle = _workflow_lifecycle_summary(ev)
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
+            out.append(
+                self._emit(
+                    type="workflow.lifecycle.changed",
+                    path=[PathSegment(kind="run", id=self._run_id), wf_seg],
+                    data=lifecycle,
+                )
+            )
+            return out if self._level != StreamLevel.LITE else []
+
+        if typ in {"workflow.intervention.waiting", "workflow.intervention.unsupported"} and workflow_id:
+            lifecycle = _workflow_lifecycle_summary(ev)
+            wf_seg = PathSegment(
+                kind="workflow",
+                id=workflow_instance_id or workflow_id,
+                instance_id=workflow_instance_id or workflow_id,
+                ref={"kind": "workflow", "id": workflow_id},
+            )
+            path = [PathSegment(kind="run", id=self._run_id), wf_seg]
+            out.append(
+                self._emit(
+                    type=typ,
+                    path=path,
+                    data=lifecycle,
+                )
+            )
+            if typ == "workflow.intervention.unsupported":
+                out.append(
+                    self._emit(
+                        type="error",
+                        path=path,
+                        data={
+                            "kind": str(ev.get("error_code") or "WORKFLOW_INTERVENTION_UNSUPPORTED"),
+                            "message": "workflow intervention preview is not supported",
+                            **lifecycle,
+                        },
+                    )
+                )
             return out
 
         return []
@@ -613,5 +774,15 @@ class RuntimeUIEventProjector:
         if isinstance(report.events_path, str) and report.events_path:
             ev.events_path = report.events_path
         if report.artifacts and isinstance(report.artifacts[0], str) and report.artifacts[0].strip():
-            ev.artifact_path = report.artifacts[0].strip()
+            artifact = report.artifacts[0].strip()
+            if artifact.startswith("agently-action://"):
+                ev.artifact_ref = artifact
+            else:
+                ev.artifact_path = artifact
+        context_pack_ref = report.meta.get("context_pack_ref") if isinstance(report.meta, dict) else None
+        if isinstance(context_pack_ref, str) and context_pack_ref.strip():
+            ev.context_pack_ref = context_pack_ref.strip()
+        close_snapshot_ref = report.meta.get("close_snapshot_ref") if isinstance(report.meta, dict) else None
+        if isinstance(close_snapshot_ref, str) and close_snapshot_ref.strip():
+            ev.close_snapshot_ref = close_snapshot_ref.strip()
         return ev

@@ -46,6 +46,9 @@ class Evidence(BaseModel):
     events_path: Optional[str] = None
     call_id: Optional[str] = None
     artifact_path: Optional[str] = None
+    artifact_ref: Optional[str] = None
+    context_pack_ref: Optional[str] = None
+    close_snapshot_ref: Optional[str] = None
     node_report_schema: Optional[str] = None
 
 

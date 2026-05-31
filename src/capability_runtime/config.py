@@ -23,6 +23,8 @@ from skills_runtime.tools.protocol import HumanIOProvider, ToolSpec
 PreflightMode = Literal["error", "warn", "off"]
 RuntimeMode = Literal["mock", "bridge", "sdk_native"]
 OutputValidationMode = Literal["off", "warn", "error"]
+ProviderRequesterStrategy = Literal["chat_completions", "responses"]
+AgentlyRequesterStrategy = ProviderRequesterStrategy
 
 
 @dataclass(frozen=True)
@@ -50,7 +52,7 @@ class RuntimeConfig:
 
     参数分组：
     - 执行模式：mode
-    - 桥接执行：workspace_root / sdk_config_paths / agently_agent
+    - 桥接执行：workspace_root / sdk_config_paths / agently_agent / requester_strategy
     - Workflow：workflow_engine（可注入）
     - SDK 注入：approval_provider / human_io / cancel_checker / wal_backend / env_vars
     - Skills 配置：skills_config / in_memory_skills
@@ -67,6 +69,18 @@ class RuntimeConfig:
     workspace_root: Optional[Path] = None
     sdk_config_paths: List[Path] = field(default_factory=list)
     agently_agent: Optional[Any] = None
+    requester_strategy: ProviderRequesterStrategy = "chat_completions"
+    agently_requester: Optional[AgentlyRequesterStrategy] = None
+
+    @property
+    def effective_requester_strategy(self) -> ProviderRequesterStrategy:
+        """
+        返回当前 Runtime bridge requester strategy。
+
+        `requester_strategy` 是中立首选字段；`agently_requester` 保留为旧配置兼容入口。
+        """
+
+        return self.agently_requester or self.requester_strategy
 
     # === Workflow 引擎注入（可选）===
     #
@@ -115,6 +129,7 @@ class RuntimeConfig:
 
     # === 护栏 ===
     max_depth: int = 10
+    max_dynamic_nodes: int = 64
     max_total_loop_iterations: int = 50000
     preflight_mode: PreflightMode = "error"
 
@@ -166,6 +181,8 @@ __all__ = [
     "PreflightMode",
     "RuntimeMode",
     "OutputValidationMode",
+    "ProviderRequesterStrategy",
+    "AgentlyRequesterStrategy",
     "CustomTool",
     "RuntimeConfig",
     "normalize_workspace_root",

@@ -139,12 +139,16 @@ class TriggerFlowWorkflowEngine:
         执行 Workflow（流式）。
 
         事件策略：
-        - 仅输出轻量 workflow 事件（workflow started/finished + step started/finished）；
+        - 输出轻量 workflow 事件（workflow started/finished + step started/finished）；
+        - lifecycle 只作为 additive 摘要事件和字段，不替代 WAL/NodeReport 真相源；
         - 不透传上游全量 AgentEvent，避免把深审计负担带到默认流里。
         - 深审计与编排分支依据应读取 WAL/events + NodeReport（真相源），而非依赖轻量事件的 payload 细节。
         """
 
         workflow_instance_id = uuid.uuid4().hex
+        execution_id = f"triggerflow-{workflow_instance_id}"
+        lifecycle_state = "open"
+        state_version = 0
         context = context.with_bag_overlay(**(input or {}))
         context = context.with_bag_overlay(
             **{
@@ -161,12 +165,36 @@ class TriggerFlowWorkflowEngine:
         async def emit(event: WorkflowStreamEvent) -> None:
             await event_queue.put(event)
 
+        def lifecycle_payload(*, state: str, version: int, close_reason: str | None = None) -> Dict[str, Any]:
+            """生成本仓中立 TriggerFlow lifecycle 摘要，不暴露上游 execution 对象。"""
+
+            payload: Dict[str, Any] = {
+                "lifecycle_state": state,
+                "execution_id": execution_id,
+                "state_version": version,
+                "intervention_mode": None,
+                "pending_interventions": [],
+            }
+            if close_reason is not None:
+                payload["close_reason"] = close_reason
+            return payload
+
         await emit(
             {
                 "type": "workflow.started",
                 "run_id": context.run_id,
                 "workflow_id": spec.base.id,
                 "workflow_instance_id": workflow_instance_id,
+                **lifecycle_payload(state=lifecycle_state, version=state_version),
+            }
+        )
+        await emit(
+            {
+                "type": "workflow.lifecycle.changed",
+                "run_id": context.run_id,
+                "workflow_id": spec.base.id,
+                "workflow_instance_id": workflow_instance_id,
+                **lifecycle_payload(state=lifecycle_state, version=state_version),
             }
         )
 
@@ -261,6 +289,7 @@ class TriggerFlowWorkflowEngine:
 
         @flow.chunk("finalize")
         async def finalize(data: Any) -> CapabilityResult:
+            nonlocal lifecycle_state, state_version
             payload_raw = getattr(data, "value", None)
             payload: Dict[str, Any] = dict(payload_raw) if isinstance(payload_raw, dict) else {}
             terminal = payload.get("__terminal_result__")
@@ -274,6 +303,18 @@ class TriggerFlowWorkflowEngine:
                 result = CapabilityResult(status=CapabilityStatus.SUCCESS, output=output)
 
             terminal_holder["result"] = result
+            lifecycle_state = "closed"
+            state_version += 1
+            close_reason = getattr(result.status, "value", str(result.status))
+            await emit(
+                {
+                    "type": "workflow.lifecycle.changed",
+                    "run_id": context_holder.context.run_id,
+                    "workflow_id": spec.base.id,
+                    "workflow_instance_id": workflow_instance_id,
+                    **lifecycle_payload(state=lifecycle_state, version=state_version, close_reason=close_reason),
+                }
+            )
             await emit(
                 {
                     "type": "workflow.finished",
@@ -281,6 +322,7 @@ class TriggerFlowWorkflowEngine:
                     "workflow_id": spec.base.id,
                     "workflow_instance_id": workflow_instance_id,
                     "status": getattr(result.status, "value", str(result.status)),
+                    **lifecycle_payload(state=lifecycle_state, version=state_version, close_reason=close_reason),
                 }
             )
             return result
@@ -288,6 +330,7 @@ class TriggerFlowWorkflowEngine:
         chain.to(finalize).end()
 
         async def run_flow() -> None:
+            nonlocal lifecycle_state, state_version
             try:
                 result = await flow.async_start(
                     {"__terminal_result__": None},
@@ -318,6 +361,21 @@ class TriggerFlowWorkflowEngine:
                     report=report,
                     node_report=report,
                 )
+                lifecycle_state = "closed"
+                state_version += 1
+                await emit(
+                    {
+                        "type": "workflow.lifecycle.changed",
+                        "run_id": context_holder.context.run_id,
+                        "workflow_id": spec.base.id,
+                        "workflow_instance_id": workflow_instance_id,
+                        **lifecycle_payload(
+                            state=lifecycle_state,
+                            version=state_version,
+                            close_reason="engine_error",
+                        ),
+                    }
+                )
                 await emit(
                     {
                         "type": "workflow.finished",
@@ -325,6 +383,11 @@ class TriggerFlowWorkflowEngine:
                         "workflow_id": spec.base.id,
                         "workflow_instance_id": workflow_instance_id,
                         "status": "failed",
+                        **lifecycle_payload(
+                            state=lifecycle_state,
+                            version=state_version,
+                            close_reason="engine_error",
+                        ),
                     }
                 )
             finally:

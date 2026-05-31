@@ -24,7 +24,7 @@ from ..logging_utils import log_suppressed_exception
 from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
-from ..reporting.node_report import NodeReportBuilder
+from ..reporting.node_report import NodeReportBuilder, attach_agently_bridge_diagnostics
 from ..services import RuntimeServices, map_node_status
 
 # _build_task 使用的 prompt section 常量
@@ -386,6 +386,11 @@ class AgentAdapter:
             return
 
         report = NodeReportBuilder().build(events=events)
+        attach_agently_bridge_diagnostics(
+            report,
+            mode=getattr(self._services.config, "mode", ""),
+            requester_strategy=getattr(self._services.config, "effective_requester_strategy", "chat_completions"),
+        )
         self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
         _apply_on_event_error_evidence(report)
         if issues and getattr(self._services.config, "preflight_mode", "error") == "warn":

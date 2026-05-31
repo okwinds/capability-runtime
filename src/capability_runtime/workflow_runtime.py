@@ -52,6 +52,9 @@ class WorkflowRunSnapshot:
     - current_step_id：当前步骤 ID
     - waiting_approval_key：等待审批键
     - events_path：证据链 events 定位符
+    - lifecycle_state/execution_id/state_version：TriggerFlow lifecycle 中立摘要
+    - intervention_mode/pending_interventions：intervention preview 中立状态
+    - close_reason：workflow close 原因摘要
     """
 
     run_id: str
@@ -63,6 +66,12 @@ class WorkflowRunSnapshot:
     waiting_approval_key: str | None = None
     events_path: str | None = None
     host_runtime: dict[str, Any] | None = None
+    lifecycle_state: str | None = None
+    execution_id: str | None = None
+    state_version: int | None = None
+    intervention_mode: str | None = None
+    pending_interventions: list[dict[str, Any]] = field(default_factory=list)
+    close_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +113,12 @@ def summarize_workflow_items(
     ordered_steps: list[str] = []
     steps: dict[str, WorkflowStepSnapshot] = {}
     final_status: WorkflowRunStatus = WorkflowRunStatus.RUNNING
+    lifecycle_state: str | None = None
+    execution_id: str | None = None
+    state_version: int | None = None
+    intervention_mode: str | None = None
+    pending_interventions: list[dict[str, Any]] = []
+    close_reason: str | None = None
 
     for item in items:
         if not isinstance(item, dict):
@@ -113,6 +128,23 @@ def summarize_workflow_items(
             run_id = str(item.get("run_id") or "")
         if typ == "workflow.started":
             workflow_instance_id = str(item.get("workflow_instance_id") or workflow_id)
+            lifecycle_state = _optional_text(item.get("lifecycle_state")) or lifecycle_state
+            execution_id = _optional_text(item.get("execution_id")) or execution_id
+            state_version = _optional_int(item.get("state_version"), default=state_version)
+            intervention_mode = _optional_text(item.get("intervention_mode")) or intervention_mode
+            pending_interventions = _normalize_pending_interventions(item.get("pending_interventions"), pending_interventions)
+            continue
+        if typ in {
+            "workflow.lifecycle.changed",
+            "workflow.intervention.waiting",
+            "workflow.intervention.unsupported",
+        }:
+            lifecycle_state = _optional_text(item.get("lifecycle_state")) or lifecycle_state
+            execution_id = _optional_text(item.get("execution_id")) or execution_id
+            state_version = _optional_int(item.get("state_version"), default=state_version)
+            intervention_mode = _optional_text(item.get("intervention_mode")) or intervention_mode
+            pending_interventions = _normalize_pending_interventions(item.get("pending_interventions"), pending_interventions)
+            close_reason = _optional_text(item.get("close_reason")) or close_reason
             continue
         if typ == "workflow.step.started":
             step_id = str(item.get("step_id") or "").strip()
@@ -147,6 +179,12 @@ def summarize_workflow_items(
             continue
         if typ == "workflow.finished":
             final_status = _map_workflow_status_from_event(str(item.get("status") or "pending"))
+            lifecycle_state = _optional_text(item.get("lifecycle_state")) or lifecycle_state
+            execution_id = _optional_text(item.get("execution_id")) or execution_id
+            state_version = _optional_int(item.get("state_version"), default=state_version)
+            intervention_mode = _optional_text(item.get("intervention_mode")) or intervention_mode
+            pending_interventions = _normalize_pending_interventions(item.get("pending_interventions"), pending_interventions)
+            close_reason = _optional_text(item.get("close_reason")) or close_reason
 
     waiting_approval_key = None
     events_path = None
@@ -182,6 +220,12 @@ def summarize_workflow_items(
         waiting_approval_key=waiting_approval_key,
         events_path=events_path,
         host_runtime=host_runtime,
+        lifecycle_state=lifecycle_state,
+        execution_id=execution_id,
+        state_version=state_version,
+        intervention_mode=intervention_mode,
+        pending_interventions=pending_interventions,
+        close_reason=close_reason,
     )
 
 
@@ -216,3 +260,34 @@ def _optional_text(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _optional_int(value: Any, *, default: int | None) -> int | None:
+    """把可选值归一为 int；无法转换时保留默认值。"""
+
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return default
+
+
+def _normalize_pending_interventions(value: Any, default: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把 pending interventions 归一为中立 dict 摘要列表。"""
+
+    if not isinstance(value, list):
+        return list(default)
+    normalized: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        entry: dict[str, Any] = {}
+        for key in ("id", "target", "status", "version"):
+            val = item.get(key)
+            if isinstance(val, (str, int, float, bool)) or val is None:
+                entry[key] = val
+        if entry:
+            normalized.append(entry)
+    return normalized

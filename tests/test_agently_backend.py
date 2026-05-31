@@ -225,6 +225,44 @@ async def test_agently_backend_usage_sink_accepts_missing_request_metadata():
 
 
 @pytest.mark.asyncio
+async def test_agently_backend_usage_sink_falls_back_to_request_model_when_provider_omits_model():
+    usage_events = []
+    backend = _backend_from_items(
+        [
+            (
+                "message",
+                '{"id":"req_no_model","provider":"gateway-provider","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}}',
+            ),
+            ("message", "[DONE]"),
+        ]
+    )
+
+    out = [
+        ev
+        async for ev in backend.stream_chat(
+            ChatRequest(
+                model="gpt-5.4",
+                messages=[{"role": "user", "content": "x"}],
+                tools=[],
+                extra={"_caprt_usage_sink": usage_events.append},
+            )
+        )
+    ]
+
+    assert [e.type for e in out] == ["completed"]
+    assert usage_events == [
+        {
+            "model": "gpt-5.4",
+            "input_tokens": 4,
+            "output_tokens": 6,
+            "total_tokens": 10,
+            "request_id": "req_no_model",
+            "provider": "gateway-provider",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_agently_sse_usage_request_metadata_reaches_runtime_node_report(tmp_path):
     backend = _backend_from_items(
         [
@@ -265,6 +303,26 @@ async def test_agently_sse_usage_request_metadata_reaches_runtime_node_report(tm
     assert result.node_report.usage.total_tokens == 18
     assert result.node_report.usage.request_id == "req_123"
     assert result.node_report.usage.provider == "openai"
+
+
+@pytest.mark.asyncio
+async def test_runtime_usage_model_replaces_sdk_default_with_actual_request_model(tmp_path):
+    backend = _UpstreamUsageWithSinkBackend(
+        sink_payload={
+            "model": "gpt-5.4",
+            "request_id": "req_actual_model",
+            "provider": "gateway-provider",
+        },
+        completed_usage={"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+    )
+
+    result = await _run_usage_backend(backend, tmp_path)
+
+    assert result.node_report is not None
+    assert result.node_report.usage is not None
+    assert result.node_report.usage.model == "gpt-5.4"
+    assert result.node_report.usage.request_id == "req_actual_model"
+    assert result.node_report.usage.provider == "gateway-provider"
 
 
 @pytest.mark.asyncio
@@ -388,6 +446,44 @@ def test_supplemental_usage_metadata_helper_does_not_overwrite_existing_model() 
         "total_tokens": 3,
         "request_id": "req_model",
         "provider": "sink-provider",
+    }
+
+
+def test_supplemental_usage_metadata_helper_replaces_default_model_placeholder() -> None:
+    ev = AgentEvent(
+        type="llm_usage",
+        timestamp="2026-05-31T00:00:00Z",
+        run_id="run_1",
+        payload={
+            "model": "gpt-4",
+            "input_tokens": 1,
+            "output_tokens": 2,
+            "total_tokens": 3,
+            "request_id": "req_upstream",
+            "provider": "openai",
+        },
+    )
+
+    merged = _merge_supplemental_usage_metadata_event(
+        ev=ev,
+        supplemental_payloads=[
+            {
+                "model": "gpt-5.4",
+                "request_id": "req_gateway",
+                "provider": "gateway-provider",
+            }
+        ],
+    )
+
+    assert merged.payload == {
+        "model": "gpt-5.4",
+        "model_upstream": "gpt-4",
+        "input_tokens": 1,
+        "output_tokens": 2,
+        "total_tokens": 3,
+        "request_id": "req_upstream",
+        "provider": "gateway-provider",
+        "provider_upstream": "openai",
     }
 
 

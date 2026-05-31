@@ -246,11 +246,19 @@ class SdkLifecycle:
             from .adapters.agently_backend import (
                 AgentlyBackendConfig,
                 AgentlyChatBackend,
-                build_openai_compatible_requester_factory,
+                build_agently_requester_factory,
             )
 
-            requester_factory = build_openai_compatible_requester_factory(agently_agent=self._config.agently_agent)
-            return AgentlyChatBackend(config=AgentlyBackendConfig(requester_factory=requester_factory))
+            requester_factory = build_agently_requester_factory(
+                agently_agent=self._config.agently_agent,
+                strategy=self._config.effective_requester_strategy,
+            )
+            return AgentlyChatBackend(
+                config=AgentlyBackendConfig(
+                    requester_factory=requester_factory,
+                    requester_strategy=self._config.effective_requester_strategy,
+                )
+            )
         else:
             from skills_runtime.llm.openai_chat import OpenAIChatCompletionsBackend
 
@@ -740,6 +748,7 @@ def _now_rfc3339() -> str:
 
 
 _USAGE_PROVIDER_PLACEHOLDERS = {"openai", "openai-compatible"}
+_USAGE_MODEL_PLACEHOLDERS = {"gpt-4"}
 
 
 def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_payloads: List[Dict[str, Any]]) -> AgentEvent:
@@ -760,13 +769,23 @@ def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_pay
 
     for supplemental_payload in supplemental_payloads:
         supplemental_summary = extract_usage_metrics(supplemental_payload)
-        for field in ("model", "request_id"):
-            current_value = extract_usage_metrics(merged_payload).get(field)
-            if isinstance(current_value, str) and current_value.strip():
-                continue
-            supplemental_value = supplemental_summary.get(field)
-            if isinstance(supplemental_value, str) and supplemental_value.strip():
-                merged_payload[field] = supplemental_value.strip()
+        current_model = extract_usage_metrics(merged_payload).get("model")
+        supplemental_model = supplemental_summary.get("model")
+        if isinstance(supplemental_model, str) and supplemental_model.strip():
+            supplemental_model = supplemental_model.strip()
+            if not (isinstance(current_model, str) and current_model.strip()):
+                merged_payload["model"] = supplemental_model
+            else:
+                current_model = current_model.strip()
+                if current_model in _USAGE_MODEL_PLACEHOLDERS and current_model != supplemental_model:
+                    merged_payload.setdefault("model_upstream", current_model)
+                    merged_payload["model"] = supplemental_model
+
+        current_request_id = extract_usage_metrics(merged_payload).get("request_id")
+        if not (isinstance(current_request_id, str) and current_request_id.strip()):
+            supplemental_request_id = supplemental_summary.get("request_id")
+            if isinstance(supplemental_request_id, str) and supplemental_request_id.strip():
+                merged_payload["request_id"] = supplemental_request_id.strip()
         current_provider = extract_usage_metrics(merged_payload).get("provider")
         supplemental_provider = supplemental_summary.get("provider")
         if not (isinstance(supplemental_provider, str) and supplemental_provider.strip()):

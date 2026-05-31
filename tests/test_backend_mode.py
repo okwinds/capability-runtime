@@ -46,12 +46,14 @@ def test_bridge_mode_requires_agently_agent() -> None:
         Runtime(RuntimeConfig(mode="bridge", agently_agent=None))  # type: ignore[arg-type]
 
 
-def test_bridge_mode_calls_requester_factory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    called: Dict[str, Any] = {"ok": False}
+def test_bridge_mode_default_uses_chat_completions_requester_strategy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    called: Dict[str, Any] = {"strategy": None, "agently_agent": None}
 
-    def _factory(*, agently_agent: Any):
-        _ = agently_agent
-        called["ok"] = True
+    def _factory(*, agently_agent: Any, strategy: str):
+        called["strategy"] = strategy
+        called["agently_agent"] = agently_agent
 
         def _rf():
             raise RuntimeError("not used in this test")
@@ -64,13 +66,128 @@ def test_bridge_mode_calls_requester_factory(monkeypatch: pytest.MonkeyPatch, tm
 
     import capability_runtime.adapters.agently_backend as ab
 
-    monkeypatch.setattr(ab, "build_openai_compatible_requester_factory", _factory)
+    monkeypatch.setattr(
+        ab,
+        "build_openai_compatible_requester_factory",
+        lambda **_: (_ for _ in ()).throw(AssertionError("legacy factory must be wrapped by strategy selector")),
+    )
+    monkeypatch.setattr(ab, "build_agently_requester_factory", _factory, raising=False)
     monkeypatch.setattr(ab, "AgentlyChatBackend", _FakeAgentlyChatBackend)
     monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
 
-    rt = Runtime(RuntimeConfig(mode="bridge", workspace_root=tmp_path, agently_agent=object(), preflight_mode="off"))
+    agently_agent = object()
+    rt = Runtime(RuntimeConfig(mode="bridge", workspace_root=tmp_path, agently_agent=agently_agent, preflight_mode="off"))
     rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
-    assert called["ok"] is True
+    assert called == {"strategy": "chat_completions", "agently_agent": agently_agent}
+
+
+def test_bridge_mode_can_opt_into_responses_requester_strategy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    called: Dict[str, Any] = {"strategy": None}
+
+    def _factory(*, agently_agent: Any, strategy: str):
+        _ = agently_agent
+        called["strategy"] = strategy
+
+        def _rf():
+            raise RuntimeError("not used in this test")
+
+        return _rf
+
+    class _FakeAgentlyChatBackend:
+        def __init__(self, *, config: Any) -> None:
+            self.config = config
+
+    import capability_runtime.adapters.agently_backend as ab
+
+    monkeypatch.setattr(
+        ab,
+        "build_openai_compatible_requester_factory",
+        lambda **_: (_ for _ in ()).throw(AssertionError("legacy factory must be wrapped by strategy selector")),
+    )
+    monkeypatch.setattr(ab, "build_agently_requester_factory", _factory, raising=False)
+    monkeypatch.setattr(ab, "AgentlyChatBackend", _FakeAgentlyChatBackend)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="bridge",
+            workspace_root=tmp_path,
+            agently_agent=object(),
+            requester_strategy="responses",
+            preflight_mode="off",
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    assert called["strategy"] == "responses"
+
+
+def test_bridge_mode_accepts_legacy_agently_requester_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    called: Dict[str, Any] = {"strategy": None}
+
+    def _factory(*, agently_agent: Any, strategy: str):
+        _ = agently_agent
+        called["strategy"] = strategy
+
+        def _rf():
+            raise RuntimeError("not used in this test")
+
+        return _rf
+
+    class _FakeAgentlyChatBackend:
+        def __init__(self, *, config: Any) -> None:
+            self.config = config
+
+    import capability_runtime.adapters.agently_backend as ab
+
+    monkeypatch.setattr(ab, "build_agently_requester_factory", _factory, raising=False)
+    monkeypatch.setattr(ab, "AgentlyChatBackend", _FakeAgentlyChatBackend)
+    monkeypatch.setattr("skills_runtime.core.agent.Agent", _FakeAgent)
+
+    rt = Runtime(
+        RuntimeConfig(
+            mode="bridge",
+            workspace_root=tmp_path,
+            agently_agent=object(),
+            agently_requester="responses",
+            preflight_mode="off",
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    assert called["strategy"] == "responses"
+
+
+def test_sdk_backend_injection_ignores_provider_requester_strategy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class _InjectedBackend:
+        pass
+
+    import capability_runtime.adapters.agently_backend as ab
+
+    monkeypatch.setattr(
+        ab,
+        "build_agently_requester_factory",
+        lambda **_: (_ for _ in ()).throw(AssertionError("sdk_backend must bypass Agently requester selection")),
+        raising=False,
+    )
+
+    injected = _InjectedBackend()
+    rt = Runtime(
+        RuntimeConfig(
+            mode="bridge",
+            workspace_root=tmp_path,
+            agently_agent=object(),
+            sdk_backend=injected,  # type: ignore[arg-type]
+            requester_strategy="responses",
+            preflight_mode="off",
+        )
+    )
+    rt.register(AgentSpec(base=CapabilitySpec(id="A", kind=CapabilityKind.AGENT, name="A")))
+    assert rt._sdk.state.backend is injected
 
 
 @pytest.mark.asyncio

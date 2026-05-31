@@ -68,6 +68,64 @@ def _get_first_dist_version(dist_names: List[str]) -> Optional[str]:
     return None
 
 
+def attach_agently_bridge_diagnostics(
+    report: NodeReport,
+    *,
+    mode: str,
+    requester_strategy: str,
+) -> None:
+    """在 bridge mode 下给 NodeReport 注入脱敏 Agently diagnostics 摘要。"""
+
+    if str(mode) != "bridge":
+        return
+    try:
+        from ..adapters.agently_compat import (
+            collect_agently_bridge_diagnostics,
+            summarize_agently_bridge_diagnostics,
+        )
+
+        diagnostics = collect_agently_bridge_diagnostics(requester_strategy=str(requester_strategy))
+        report.bridge["agently"] = summarize_agently_bridge_diagnostics(diagnostics)
+    except Exception as exc:
+        log_suppressed_exception(
+            context="attach_agently_bridge_diagnostics",
+            exc=exc,
+        )
+
+
+_ACTION_ARTIFACT_SUMMARY_KEYS = (
+    "artifact_id",
+    "action_call_id",
+    "artifact_type",
+    "label",
+    "media_type",
+    "source",
+)
+
+
+def _summarize_action_artifact(value: Any) -> Optional[Dict[str, str]]:
+    """把 Agently Action artifact/observation 归一为 reference 摘要。"""
+
+    if not isinstance(value, dict):
+        return None
+    artifact_id = str(value.get("artifact_id") or "").strip()
+    if not artifact_id:
+        return None
+    summary: Dict[str, str] = {"artifact_id": artifact_id}
+    for key in _ACTION_ARTIFACT_SUMMARY_KEYS[1:]:
+        raw = value.get(key)
+        if isinstance(raw, str) and raw.strip():
+            summary[key] = raw.strip()
+    summary.setdefault("source", "runtime_action")
+    return summary
+
+
+def _action_artifact_ref(summary: Dict[str, str]) -> str:
+    """生成 action artifact reference locator。"""
+
+    return f"agently-action://{summary['artifact_id']}"
+
+
 @dataclass
 class NodeReportBuilder:
     """
@@ -122,6 +180,9 @@ class NodeReportBuilder:
 
         artifacts: List[str] = []
         seen_artifacts: set[str] = set()
+        action_artifacts: List[Dict[str, str]] = []
+        seen_action_artifacts: set[str] = set()
+        action_artifact_diagnostics: List[Dict[str, Any]] = []
 
         def _add_artifact(path: str) -> None:
             """
@@ -136,6 +197,49 @@ class NodeReportBuilder:
                 return
             artifacts.append(p)
             seen_artifacts.add(p)
+
+        def _add_action_artifact(summary: Dict[str, str]) -> None:
+            """记录 action artifact reference 摘要与 artifacts locator。"""
+
+            artifact_id = summary["artifact_id"]
+            if artifact_id in seen_action_artifacts:
+                return
+            seen_action_artifacts.add(artifact_id)
+            action_artifacts.append(dict(summary))
+            _add_artifact(_action_artifact_ref(summary))
+
+        def _extract_action_artifacts(data: Any, *, source: str) -> List[Dict[str, str]]:
+            """从 action observation data 中提取 artifact reference 摘要。"""
+
+            if not isinstance(data, dict):
+                return []
+            raw_items: List[Any] = []
+            for key in ("artifact_refs", "artifacts"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    raw_items.extend(value)
+            summaries: List[Dict[str, str]] = []
+            seen_in_payload: set[str] = set()
+            for index, item in enumerate(raw_items):
+                summary = _summarize_action_artifact(item)
+                if summary is None:
+                    action_artifact_diagnostics.append(
+                        {"code": "ACTION_ARTIFACT_INVALID", "index": index, "source": source}
+                    )
+                    continue
+                if summary["artifact_id"] in seen_in_payload:
+                    continue
+                seen_in_payload.add(summary["artifact_id"])
+                summaries.append(summary)
+                _add_action_artifact(summary)
+            return summaries
+
+        def _has_action_artifact_container(data: Any) -> bool:
+            """判断 data 是否带有 action artifact 容器字段。"""
+
+            if not isinstance(data, dict):
+                return False
+            return isinstance(data.get("artifact_refs"), list) or isinstance(data.get("artifacts"), list)
 
         # call_id -> aggregated fields
         tool_calls: Dict[str, Dict[str, Any]] = {}
@@ -305,7 +409,11 @@ class NodeReportBuilder:
                             t["error_kind"] = error_kind
                         data = result.get("data")
                         if isinstance(data, dict):
-                            t["data"] = data
+                            artifact_summaries = _extract_action_artifacts(data, source="tool_call_finished")
+                            if artifact_summaries or _has_action_artifact_container(data):
+                                t["data"] = {"artifact_refs": artifact_summaries}
+                            else:
+                                t["data"] = data
 
             if ev.type in ("run_completed", "run_failed", "run_cancelled", "run_waiting_human"):
                 # skills-runtime-sdk>=1.0 使用 `wal_locator` 作为 WAL/事件证据链定位符；
@@ -437,6 +545,12 @@ class NodeReportBuilder:
                     else {}
                 ),
                 **({"tool_safety": tool_safety} if tool_safety else {}),
+                **({"agently_action_artifacts": action_artifacts} if action_artifacts else {}),
+                **(
+                    {"agently_action_artifact_diagnostics": action_artifact_diagnostics}
+                    if action_artifact_diagnostics
+                    else {}
+                ),
             },
         )
         return report

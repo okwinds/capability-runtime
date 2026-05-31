@@ -12,6 +12,7 @@ from .capability import (
 )
 from .chat_backend import ChatBackendProtocol
 from .context import ExecutionContext, RecursionLimitError
+from .dynamic_workflow import DynamicWorkflowNode, DynamicWorkflowPlan
 from .workflow import (
     ConditionalStep,
     InputMapping,
@@ -32,6 +33,8 @@ __all__ = [
     "AgentIOSchema",
     "PromptRenderMode",
     "ChatBackendProtocol",
+    "DynamicWorkflowNode",
+    "DynamicWorkflowPlan",
     "WorkflowSpec",
     "Step",
     "LoopStep",

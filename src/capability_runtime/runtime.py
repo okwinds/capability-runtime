@@ -14,11 +14,17 @@ import copy
 import time
 import uuid
 from dataclasses import replace
-from typing import Any, AsyncIterator, Dict, List, Optional, Union
+from typing import Any, AsyncIterator, Dict, List, Mapping, Optional, Union
 
 from skills_runtime.core.contracts import AgentEvent
 
 from .config import RuntimeConfig
+from .dynamic_workflow import (
+    DynamicWorkflowPlanError,
+    compile_task_dag,
+    topological_dynamic_groups,
+    validate_dynamic_workflow_plan,
+)
 from .guards import ExecutionGuards
 from .host_protocol import (
     ApprovalTicket,
@@ -33,9 +39,10 @@ from .output_validator import OutputValidator
 from .protocol.agent import AgentSpec
 from .protocol.capability import CapabilityKind, CapabilityResult, CapabilityStatus
 from .protocol.context import ExecutionContext, RecursionLimitError
+from .protocol.dynamic_workflow import DynamicWorkflowNode, DynamicWorkflowPlan
 from .protocol.workflow import WorkflowSpec
 from .registry import AnySpec, CapabilityRegistry, _get_base
-from .reporting.node_report import build_fail_closed_report
+from .reporting.node_report import attach_agently_bridge_diagnostics, build_fail_closed_report
 from .sdk_lifecycle import (
     SdkLifecycle,
     _normalize_skills_config_for_skills_runtime,
@@ -731,6 +738,181 @@ class Runtime(RuntimeUIEventsMixin):
             )
         )
 
+    def compile_dynamic_workflow_plan(self, task_dag: Mapping[str, Any] | Any) -> DynamicWorkflowPlan:
+        """
+        编译 Dynamic DAG preview plan。
+
+        说明：
+        - 输入可以是 TaskDAG-like dict/object，但输出必须是本仓中立 `DynamicWorkflowPlan`；
+        - 编译阶段会按当前 registry 校验 capability binding，避免把上游对象透传到执行层。
+        """
+
+        max_nodes = int(getattr(self._config, "max_dynamic_nodes", 64))
+        if isinstance(task_dag, DynamicWorkflowPlan):
+            validate_dynamic_workflow_plan(task_dag, max_nodes=max_nodes)
+            return task_dag
+        return compile_task_dag(
+            task_dag,
+            registry_ids=set(self._registry.list_ids()),
+            max_nodes=max_nodes,
+        )
+
+    async def run_dynamic_workflow(
+        self,
+        plan: DynamicWorkflowPlan | Mapping[str, Any],
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+    ) -> CapabilityResult:
+        """执行 Dynamic DAG preview，并返回终态 CapabilityResult。"""
+
+        terminal: CapabilityResult | None = None
+        async for item in self.run_dynamic_workflow_stream(plan, input=input, context=context):
+            if isinstance(item, CapabilityResult):
+                terminal = item
+        if terminal is not None:
+            return terminal
+        run_id = context.run_id if context is not None else uuid.uuid4().hex
+        return self._build_missing_terminal_result(
+            run_id=run_id,
+            capability_id="dynamic_workflow",
+            source="runtime.run_dynamic_workflow",
+            error="Runtime.run_dynamic_workflow_stream produced no terminal CapabilityResult",
+        )
+
+    async def run_dynamic_workflow_stream(
+        self,
+        plan: DynamicWorkflowPlan | Mapping[str, Any],
+        *,
+        input: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None,
+    ) -> AsyncIterator[Union[WorkflowStreamEvent, CapabilityResult]]:
+        """
+        流式执行 Dynamic DAG preview。
+
+        事件只使用本仓 workflow.* 轻量事件；每个节点执行只通过 `Runtime.run()`。
+        """
+
+        ctx = context or ExecutionContext(run_id=uuid.uuid4().hex, max_depth=self._config.max_depth)
+        started = time.monotonic()
+        try:
+            compiled = self.compile_dynamic_workflow_plan(plan)
+        except DynamicWorkflowPlanError as exc:
+            yield self._build_dynamic_workflow_error_result(
+                run_id=ctx.run_id,
+                graph_id=_extract_dynamic_graph_id(plan),
+                error=str(exc),
+                error_code=exc.error_code,
+                completion_reason="dynamic_dag_compile_failed",
+                node_summaries={},
+                started=started,
+            )
+            return
+
+        workflow_instance_id = f"dynamic-dag:{ctx.run_id}:{compiled.graph_id}"
+        yield {
+            "type": "workflow.dynamic_dag.planned",
+            "run_id": ctx.run_id,
+            "workflow_id": compiled.graph_id,
+            "workflow_instance_id": workflow_instance_id,
+            "graph_id": compiled.graph_id,
+            "plan_hash": compiled.plan_hash,
+            "node_count": len(compiled.nodes),
+            "source": compiled.source,
+        }
+
+        node_summaries: dict[str, dict[str, Any]] = {}
+        node_outputs: dict[str, Any] = {}
+        blocked_nodes: set[str] = set()
+        first_error: tuple[str, str] | None = None
+
+        for group in topological_dynamic_groups(compiled):
+            for node in group:
+                if any(dep in blocked_nodes for dep in node.depends_on):
+                    node_summaries[node.id] = self._build_dynamic_node_summary(node, status="skipped", skip_reason="dependency_failed")
+                    blocked_nodes.add(node.id)
+                    yield self._dynamic_node_event(
+                        "workflow.dynamic_dag.node.finished",
+                        ctx=ctx,
+                        plan=compiled,
+                        workflow_instance_id=workflow_instance_id,
+                        node=node,
+                        status="skipped",
+                    )
+                    continue
+
+                if not node.capability_id or not self._registry.has(node.capability_id):
+                    node_summaries[node.id] = self._build_dynamic_node_summary(node, status="failed", error_code="DYNAMIC_DAG_NODE_UNRESOLVED")
+                    blocked_nodes.add(node.id)
+                    if first_error is None:
+                        first_error = ("DYNAMIC_DAG_NODE_UNRESOLVED", f"Dynamic DAG node cannot resolve a registered capability: {node.id}")
+                    yield self._dynamic_node_event(
+                        "workflow.dynamic_dag.node.finished",
+                        ctx=ctx,
+                        plan=compiled,
+                        workflow_instance_id=workflow_instance_id,
+                        node=node,
+                        status="failed",
+                        error_code="DYNAMIC_DAG_NODE_UNRESOLVED",
+                    )
+                    continue
+
+                yield self._dynamic_node_event(
+                    "workflow.dynamic_dag.node.started",
+                    ctx=ctx,
+                    plan=compiled,
+                    workflow_instance_id=workflow_instance_id,
+                    node=node,
+                    status="running",
+                )
+                node_input = dict(node.inputs)
+                node_input["workflow_input"] = dict(input or {})
+                node_input["dependency_results"] = {dep: node_outputs.get(dep) for dep in node.depends_on}
+
+                result = await self.run(node.capability_id, input=node_input, context=ctx)
+                if result.status == CapabilityStatus.SUCCESS:
+                    node_outputs[node.id] = result.output
+                    node_summaries[node.id] = self._build_dynamic_node_summary(node, status="success", output=result.output)
+                    yield self._dynamic_node_event(
+                        "workflow.dynamic_dag.node.finished",
+                        ctx=ctx,
+                        plan=compiled,
+                        workflow_instance_id=workflow_instance_id,
+                        node=node,
+                        status="success",
+                    )
+                    continue
+
+                blocked_nodes.add(node.id)
+                error_code = result.error_code or "DYNAMIC_DAG_NODE_FAILED"
+                node_summaries[node.id] = self._build_dynamic_node_summary(
+                    node,
+                    status="failed",
+                    error_code=error_code,
+                    error=result.error,
+                )
+                if first_error is None:
+                    first_error = ("DYNAMIC_DAG_NODE_FAILED", result.error or f"Dynamic DAG node failed: {node.id}")
+                yield self._dynamic_node_event(
+                    "workflow.dynamic_dag.node.finished",
+                    ctx=ctx,
+                    plan=compiled,
+                    workflow_instance_id=workflow_instance_id,
+                    node=node,
+                    status="failed",
+                    error_code=error_code,
+                )
+
+        terminal = self._build_dynamic_workflow_terminal_result(
+            run_id=ctx.run_id,
+            plan=compiled,
+            node_summaries=node_summaries,
+            node_outputs=node_outputs,
+            first_error=first_error,
+            started=started,
+        )
+        yield terminal
+
     def bind_runtime_server(self) -> None:
         """
         若配置了 runtime_server，则显式把本地 Runtime 绑定给它。
@@ -902,13 +1084,19 @@ class Runtime(RuntimeUIEventsMixin):
         RuntimeServices 协议方法：构造 fail-closed NodeReport。
         """
 
-        return build_fail_closed_report(
+        report = build_fail_closed_report(
             run_id=run_id,
             status=status,
             reason=reason,
             completion_reason=completion_reason,
             meta=meta,
         )
+        attach_agently_bridge_diagnostics(
+            report,
+            mode=self._config.mode,
+            requester_strategy=self._config.effective_requester_strategy,
+        )
+        return report
 
     def apply_output_validation(
         self,
@@ -975,6 +1163,183 @@ class Runtime(RuntimeUIEventsMixin):
             prompt_profile=prompt_profile,
             precomposed_messages=precomposed_messages,
         )
+
+    def _build_dynamic_node_summary(
+        self,
+        node: DynamicWorkflowNode,
+        *,
+        status: str,
+        output: Any = None,
+        error_code: str | None = None,
+        error: str | None = None,
+        skip_reason: str | None = None,
+    ) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "id": node.id,
+            "kind": node.kind,
+            "status": status,
+            "capability_id": node.capability_id,
+            "depends_on": list(node.depends_on),
+            "approval_required": node.approval_required,
+        }
+        if error_code:
+            summary["error_code"] = error_code
+        if error:
+            summary["error"] = error
+        if skip_reason:
+            summary["skip_reason"] = skip_reason
+        if output is not None:
+            summary["output_type"] = type(output).__name__
+        return summary
+
+    def _build_dynamic_workflow_terminal_result(
+        self,
+        *,
+        run_id: str,
+        plan: DynamicWorkflowPlan,
+        node_summaries: dict[str, dict[str, Any]],
+        node_outputs: dict[str, Any],
+        first_error: tuple[str, str] | None,
+        started: float,
+    ) -> CapabilityResult:
+        meta = {
+            "dynamic_dag": {
+                "graph_id": plan.graph_id,
+                "plan_hash": plan.plan_hash,
+                "node_count": len(plan.nodes),
+                "source": plan.source,
+                "nodes": node_summaries,
+            }
+        }
+        if first_error is None:
+            report = NodeReport(
+                status="success",
+                reason=None,
+                completion_reason="dynamic_dag_completed",
+                engine={"name": "capability-runtime", "component": "dynamic_workflow"},
+                bridge={"name": "capability-runtime"},
+                run_id=run_id,
+                turn_id=None,
+                events_path=None,
+                activated_skills=[],
+                tool_calls=[],
+                artifacts=[],
+                meta=meta,
+            )
+            attach_agently_bridge_diagnostics(
+                report,
+                mode=self._config.mode,
+                requester_strategy=self._config.effective_requester_strategy,
+            )
+            return CapabilityResult(
+                status=CapabilityStatus.SUCCESS,
+                output={"graph_id": plan.graph_id, "plan_hash": plan.plan_hash, "nodes": node_summaries, "outputs": node_outputs},
+                report=report,
+                node_report=report,
+                duration_ms=(time.monotonic() - started) * 1000,
+            )
+
+        error_code, error = first_error
+        report = build_fail_closed_report(
+            run_id=run_id,
+            status="failed",
+            reason="dynamic_dag_failed",
+            completion_reason="dynamic_dag_failed",
+            meta=meta,
+        )
+        attach_agently_bridge_diagnostics(
+            report,
+            mode=self._config.mode,
+            requester_strategy=self._config.effective_requester_strategy,
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error=error,
+            error_code=error_code,
+            output={"graph_id": plan.graph_id, "plan_hash": plan.plan_hash, "nodes": node_summaries, "outputs": node_outputs},
+            report=report,
+            node_report=report,
+            duration_ms=(time.monotonic() - started) * 1000,
+        )
+
+    def _build_dynamic_workflow_error_result(
+        self,
+        *,
+        run_id: str,
+        graph_id: str,
+        error: str,
+        error_code: str,
+        completion_reason: str,
+        node_summaries: dict[str, dict[str, Any]],
+        started: float,
+    ) -> CapabilityResult:
+        report = build_fail_closed_report(
+            run_id=run_id,
+            status="failed",
+            reason="dynamic_dag_failed",
+            completion_reason=completion_reason,
+            meta={
+                "dynamic_dag": {
+                    "graph_id": graph_id,
+                    "plan_hash": None,
+                    "node_count": len(node_summaries),
+                    "source": "task_dag",
+                    "nodes": node_summaries,
+                }
+            },
+        )
+        attach_agently_bridge_diagnostics(
+            report,
+            mode=self._config.mode,
+            requester_strategy=self._config.effective_requester_strategy,
+        )
+        return CapabilityResult(
+            status=CapabilityStatus.FAILED,
+            error=error,
+            error_code=error_code,
+            report=report,
+            node_report=report,
+            duration_ms=(time.monotonic() - started) * 1000,
+        )
+
+    def _dynamic_node_event(
+        self,
+        event_type: str,
+        *,
+        ctx: ExecutionContext,
+        plan: DynamicWorkflowPlan,
+        workflow_instance_id: str,
+        node: DynamicWorkflowNode,
+        status: str,
+        error_code: str | None = None,
+    ) -> WorkflowStreamEvent:
+        event: WorkflowStreamEvent = {
+            "type": event_type,
+            "run_id": ctx.run_id,
+            "workflow_id": plan.graph_id,
+            "workflow_instance_id": workflow_instance_id,
+            "graph_id": plan.graph_id,
+            "plan_hash": plan.plan_hash,
+            "dag_node_id": node.id,
+            "capability_id": node.capability_id,
+            "status": status,
+        }
+        if error_code:
+            event["error_code"] = error_code
+        return event
+
+
+def _extract_dynamic_graph_id(value: Any) -> str:
+    if isinstance(value, DynamicWorkflowPlan):
+        return value.graph_id
+    if isinstance(value, Mapping):
+        graph_id = value.get("graph_id")
+        if isinstance(graph_id, str) and graph_id.strip():
+            return graph_id.strip()
+    graph_id = getattr(value, "graph_id", None)
+    if isinstance(graph_id, str) and graph_id.strip():
+        return graph_id.strip()
+    return "dynamic-dag"
 
 
 __all__ = ["Runtime"]

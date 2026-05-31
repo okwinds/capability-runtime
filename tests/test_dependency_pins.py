@@ -25,3 +25,19 @@ def test_dependency_pins_skills_runtime_sdk_version() -> None:
     assert '"skills-runtime-sdk==0.1.5.post1"' not in pyproject_text
     assert '"skills-runtime-sdk==1.0.4.post1"' not in pyproject_text
     assert '"skills-runtime-sdk==0.1.4.post2"' not in pyproject_text
+
+
+def test_dependency_pins_agently_version() -> None:
+    """
+    锁死 Agently 目标版本，避免本次能力升级退化成 4.0.8 兼容路径。
+
+    - 入参：无（从仓库根目录读取 `pyproject.toml`）
+    - 返回：无；断言失败即视为 pin 未对齐目标上游事实源
+    """
+
+    repo_root = Path(__file__).resolve().parents[1]
+    pyproject_text = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"agently==4.1.3.1"' in pyproject_text
+    assert '"agently==4.0.8"' not in pyproject_text
+    assert '"agently==4.1.3"' not in pyproject_text

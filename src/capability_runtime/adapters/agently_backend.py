@@ -20,8 +20,9 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, cast
 
 from skills_runtime.llm.chat_sse import ChatCompletionsSseParser, ChatStreamEvent
 from skills_runtime.llm.protocol import ChatBackend, ChatRequest
-from skills_runtime.tools.protocol import ToolSpec, tool_spec_to_openai_tool
+from skills_runtime.tools.protocol import ToolCall, ToolSpec, tool_spec_to_openai_tool
 
+from ..config import ProviderRequesterStrategy
 from ..logging_utils import log_suppressed_exception
 from ..utils.usage import _usage_int
 
@@ -62,9 +63,117 @@ class AgentlyBackendConfig:
 
     参数：
     - `requester_factory`：默认使用 Agently OpenAICompatible；测试可注入 FakeRequester。
+    - `requester_strategy`：Agently requester 策略；默认保留 chat.completions legacy 路径。
     """
 
     requester_factory: AgentlyRequesterFactory
+    requester_strategy: ProviderRequesterStrategy = "chat_completions"
+
+
+def _parse_tool_call_arguments(raw_arguments: str) -> Dict[str, Any]:
+    """解析 tool call arguments；失败时保留 raw_arguments，由上游决定如何处理。"""
+
+    if not raw_arguments.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_arguments)
+    except Exception as exc:
+        log_suppressed_exception(
+            context="parse_responses_tool_call_arguments",
+            exc=exc,
+            extra={"raw_len": len(raw_arguments)},
+        )
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _responses_content_parts(content: Any) -> List[Dict[str, Any]]:
+    """把 OpenAI chat message content 归一为 Responses input content parts。"""
+
+    if isinstance(content, list):
+        parts: List[Dict[str, Any]] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append({"type": "input_text", "text": part})
+                continue
+            if not isinstance(part, dict):
+                parts.append({"type": "input_text", "text": str(part)})
+                continue
+            part_type = part.get("type")
+            if part_type == "text":
+                parts.append({"type": "input_text", "text": str(part.get("text", ""))})
+            elif part_type in ("input_text", "input_image", "input_file"):
+                parts.append(dict(part))
+            else:
+                parts.append({"type": "input_text", "text": str(part.get("text", ""))})
+        return parts
+    return [{"type": "input_text", "text": str(content or "")}]
+
+
+def _responses_input_from_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """把 chat.completions messages 显式编译为 Responses `input`。"""
+
+    items: List[Dict[str, Any]] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role", "user"))
+        if role == "assistant" and isinstance(message.get("tool_calls"), list):
+            for tool_call in message.get("tool_calls") or []:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+                call_id = str(tool_call.get("id") or tool_call.get("call_id") or "").strip()
+                name = str(function.get("name") or tool_call.get("name") or "").strip()
+                arguments = function.get("arguments", tool_call.get("arguments", ""))
+                if not call_id or not name:
+                    continue
+                items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": name,
+                        "arguments": str(arguments or ""),
+                    }
+                )
+            content = message.get("content")
+            if content in (None, ""):
+                continue
+        if role == "tool":
+            call_id = str(message.get("tool_call_id") or message.get("call_id") or "").strip()
+            if call_id:
+                items.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": str(message.get("content") or ""),
+                    }
+                )
+            continue
+        items.append(
+            {
+                "type": "message",
+                "role": role,
+                "content": _responses_content_parts(message.get("content", "")),
+            }
+        )
+    return items
+
+
+def _responses_tool_from_spec(spec: ToolSpec) -> Dict[str, Any]:
+    """把 SDK ToolSpec 编译为 Responses function tool wire 形状。"""
+
+    openai_tool = tool_spec_to_openai_tool(spec)
+    function = openai_tool.get("function") if isinstance(openai_tool, dict) else None
+    if not isinstance(function, dict):
+        return dict(openai_tool)
+    return {
+        "type": "function",
+        "name": str(function.get("name", "")),
+        "description": str(function.get("description", "")),
+        "parameters": dict(function.get("parameters") or {}),
+        "strict": bool(function.get("strict", False)),
+    }
 
 def _normalize_usage_payload(
     *,
@@ -105,7 +214,7 @@ def _normalize_usage_payload(
     return payload if any(value is not None for value in payload.values()) else None
 
 
-def _extract_usage_payload_from_sse_data(data: str) -> Optional[Dict[str, Any]]:
+def _extract_usage_payload_from_sse_data(data: str, *, request_model: Any = None) -> Optional[Dict[str, Any]]:
     """
     从原始 SSE `data` 字符串中提取 usage 摘要。
 
@@ -133,7 +242,7 @@ def _extract_usage_payload_from_sse_data(data: str) -> Optional[Dict[str, Any]]:
         request_id = obj.get("id")
     return _normalize_usage_payload(
         usage=obj.get("usage"),
-        model=obj.get("model"),
+        model=obj.get("model") or request_model,
         request_id=request_id,
         provider=obj.get("provider"),
     )
@@ -197,6 +306,11 @@ class AgentlyChatBackend(ChatBackend):
         参数：
         - `request`：上游 `ChatRequest` 参数包（包含 model/messages/tools 与可选推理参数）
         """
+
+        if self._config.requester_strategy == "responses":
+            async for event in self._stream_responses_chat(request):
+                yield event
+            return
 
         usage_sink = None
         if isinstance(getattr(request, "extra", None), dict):
@@ -348,7 +462,7 @@ class AgentlyChatBackend(ChatBackend):
                     if not isinstance(data, str):
                         continue
 
-                    usage_payload = _extract_usage_payload_from_sse_data(data)
+                    usage_payload = _extract_usage_payload_from_sse_data(data, request_model=request.model)
                     if usage_payload is not None and usage_sink is not None:
                         try:
                             usage_sink(dict(usage_payload))
@@ -407,6 +521,203 @@ class AgentlyChatBackend(ChatBackend):
                 yield deferred_completed
             return
 
+    async def _stream_responses_chat(self, request: ChatRequest) -> AsyncIterator[ChatStreamEvent]:
+        """
+        发起一次 Responses streaming 请求并归一化为 SDK `ChatStreamEvent`。
+
+        Agently `OpenAIResponsesCompatible` 的 stream event 与 chat.completions SSE 不同；
+        本方法只在 adapter 内部做语义归一，不新增第二套下游 API。
+        """
+
+        if not isinstance(request.messages, list):
+            raise TypeError("messages must be a list[dict]")
+
+        usage_sink = None
+        if isinstance(getattr(request, "extra", None), dict):
+            candidate_sink = request.extra.get("_caprt_usage_sink")
+            if callable(candidate_sink):
+                usage_sink = candidate_sink
+
+        requester = self._config.requester_factory()
+        request_data = requester.generate_request_data()
+        request_data.data["input"] = _responses_input_from_messages(request.messages)
+        request_data.request_options["model"] = request.model
+        request_data.request_options["stream"] = True
+        request_data.stream = True
+
+        if request.temperature is not None:
+            request_data.request_options["temperature"] = float(request.temperature)
+        if request.max_tokens is not None:
+            request_data.request_options["max_output_tokens"] = int(request.max_tokens)
+        if request.top_p is not None:
+            request_data.request_options["top_p"] = float(request.top_p)
+        if request.response_format is not None:
+            request_data.request_options["text"] = {"format": dict(request.response_format)}
+
+        tools_wire = [_responses_tool_from_spec(spec) for spec in list(request.tools or [])]
+        if tools_wire:
+            request_data.request_options["tools"] = tools_wire
+        else:
+            request_data.request_options.pop("tools", None)
+
+        stream_or_coro = requester.request_model(request_data)
+        stream: AsyncIterator[tuple[str, Any]]
+        if hasattr(stream_or_coro, "__aiter__"):
+            stream = cast(AsyncIterator[tuple[str, Any]], stream_or_coro)
+        else:
+            stream = await stream_or_coro
+
+        tool_states: Dict[str, Dict[str, Any]] = {}
+        emitted_tool_calls: set[str] = set()
+
+        def _state_for(call_id: str, *, output_index: Any = None) -> Dict[str, Any]:
+            index = output_index if isinstance(output_index, int) else len(tool_states)
+            return tool_states.setdefault(
+                call_id,
+                {
+                    "call_id": call_id,
+                    "index": index,
+                    "name": "",
+                    "arguments": "",
+                },
+            )
+
+        def _tool_event_from_state(state: Dict[str, Any]) -> ChatStreamEvent | None:
+            call_id = str(state.get("call_id", "")).strip()
+            if not call_id or call_id in emitted_tool_calls:
+                return None
+            name = str(state.get("name", "")).strip()
+            raw_arguments = str(state.get("arguments", ""))
+            emitted_tool_calls.add(call_id)
+            return ChatStreamEvent(
+                type="tool_calls",
+                tool_calls=[
+                    ToolCall(
+                        call_id=call_id,
+                        name=name,
+                        args=_parse_tool_call_arguments(raw_arguments),
+                        raw_arguments=raw_arguments,
+                    )
+                ],
+            )
+
+        async for event_name, data in stream:
+            if event_name == "error":
+                error = data if isinstance(data, BaseException) else RuntimeError(f"Agently requester error: {data!r}")
+                raise error
+            if not isinstance(data, str):
+                continue
+            raw = data.strip()
+            if not raw or raw in ("[DONE]", "DONE"):
+                continue
+            try:
+                loaded = json.loads(raw)
+            except Exception as exc:
+                log_suppressed_exception(
+                    context="parse_responses_stream_json",
+                    exc=exc,
+                    extra={"raw_len": len(raw), "event": str(event_name)},
+                )
+                continue
+            if not isinstance(loaded, dict):
+                continue
+
+            payload_type = str(loaded.get("type") or event_name)
+            if payload_type == "response.output_text.delta":
+                yield ChatStreamEvent(type="text_delta", text=str(loaded.get("delta", "")))
+                continue
+
+            if payload_type == "response.output_item.added":
+                item = loaded.get("item")
+                if isinstance(item, dict) and item.get("type") == "function_call":
+                    call_id = str(item.get("call_id", "")).strip()
+                    if call_id:
+                        state = _state_for(call_id, output_index=loaded.get("output_index"))
+                        if isinstance(item.get("name"), str):
+                            state["name"] = item["name"]
+                        if isinstance(item.get("arguments"), str):
+                            state["arguments"] = item["arguments"]
+                continue
+
+            if payload_type == "response.function_call_arguments.delta":
+                call_id = str(loaded.get("call_id", "")).strip()
+                if call_id:
+                    state = _state_for(call_id, output_index=loaded.get("output_index"))
+                    state["arguments"] = str(state.get("arguments", "")) + str(loaded.get("delta", ""))
+                continue
+
+            if payload_type == "response.function_call_arguments.done":
+                call_id = str(loaded.get("call_id", "")).strip()
+                if call_id:
+                    state = _state_for(call_id, output_index=loaded.get("output_index"))
+                    if isinstance(loaded.get("arguments"), str):
+                        state["arguments"] = loaded["arguments"]
+                    event = _tool_event_from_state(state)
+                    if event is not None:
+                        yield event
+                continue
+
+            if payload_type == "response.output_item.done":
+                item = loaded.get("item")
+                if isinstance(item, dict) and item.get("type") == "function_call":
+                    call_id = str(item.get("call_id", "")).strip()
+                    if call_id:
+                        state = _state_for(call_id, output_index=loaded.get("output_index"))
+                        if isinstance(item.get("name"), str):
+                            state["name"] = item["name"]
+                        if isinstance(item.get("arguments"), str):
+                            state["arguments"] = item["arguments"]
+                        event = _tool_event_from_state(state)
+                        if event is not None:
+                            yield event
+                continue
+
+            if payload_type == "response.completed":
+                response_payload = loaded.get("response", loaded)
+                response = response_payload if isinstance(response_payload, dict) else {}
+                for state in list(tool_states.values()):
+                    event = _tool_event_from_state(state)
+                    if event is not None:
+                        yield event
+
+                usage_payload = _normalize_usage_payload(
+                    usage=response.get("usage"),
+                    model=response.get("model") or request.model,
+                    request_id=response.get("id"),
+                    provider=response.get("provider") or "openai-responses",
+                )
+                if usage_payload is not None and usage_sink is not None:
+                    try:
+                        usage_sink(dict(usage_payload))
+                    except Exception as sink_exc:
+                        log_suppressed_exception(
+                            context="usage_sink_callback",
+                            exc=sink_exc,
+                            extra={"source": "agently_responses_backend"},
+                        )
+                usage = response.get("usage")
+                completed_usage = {
+                    "input_tokens": _usage_int(usage.get("input_tokens")) if isinstance(usage, dict) else None,
+                    "output_tokens": _usage_int(usage.get("output_tokens")) if isinstance(usage, dict) else None,
+                    "total_tokens": _usage_int(usage.get("total_tokens")) if isinstance(usage, dict) else None,
+                }
+                completed_usage = {k: v for k, v in completed_usage.items() if v is not None}
+                finish_reason = "tool_calls" if emitted_tool_calls else "stop"
+                yield ChatStreamEvent(
+                    type="completed",
+                    finish_reason=finish_reason,
+                    usage=completed_usage or None,
+                    request_id=str(response.get("id")) if response.get("id") is not None else None,
+                    provider=str(response.get("provider") or "openai-responses"),
+                )
+                return
+
+        for state in list(tool_states.values()):
+            event = _tool_event_from_state(state)
+            if event is not None:
+                yield event
+        yield ChatStreamEvent(type="completed", finish_reason="tool_calls" if emitted_tool_calls else "stop")
+
 
 def build_openai_compatible_requester_factory(*, agently_agent: Any) -> AgentlyRequesterFactory:
     """
@@ -437,3 +748,51 @@ def build_openai_compatible_requester_factory(*, agently_agent: Any) -> AgentlyR
         return OpenAICompatible(prompt, settings)
 
     return _factory
+
+
+def build_openai_responses_compatible_requester_factory(*, agently_agent: Any) -> AgentlyRequesterFactory:
+    """
+    构造 Responses requester_factory（复用 Agently OpenAIResponsesCompatible builtins）。
+
+    参数：
+    - `agently_agent`：宿主提供的 Agently agent（需包含 `plugin_manager` 与 `settings`）。
+
+    返回：
+    - requester_factory：无参可调用对象，返回 OpenAIResponsesCompatible requester 实例。
+    """
+
+    from agently.core import Prompt
+    from agently.builtins.plugins.ModelRequester.OpenAIResponsesCompatible import OpenAIResponsesCompatible
+
+    plugin_manager = getattr(agently_agent, "plugin_manager", None)
+    settings = getattr(agently_agent, "settings", None)
+    if plugin_manager is None or settings is None:
+        raise TypeError("agently_agent must provide .plugin_manager and .settings")
+
+    def _factory() -> AgentlyRequester:
+        """按当前 agently settings 构建一次 Responses requester。"""
+
+        prompt = Prompt(plugin_manager=plugin_manager, parent_settings=settings, name="capability-runtime-responses-backend")
+        prompt.set("input", "bridge")
+        return OpenAIResponsesCompatible(prompt, settings)
+
+    return _factory
+
+
+def build_agently_requester_factory(
+    *,
+    agently_agent: Any,
+    strategy: ProviderRequesterStrategy,
+) -> AgentlyRequesterFactory:
+    """
+    按 RuntimeConfig.requester_strategy 选择 Agently requester。
+
+    默认 `chat_completions` 走既有 OpenAICompatible；`responses` 显式 opt-in
+    到 OpenAIResponsesCompatible。这里仅选择 requester，Responses stream 归一化在 Slice B 落地。
+    """
+
+    if strategy == "chat_completions":
+        return build_openai_compatible_requester_factory(agently_agent=agently_agent)
+    if strategy == "responses":
+        return build_openai_responses_compatible_requester_factory(agently_agent=agently_agent)
+    raise ValueError(f"unsupported agently requester strategy: {strategy!r}")

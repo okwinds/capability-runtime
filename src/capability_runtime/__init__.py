@@ -4,7 +4,8 @@ from __future__ import annotations
 __version__ = "0.1.4"
 
 # === 统一入口 ===
-from .config import CustomTool, RuntimeConfig
+from .config import AgentlyRequesterStrategy, CustomTool, ProviderRequesterStrategy, RuntimeConfig
+from .context_pack import RuntimeContextRecordRef, RuntimeRecallContextPack
 from .runtime import Runtime
 from .service_facade import RuntimeServiceFacade, RuntimeServiceHandle, RuntimeServiceRequest, RuntimeSession
 from .structured_stream import StructuredStreamEvent
@@ -27,6 +28,7 @@ from .protocol.capability import (
     CapabilityStatus,
 )
 from .protocol.context import ExecutionContext
+from .protocol.dynamic_workflow import DynamicWorkflowNode, DynamicWorkflowPlan
 from .protocol.workflow import (
     ConditionalStep,
     InputMapping,
@@ -45,8 +47,12 @@ __all__ = [
     # Runtime
     "Runtime",
     "RuntimeConfig",
+    "ProviderRequesterStrategy",
+    "AgentlyRequesterStrategy",
     "CustomTool",
     "StructuredStreamEvent",
+    "RuntimeContextRecordRef",
+    "RuntimeRecallContextPack",
     # Reports
     "NodeReport",
     "NodeResult",
@@ -77,6 +83,8 @@ __all__ = [
     "AgentSpec",
     "AgentIOSchema",
     "PromptRenderMode",
+    "DynamicWorkflowNode",
+    "DynamicWorkflowPlan",
     "WorkflowSpec",
     "Step",
     "LoopStep",

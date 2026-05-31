@@ -11,8 +11,12 @@ def test_public_api_all_exports_are_stable() -> None:
         # Runtime
         "Runtime",
         "RuntimeConfig",
+        "ProviderRequesterStrategy",
+        "AgentlyRequesterStrategy",
         "CustomTool",
         "StructuredStreamEvent",
+        "RuntimeContextRecordRef",
+        "RuntimeRecallContextPack",
         # Reports
         "NodeReport",
         "NodeResult",
@@ -43,6 +47,8 @@ def test_public_api_all_exports_are_stable() -> None:
         "AgentSpec",
         "AgentIOSchema",
         "PromptRenderMode",
+        "DynamicWorkflowNode",
+        "DynamicWorkflowPlan",
         "WorkflowSpec",
         "Step",
         "LoopStep",

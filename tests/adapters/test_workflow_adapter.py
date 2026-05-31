@@ -878,7 +878,8 @@ async def test_workflow_run_stream_emits_lightweight_events() -> None:
 
     assert terminal is not None
     assert terminal.status == CapabilityStatus.SUCCESS
-    assert [e["type"] for e in events] == [
+    legacy_types = [e["type"] for e in events if e["type"] != "workflow.lifecycle.changed"]
+    assert legacy_types == [
         "workflow.started",
         "workflow.step.started",
         "workflow.step.finished",
@@ -886,6 +887,7 @@ async def test_workflow_run_stream_emits_lightweight_events() -> None:
         "workflow.step.finished",
         "workflow.finished",
     ]
+    assert any(e["type"] == "workflow.lifecycle.changed" for e in events)
     assert [e.get("step_id") for e in events if e["type"] == "workflow.step.started"] == ["s1", "s2"]
     assert events[-1]["status"] == "success"
 
