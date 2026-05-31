@@ -18,6 +18,7 @@ from skills_runtime.llm.protocol import ChatRequest
 from skills_runtime.skills.manager import SkillsManager
 
 from .config import CustomTool, RuntimeConfig, RuntimeMode, normalize_workspace_root
+from .errors import ProviderStreamTerminalError
 from .logging_utils import log_suppressed_exception
 from .protocol.chat_backend import ChatBackendProtocol
 from .utils.usage import extract_usage_metrics
@@ -114,7 +115,11 @@ class SdkLifecycle:
 
         override_tool_choice = _extract_tool_choice_override(llm_config)
         if override_tool_choice is not None:
-            backend = _ToolChoiceOverrideBackend(backend=backend, tool_choice=override_tool_choice)
+            backend = _ToolChoiceOverrideBackend(
+                backend=backend,
+                tool_choice=override_tool_choice,
+                after_tool_result=self._config.tool_choice_after_tool_result,
+            )
 
         override_response_format = _extract_response_format_override(llm_config)
         if override_response_format is not None:
@@ -391,7 +396,7 @@ def _extract_tool_choice_override(llm_config: Optional[Dict[str, Any]]) -> Optio
     elif isinstance(raw, dict):
         tool_choice = raw
     else:
-        return None
+        raise ValueError("llm_config.tool_choice must be a string or dict")
 
     if tool_choice is None:
         return None
@@ -541,9 +546,10 @@ class _ToolChoiceOverrideBackend:
     - 不强依赖 request 的具体实现（pydantic v1/v2 / dict / 普通对象 best-effort 兼容）。
     """
 
-    def __init__(self, *, backend: ChatBackendProtocol, tool_choice: Any) -> None:
+    def __init__(self, *, backend: ChatBackendProtocol, tool_choice: Any, after_tool_result: str | None = None) -> None:
         self._backend: ChatBackendProtocol = backend
         self._tool_choice: Any = tool_choice
+        self._after_tool_result: str | None = after_tool_result
 
     async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """
@@ -553,9 +559,13 @@ class _ToolChoiceOverrideBackend:
         - request：上游 SDK 生成的 ChatRequest（或兼容对象）
         """
 
+        tool_choice = self._tool_choice
+        if self._after_tool_result is not None and _request_has_tool_result_message(request=request):
+            tool_choice = self._after_tool_result
+
         raw_extra = getattr(request, "extra", None)
         extra = dict(raw_extra) if isinstance(raw_extra, dict) else {}
-        extra["tool_choice"] = self._tool_choice
+        extra["tool_choice"] = tool_choice
         forwarded = _clone_request_with_field_update(
             request,
             field_name="extra",
@@ -566,6 +576,20 @@ class _ToolChoiceOverrideBackend:
 
         async for ev in self._backend.stream_chat(forwarded):
             yield ev
+
+
+def _request_has_tool_result_message(*, request: ChatRequest) -> bool:
+    """
+    判断当前 LLM 请求是否已经包含工具执行结果。
+
+    默认不改写 `tool_choice`；只有 `RuntimeConfig.tool_choice_after_tool_result`
+    显式配置时，才在工具结果回注后的后续 turn 应用兼容策略。
+    """
+
+    messages = getattr(request, "messages", None)
+    if not isinstance(messages, list):
+        return False
+    return any(isinstance(message, dict) and str(message.get("role") or "") == "tool" for message in messages)
 
 
 class _ResponseFormatOverrideBackend:
@@ -647,6 +671,7 @@ class _UsageTapBackend:
     def __init__(self, *, backend: ChatBackendProtocol) -> None:
         self._backend: ChatBackendProtocol = backend
         self._usage_payloads: List[Dict[str, Any]] = []
+        self._provider_terminal_payloads: List[Dict[str, Any]] = []
 
     def _capture_usage(self, payload: Any) -> None:
         """记录一次 usage 摘要（fail-open；仅保留 dict 载荷）。"""
@@ -661,6 +686,13 @@ class _UsageTapBackend:
         self._usage_payloads.clear()
         return out
 
+    def drain_provider_terminal_payloads(self) -> List[Dict[str, Any]]:
+        """取出并清空 provider stream 非成功终态载荷。"""
+
+        out = list(self._provider_terminal_payloads)
+        self._provider_terminal_payloads.clear()
+        return out
+
     async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
         """注入 `_caprt_usage_sink` 后转发到底层 backend。"""
 
@@ -668,12 +700,16 @@ class _UsageTapBackend:
             request,
             lambda extra: _merge_usage_sink(extra=extra, sink=self._capture_usage),
         )
-        async for ev in self._backend.stream_chat(forwarded):
-            if getattr(ev, "type", None) == "llm_usage":
-                payload = getattr(ev, "payload", None)
-                if isinstance(payload, dict):
-                    self._capture_usage(payload)
-            yield ev
+        try:
+            async for ev in self._backend.stream_chat(forwarded):
+                if getattr(ev, "type", None) == "llm_usage":
+                    payload = getattr(ev, "payload", None)
+                    if isinstance(payload, dict):
+                        self._capture_usage(payload)
+                yield ev
+        except ProviderStreamTerminalError as exc:
+            self._provider_terminal_payloads.append(exc.to_control_payload())
+            raise
 
 
 class _AgentUsageEventBridge:
@@ -709,21 +745,40 @@ class _AgentUsageEventBridge:
         last_run_id = run_id or ""
         last_turn_id: Optional[str] = None
 
-        async for ev in self._agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
-            if ev.type == "llm_usage":
-                saw_llm_usage = True
-                pending_supplemental_usage.extend(self._usage_bridge_backend.drain_usage_payloads())
-                if pending_supplemental_usage:
-                    ev = _merge_supplemental_usage_metadata_event(
-                        ev=ev,
-                        supplemental_payloads=pending_supplemental_usage,
-                    )
-                    pending_supplemental_usage.clear()
-            if isinstance(ev.run_id, str) and ev.run_id:
-                last_run_id = ev.run_id
-            if isinstance(ev.turn_id, str) and ev.turn_id:
-                last_turn_id = ev.turn_id
-            yield ev
+        try:
+            async for ev in self._agent.run_stream_async(task, run_id=run_id, initial_history=initial_history):
+                if ev.type == "llm_usage":
+                    saw_llm_usage = True
+                    pending_supplemental_usage.extend(self._usage_bridge_backend.drain_usage_payloads())
+                    if pending_supplemental_usage:
+                        ev = _merge_supplemental_usage_metadata_event(
+                            ev=ev,
+                            supplemental_payloads=pending_supplemental_usage,
+                        )
+                        pending_supplemental_usage.clear()
+                if isinstance(ev.run_id, str) and ev.run_id:
+                    last_run_id = ev.run_id
+                if isinstance(ev.turn_id, str) and ev.turn_id:
+                    last_turn_id = ev.turn_id
+                if ev.type == "run_failed":
+                    for payload in self._usage_bridge_backend.drain_provider_terminal_payloads():
+                        yield AgentEvent(
+                            type="provider_stream_terminal",
+                            timestamp=_now_rfc3339(),
+                            run_id=last_run_id,
+                            turn_id=last_turn_id,
+                            payload=dict(payload),
+                        )
+                yield ev
+        except ProviderStreamTerminalError as exc:
+            yield AgentEvent(
+                type="provider_stream_terminal",
+                timestamp=_now_rfc3339(),
+                run_id=last_run_id,
+                turn_id=last_turn_id,
+                payload=exc.to_control_payload(),
+            )
+            raise
 
         if saw_llm_usage:
             # 上游 usage 已是 token 权威来源；清空未配对 payload，避免作为新 usage 事件造成双计。

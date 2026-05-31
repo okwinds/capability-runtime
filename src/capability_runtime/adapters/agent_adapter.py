@@ -20,12 +20,14 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Union
 from skills_runtime.core.contracts import AgentEvent
 from skills_runtime.core.errors import FrameworkIssue
 
+from ..errors import ProviderStreamTerminalError
 from ..logging_utils import log_suppressed_exception
 from ..protocol.agent import AgentSpec
 from ..protocol.capability import CapabilityResult, CapabilityStatus
 from ..protocol.context import ExecutionContext
 from ..reporting.node_report import NodeReportBuilder, attach_agently_bridge_diagnostics
 from ..services import RuntimeServices, map_node_status
+from ..types import NodeUsageReport
 
 # _build_task 使用的 prompt section 常量
 _SECTION_SYSTEM = "## 系统指令"
@@ -367,6 +369,57 @@ class AgentAdapter:
                 node_report=report,
             )
             return
+        except ProviderStreamTerminalError as exc:
+            provider_terminal = exc.to_control_payload()
+            if any(ev.type == "provider_stream_terminal" for ev in events):
+                events.append(
+                    AgentEvent(
+                        type="run_failed",
+                        timestamp="",
+                        run_id=context.run_id,
+                        turn_id=None,
+                        payload={"error_kind": exc.reason, "message": exc.message},
+                    )
+                )
+                report = NodeReportBuilder().build(events=events)
+                attach_agently_bridge_diagnostics(
+                    report,
+                    mode=getattr(self._services.config, "mode", ""),
+                    requester_strategy=getattr(self._services.config, "effective_requester_strategy", "chat_completions"),
+                )
+                report.meta["capability_id"] = spec.base.id
+                report.meta["source"] = "provider_stream"
+            else:
+                report = self._services.build_fail_closed_report(
+                    run_id=context.run_id,
+                    status=exc.status,
+                    reason=exc.reason,
+                    completion_reason=exc.completion_reason,
+                    meta={
+                        "capability_id": spec.base.id,
+                        "source": "provider_stream",
+                        "provider_terminal": provider_terminal,
+                        **prompt_plan.evidence,
+                    },
+                )
+                if exc.model is not None or exc.request_id is not None or exc.provider is not None:
+                    report.usage = NodeUsageReport(model=exc.model, request_id=exc.request_id, provider=exc.provider)
+            self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
+            _apply_on_event_error_evidence(report)
+            status = map_node_status(report)
+            error_code = (
+                str(provider_terminal.get("error_code"))
+                if isinstance(provider_terminal.get("error_code"), str)
+                else None
+            )
+            yield CapabilityResult(
+                status=status,
+                error=exc.message if status == CapabilityStatus.FAILED else None,
+                error_code=error_code,
+                report=report,
+                node_report=report,
+            )
+            return
         except Exception as exc:
             report = self._services.build_fail_closed_report(
                 run_id=context.run_id,
@@ -423,10 +476,20 @@ class AgentAdapter:
         )
 
         status = map_node_status(report)
+        provider_terminal = report.meta.get("provider_terminal") if isinstance(report.meta, dict) else None
+        terminal_error_code = None
+        if isinstance(provider_terminal, dict) and isinstance(provider_terminal.get("error_code"), str):
+            terminal_error_code = provider_terminal["error_code"]
+        terminal_error = None
+        if isinstance(provider_terminal, dict) and isinstance(provider_terminal.get("message"), str):
+            terminal_error = provider_terminal["message"]
+            if final_output.startswith("CAPRT_PROVIDER_STREAM_TERMINAL "):
+                final_output = terminal_error if status == CapabilityStatus.FAILED else ""
         yield CapabilityResult(
             status=status,
             output=final_output,
-            error=report.reason if status == CapabilityStatus.FAILED else None,
+            error=terminal_error if terminal_error is not None and status == CapabilityStatus.FAILED else (report.reason if status == CapabilityStatus.FAILED else None),
+            error_code=terminal_error_code,
             report=report,
             node_report=report,
             artifacts=list(report.artifacts),

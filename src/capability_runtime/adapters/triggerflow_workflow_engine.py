@@ -197,7 +197,6 @@ class TriggerFlowWorkflowEngine:
                 **lifecycle_payload(state=lifecycle_state, version=state_version),
             }
         )
-
         flow = TriggerFlow(name=f"runtime-workflow-{spec.base.id}-{context.run_id[:8]}")
 
         @flow.chunk("bootstrap")
@@ -446,24 +445,44 @@ class TriggerFlowWorkflowEngine:
                 node_report=report,
             )
 
-        if isinstance(step, Step):
-            return await self._execute_basic_step(step, context=context, services=services)
-        if isinstance(step, LoopStep):
-            return await self._execute_loop_step(step, context=context, services=services)
-        if isinstance(step, ParallelStep):
-            return await self._execute_parallel_step(step, context=context, services=services)
-        if isinstance(step, ConditionalStep):
-            return await self._execute_conditional_step(step, context=context, services=services)
-        return self._build_fail_closed_result(
-            services=services,
-            context=context,
-            workflow_id="unknown",
-            error=f"Unknown step type: {type(step).__name__}",
-            error_code="INVALID_WORKFLOW_STEP",
-            reason="invalid_workflow_step",
-            completion_reason="unknown_step_type",
-            meta={"actual_type": type(step).__name__},
-        )
+        try:
+            if isinstance(step, Step):
+                return await self._execute_basic_step(step, context=context, services=services)
+            if isinstance(step, LoopStep):
+                return await self._execute_loop_step(step, context=context, services=services)
+            if isinstance(step, ParallelStep):
+                return await self._execute_parallel_step(step, context=context, services=services)
+            if isinstance(step, ConditionalStep):
+                return await self._execute_conditional_step(step, context=context, services=services)
+            return self._build_fail_closed_result(
+                services=services,
+                context=context,
+                workflow_id="unknown",
+                error=f"Unknown step type: {type(step).__name__}",
+                error_code="INVALID_WORKFLOW_STEP",
+                reason="invalid_workflow_step",
+                completion_reason="unknown_step_type",
+                meta={"actual_type": type(step).__name__},
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            step_id = getattr(step, "id", None)
+            capability_id = self._step_capability_id(step)
+            return self._build_fail_closed_result(
+                services=services,
+                context=context,
+                workflow_id=str(step_id or "workflow_step"),
+                error=f"workflow step exception: {type(exc).__name__}",
+                error_code="WORKFLOW_STEP_EXCEPTION",
+                reason="workflow_step_failed",
+                completion_reason="step_exception",
+                meta={
+                    "step_id": step_id,
+                    "capability_id": capability_id,
+                    "exception_type": type(exc).__name__,
+                },
+            )
 
     def _step_capability_id(self, step: Any) -> str | None:
         """

@@ -121,9 +121,15 @@ def _summarize_action_artifact(value: Any) -> Optional[Dict[str, str]]:
 
 
 def _action_artifact_ref(summary: Dict[str, str]) -> str:
-    """生成 action artifact reference locator。"""
+    """生成兼容旧 userspace 的 action artifact reference locator。"""
 
     return f"agently-action://{summary['artifact_id']}"
+
+
+def _runtime_action_artifact_ref(summary: Dict[str, str]) -> str:
+    """生成中立 action artifact reference locator。"""
+
+    return f"runtime-action://{summary['artifact_id']}"
 
 
 @dataclass
@@ -181,6 +187,7 @@ class NodeReportBuilder:
         artifacts: List[str] = []
         seen_artifacts: set[str] = set()
         action_artifacts: List[Dict[str, str]] = []
+        runtime_action_artifact_refs: List[str] = []
         seen_action_artifacts: set[str] = set()
         action_artifact_diagnostics: List[Dict[str, Any]] = []
 
@@ -206,6 +213,7 @@ class NodeReportBuilder:
                 return
             seen_action_artifacts.add(artifact_id)
             action_artifacts.append(dict(summary))
+            runtime_action_artifact_refs.append(_runtime_action_artifact_ref(summary))
             _add_artifact(_action_artifact_ref(summary))
 
         def _extract_action_artifacts(data: Any, *, source: str) -> List[Dict[str, str]]:
@@ -267,6 +275,7 @@ class NodeReportBuilder:
         usage_total_seen = False
         usage_request_id: Optional[str] = None
         usage_provider: Optional[str] = None
+        provider_terminal: Optional[Dict[str, Any]] = None
 
         def _ensure_tool(call_id: str, *, name: str) -> Dict[str, Any]:
             """获取/初始化工具调用聚合槽位（以 call_id 为主键）。"""
@@ -345,6 +354,15 @@ class NodeReportBuilder:
                 if isinstance(total_tokens, int):
                     usage_total_total += total_tokens
                     usage_total_seen = True
+
+            if ev.type == "provider_stream_terminal" and isinstance(ev.payload, dict):
+                provider_terminal = dict(ev.payload)
+                if provider_terminal.get("request_id") is not None:
+                    usage_request_id = str(provider_terminal.get("request_id"))
+                if provider_terminal.get("provider") is not None:
+                    usage_provider = str(provider_terminal.get("provider"))
+                if provider_terminal.get("model") is not None:
+                    usage_model = str(provider_terminal.get("model"))
 
             if ev.type == "tool_call_requested":
                 call_id = str(ev.payload.get("call_id") or "").strip()
@@ -437,6 +455,18 @@ class NodeReportBuilder:
                 elif ev.type == "run_failed":
                     final_error_kind = ev.payload.get("error_kind") if isinstance(ev.payload.get("error_kind"), str) else None
                     final_message = ev.payload.get("message") if isinstance(ev.payload.get("message"), str) else None
+                    if provider_terminal is not None:
+                        completion_status = str(provider_terminal.get("status") or "failed")
+                        completion_reason = str(provider_terminal.get("completion_reason") or "provider_stream_terminal")
+                        final_error_kind = str(provider_terminal.get("reason") or final_error_kind or "provider_stream_terminal")
+                        final_message = str(provider_terminal.get("message") or final_message or "")
+                        if provider_terminal.get("request_id") is not None:
+                            usage_request_id = str(provider_terminal.get("request_id"))
+                        if provider_terminal.get("provider") is not None:
+                            usage_provider = str(provider_terminal.get("provider"))
+                        if provider_terminal.get("model") is not None:
+                            usage_model = str(provider_terminal.get("model"))
+                        continue
                     # 对齐契约：预算耗尽属于“未完成”而非“失败”（Host 可能需要走补偿/降级）。
                     if final_error_kind in ("budget_exceeded", "terminated"):
                         completion_status = "incomplete"
@@ -456,6 +486,8 @@ class NodeReportBuilder:
         if approval_pending:
             status = "needs_approval"
             reason = "approval_pending"
+        elif provider_terminal is not None:
+            reason = str(provider_terminal.get("reason") or "unknown")
         elif status == "needs_approval":
             reason = "approval_pending"
         elif status == "failed":
@@ -545,9 +577,21 @@ class NodeReportBuilder:
                     else {}
                 ),
                 **({"tool_safety": tool_safety} if tool_safety else {}),
-                **({"agently_action_artifacts": action_artifacts} if action_artifacts else {}),
+                **({"provider_terminal": provider_terminal} if provider_terminal else {}),
                 **(
-                    {"agently_action_artifact_diagnostics": action_artifact_diagnostics}
+                    {
+                        "action_artifacts": action_artifacts,
+                        "runtime_action_artifact_refs": runtime_action_artifact_refs,
+                        "agently_action_artifacts": action_artifacts,
+                    }
+                    if action_artifacts
+                    else {}
+                ),
+                **(
+                    {
+                        "action_artifact_diagnostics": action_artifact_diagnostics,
+                        "agently_action_artifact_diagnostics": action_artifact_diagnostics,
+                    }
                     if action_artifact_diagnostics
                     else {}
                 ),

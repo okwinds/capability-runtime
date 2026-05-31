@@ -23,6 +23,7 @@ from skills_runtime.llm.protocol import ChatBackend, ChatRequest
 from skills_runtime.tools.protocol import ToolCall, ToolSpec, tool_spec_to_openai_tool
 
 from ..config import ProviderRequesterStrategy
+from ..errors import ProviderStreamTerminalError
 from ..logging_utils import log_suppressed_exception
 from ..utils.usage import _usage_int
 
@@ -174,6 +175,20 @@ def _responses_tool_from_spec(spec: ToolSpec) -> Dict[str, Any]:
         "parameters": dict(function.get("parameters") or {}),
         "strict": bool(function.get("strict", False)),
     }
+
+
+def _responses_tool_choice(value: Any) -> Any:
+    """把 chat-style named tool_choice 归一为 Responses function tool_choice。"""
+
+    if not isinstance(value, dict):
+        return value
+    function = value.get("function")
+    if isinstance(function, dict):
+        name = str(function.get("name") or "").strip()
+        if name:
+            return {"type": "function", "name": name}
+    return value
+
 
 def _normalize_usage_payload(
     *,
@@ -425,7 +440,6 @@ class AgentlyChatBackend(ChatBackend):
             tools_wire = [tool_spec_to_openai_tool(spec) for spec in tool_specs]
             if tools_wire:
                 request_data.request_options["tools"] = tools_wire
-                request_data.request_options.setdefault("tool_choice", "auto")
             else:
                 # 某些 provider 对 tools=[] 敏感；无工具时直接移除该字段。
                 request_data.request_options.pop("tools", None)
@@ -554,6 +568,11 @@ class AgentlyChatBackend(ChatBackend):
         if request.response_format is not None:
             request_data.request_options["text"] = {"format": dict(request.response_format)}
 
+        if isinstance(request.extra, dict):
+            tool_choice = request.extra.get("tool_choice")
+            if tool_choice is not None:
+                request_data.request_options["tool_choice"] = _responses_tool_choice(tool_choice)
+
         tools_wire = [_responses_tool_from_spec(spec) for spec in list(request.tools or [])]
         if tools_wire:
             request_data.request_options["tools"] = tools_wire
@@ -623,6 +642,36 @@ class AgentlyChatBackend(ChatBackend):
                 continue
 
             payload_type = str(loaded.get("type") or event_name)
+            if payload_type in {"response.failed", "response.incomplete", "response.cancelled"}:
+                response_payload = loaded.get("response", loaded)
+                response = response_payload if isinstance(response_payload, dict) else {}
+                error_obj = response.get("error")
+                error = error_obj if isinstance(error_obj, dict) else {}
+                code = str(error.get("code") or response.get("status") or payload_type)
+                message = str(error.get("message") or f"Responses stream ended with {payload_type}")
+                request_id = str(response.get("id")) if response.get("id") is not None else None
+                provider = str(response.get("provider") or "openai-responses")
+                model = (
+                    str(response.get("model") or request.model)
+                    if response.get("model") is not None or request.model is not None
+                    else None
+                )
+                status = "incomplete" if payload_type in {"response.incomplete", "response.cancelled"} else "failed"
+                reason = "cancelled" if payload_type == "response.cancelled" else code
+                completion_reason = payload_type.replace("response.", "response_")
+                if request_id is not None:
+                    message = f"{message} (request_id={request_id})"
+                raise ProviderStreamTerminalError(
+                    message=f"{code}: {message}",
+                    status=status,
+                    reason=reason,
+                    completion_reason=completion_reason,
+                    error_code="PROVIDER_STREAM_CANCELLED" if payload_type == "response.cancelled" else "PROVIDER_STREAM_TERMINAL",
+                    request_id=request_id,
+                    provider=provider,
+                    model=model,
+                )
+
             if payload_type == "response.output_text.delta":
                 yield ChatStreamEvent(type="text_delta", text=str(loaded.get("delta", "")))
                 continue

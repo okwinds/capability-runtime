@@ -773,10 +773,17 @@ class RuntimeUIEventProjector:
         ev = Evidence(node_report_schema=getattr(report, "schema_id", None))
         if isinstance(report.events_path, str) and report.events_path:
             ev.events_path = report.events_path
+        runtime_action_refs = report.meta.get("runtime_action_artifact_refs") if isinstance(report.meta, dict) else None
+        if isinstance(runtime_action_refs, list):
+            for ref in runtime_action_refs:
+                if isinstance(ref, str) and ref.strip().startswith("runtime-action://"):
+                    ev.artifact_ref = ref.strip()
+                    break
         if report.artifacts and isinstance(report.artifacts[0], str) and report.artifacts[0].strip():
             artifact = report.artifacts[0].strip()
-            if artifact.startswith("agently-action://"):
-                ev.artifact_ref = artifact
+            if artifact.startswith(("runtime-action://", "agently-action://")):
+                if ev.artifact_ref is None:
+                    ev.artifact_ref = artifact
             else:
                 ev.artifact_path = artifact
         context_pack_ref = report.meta.get("context_pack_ref") if isinstance(report.meta, dict) else None

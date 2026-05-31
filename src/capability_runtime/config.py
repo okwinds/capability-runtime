@@ -25,6 +25,7 @@ RuntimeMode = Literal["mock", "bridge", "sdk_native"]
 OutputValidationMode = Literal["off", "warn", "error"]
 ProviderRequesterStrategy = Literal["chat_completions", "responses"]
 AgentlyRequesterStrategy = ProviderRequesterStrategy
+ToolChoiceAfterToolResult = Literal["none", "auto"]
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,9 @@ class RuntimeConfig:
     agently_agent: Optional[Any] = None
     requester_strategy: ProviderRequesterStrategy = "chat_completions"
     agently_requester: Optional[AgentlyRequesterStrategy] = None
+    # 显式兼容开关：工具结果回注后的后续 LLM 请求是否覆写 tool_choice。
+    # 默认 None 表示保持 AgentSpec.llm_config["tool_choice"] 原样透传。
+    tool_choice_after_tool_result: Optional[ToolChoiceAfterToolResult] = None
 
     @property
     def effective_requester_strategy(self) -> ProviderRequesterStrategy:
@@ -81,6 +85,12 @@ class RuntimeConfig:
         """
 
         return self.agently_requester or self.requester_strategy
+
+    def __post_init__(self) -> None:
+        """运行时配置枚举值校验，避免非法 opt-in 值穿透到 provider。"""
+
+        if self.tool_choice_after_tool_result not in (None, "none", "auto"):
+            raise ValueError("tool_choice_after_tool_result must be one of: None, 'none', 'auto'")
 
     # === Workflow 引擎注入（可选）===
     #
@@ -183,6 +193,7 @@ __all__ = [
     "OutputValidationMode",
     "ProviderRequesterStrategy",
     "AgentlyRequesterStrategy",
+    "ToolChoiceAfterToolResult",
     "CustomTool",
     "RuntimeConfig",
     "normalize_workspace_root",

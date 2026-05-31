@@ -3,6 +3,7 @@ from __future__ import annotations
 """Agently Workspace/Recall preview 的中立适配层。"""
 
 import re
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -138,13 +139,14 @@ async def write_node_report_summary(
         "status": report.status,
         "reason": report.reason,
         "completion_reason": report.completion_reason,
-        "events_path": report.events_path,
-        "artifact_refs": list(report.artifacts or []),
+        "events_path_hash": _hash_locator(report.events_path),
+        "artifact_ref_count": len(report.artifacts or []),
+        "artifact_ref_hashes": [_hash_locator(item) for item in list(report.artifacts or []) if isinstance(item, str)],
         "tool_call_count": len(report.tool_calls or []),
     }
     summary = _sanitize_text(
         f"NodeReport {report.run_id}: status={report.status}; "
-        f"events={report.events_path}; artifacts={len(report.artifacts or [])}"
+        f"events_hash={content['events_path_hash']}; artifacts={len(report.artifacts or [])}"
     )
     ref = await workspace.put(
         content,
@@ -200,11 +202,26 @@ def _record_ref_from_value(
         kind = getattr(value, "kind", None) or default_kind
         summary = getattr(value, "summary", None) or getattr(value, "title", None)
     return RuntimeContextRecordRef(
-        id=_sanitize_text(str(raw_id or "")) or "unknown",
-        collection=_sanitize_text(str(collection or default_collection)) or default_collection,
-        kind=_sanitize_text(str(kind)) if kind is not None else None,
+        id=_identifier_text(str(raw_id or "")) or "unknown",
+        collection=_identifier_text(str(collection or default_collection)) or default_collection,
+        kind=_identifier_text(str(kind)) if kind is not None else None,
         summary=_sanitize_text(str(summary)) if summary is not None else None,
     )
+
+
+def _hash_locator(value: Any) -> str | None:
+    """对 locator 做不可逆摘要，避免把 WAL/path/artifact ref 原文写入 recall backend。"""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return "sha256:" + hashlib.sha256(value.strip().encode("utf-8")).hexdigest()
+
+
+def _identifier_text(value: str) -> str:
+    """标识符必须保持稳定，不做关键词替换；仅限制长度与控制字符。"""
+
+    text = "".join(ch for ch in str(value) if ch.isprintable())
+    return text[:500]
 
 
 def _sanitize_text(value: str) -> str:

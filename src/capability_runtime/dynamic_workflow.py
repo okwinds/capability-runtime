@@ -227,9 +227,9 @@ def hash_dynamic_plan(plan: DynamicWorkflowPlan) -> str:
 def _get_tasks(raw: Mapping[str, Any]) -> list[Any]:
     tasks = raw.get("tasks")
     if tasks is None:
-        raise DynamicWorkflowPlanError("DYNAMIC_DAG_INVALID", "Agently TaskDAG.tasks is required")
+        raise DynamicWorkflowPlanError("DYNAMIC_DAG_INVALID", "Dynamic DAG tasks is required")
     if not isinstance(tasks, Sequence) or isinstance(tasks, (str, bytes, bytearray)):
-        raise DynamicWorkflowPlanError("DYNAMIC_DAG_INVALID", "Agently TaskDAG.tasks must be a sequence")
+        raise DynamicWorkflowPlanError("DYNAMIC_DAG_INVALID", "Dynamic DAG tasks must be a sequence")
     return list(tasks)
 
 
@@ -260,7 +260,7 @@ def _object_to_mapping(value: Mapping[str, Any] | Any) -> Mapping[str, Any]:
             data[key] = getattr(value, key)
     if data:
         return data
-    raise DynamicWorkflowPlanError("DYNAMIC_DAG_INVALID", f"Unsupported TaskDAG value: {type(value).__name__}")
+    raise DynamicWorkflowPlanError("DYNAMIC_DAG_INVALID", f"Unsupported Dynamic DAG value: {type(value).__name__}")
 
 
 def _non_empty_string(value: Any) -> str | None:

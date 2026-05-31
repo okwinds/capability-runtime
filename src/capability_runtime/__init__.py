@@ -4,8 +4,13 @@ from __future__ import annotations
 __version__ = "0.1.4"
 
 # === 统一入口 ===
-from .config import AgentlyRequesterStrategy, CustomTool, ProviderRequesterStrategy, RuntimeConfig
-from .context_pack import RuntimeContextRecordRef, RuntimeRecallContextPack
+from .config import AgentlyRequesterStrategy, CustomTool, ProviderRequesterStrategy, RuntimeConfig, ToolChoiceAfterToolResult
+from .context_pack import (
+    RuntimeContextRecordRef,
+    RuntimeRecallContextPack,
+    build_recall_context_pack,
+    write_node_report_summary,
+)
 from .runtime import Runtime
 from .service_facade import RuntimeServiceFacade, RuntimeServiceHandle, RuntimeServiceRequest, RuntimeSession
 from .structured_stream import StructuredStreamEvent
@@ -49,10 +54,13 @@ __all__ = [
     "RuntimeConfig",
     "ProviderRequesterStrategy",
     "AgentlyRequesterStrategy",
+    "ToolChoiceAfterToolResult",
     "CustomTool",
     "StructuredStreamEvent",
     "RuntimeContextRecordRef",
     "RuntimeRecallContextPack",
+    "build_recall_context_pack",
+    "write_node_report_summary",
     # Reports
     "NodeReport",
     "NodeResult",
@@ -97,3 +105,7 @@ __all__ = [
     "RuntimeFrameworkError",
     "CapabilityNotFoundError",
 ]
+
+
+def __getattr__(name: str):
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
