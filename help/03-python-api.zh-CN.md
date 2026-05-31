@@ -14,6 +14,18 @@
 - `RuntimeConfig`
 - `CustomTool`
 
+Provider bridge 新增面：
+
+- `ProviderRequesterStrategy`：`"chat_completions"` 或 `"responses"`。
+- `RuntimeConfig.requester_strategy`：requester strategy，默认
+  `"chat_completions"`，用于 legacy 兼容。
+- `RuntimeConfig.max_dynamic_nodes`：Dynamic DAG preview 硬上限。
+
+requester selection 不负责选择业务模型。runtime 模型应通过
+`AgentSpec.llm_config["model"]` 设置；lifecycle 层会把它复制到 SDK
+`ChatRequest.model`，再由 provider backend 发出 wire request。Agently settings
+仍只是 transport 设置。
+
 ## 能力协议
 
 - `CapabilitySpec`
@@ -24,6 +36,8 @@
 - `AgentIOSchema`
 - `PromptRenderMode`
 - `WorkflowSpec`
+- `DynamicWorkflowNode`
+- `DynamicWorkflowPlan`
 - `Step`
 - `LoopStep`
 - `ParallelStep`
@@ -138,10 +152,52 @@ runtime 不为图片、音频、视频或文件新增并行二进制输出字段
 - `ApprovalTicket`
 - `ResumeIntent`
 - `HostRunSnapshot`
+- `WorkflowRunSnapshot` lifecycle 字段为 additive。消费方可在字段存在时读取
+  `lifecycle_state`、`execution_id`、`state_version`、`intervention_mode`、
+  `pending_interventions`、`close_reason`；旧事件消费方可以忽略这些字段。
 - `RuntimeServiceFacade`
 - `RuntimeServiceRequest`
 - `RuntimeServiceHandle`
 - `RuntimeSession`
+
+## Runtime Capability Preview
+
+Responses bridge：
+
+```python
+from capability_runtime import RuntimeConfig
+
+cfg = RuntimeConfig(mode="bridge", requester_strategy="responses")
+```
+
+`"responses"` 是 opt-in。默认仍是 `"chat_completions"`；离线测试注入
+`sdk_backend` 时仍优先绕过真实 requester。
+
+真实 provider 审计：
+
+- chat/completions 使用 Agently `OpenAICompatible`；Responses 使用
+  `OpenAIResponsesCompatible`。
+- `NodeReport.usage.model` 优先采用 provider usage `model`，否则回退到
+  `ChatRequest.model`。
+- provider/gateway 返回时，`NodeReport.usage.request_id` 与
+  `NodeReport.usage.provider` 必须保留。
+- Agently settings 只配置 transport；不要把它当作唯一模型配置入口。
+
+Dynamic DAG preview：
+
+```python
+plan = runtime.compile_dynamic_workflow_plan(task_dag_like_mapping)
+result = await runtime.run_dynamic_workflow(plan, input={"topic": "release"})
+```
+
+TaskDAG-like 数据必须先编译为本仓 `DynamicWorkflowPlan`；不要把 upstream-native
+`TaskDAG` / `DynamicTask` 对象作为下游应用稳定契约透传。节点只通过已注册
+capability id 执行，并通过有限 `max_dynamic_nodes` 与 `DYNAMIC_DAG_*` 诊断
+fail-closed。
+
+Workspace/Recall preview 暴露本仓中立 `RuntimeRecallContextPack`；它不是 WAL
+或 NodeReport 的替代品。Action artifact evidence 只暴露脱敏 artifact reference
+与 `NodeReport.meta` 摘要，不读取 artifact 原文。
 
 ## 错误类型
 

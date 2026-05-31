@@ -25,6 +25,9 @@
 - 基于运行时的 Workflow 编排，而不是把 TriggerFlow 暴露成公共 API
 - 以 `NodeReport`、工具调用摘要、审批摘要、WAL locator 为核心的证据链
 - 面向宿主的 wait/resume、approval ticket、continuity 与 streaming 辅助面
+- 通过同一运行时契约承载 runtime capability preview：Responses requester
+  显式 opt-in、Dynamic DAG preview、workflow lifecycle 摘要、
+  Workspace/Recall context pack、Action artifact evidence 摘要
 
 ## 架构总览
 
@@ -115,13 +118,44 @@ python examples/01_quickstart/run_bridge.py
 ```
 
 Bridge 模式复用 Agently 的 OpenAI-compatible 传输层，但 skills/tools/WAL
-的真实执行语义仍来自 `skills-runtime-sdk`。
+的真实执行语义仍来自 `skills-runtime-sdk`。legacy requester strategy 是
+`chat_completions`。Responses mode 必须通过
+`RuntimeConfig.requester_strategy="responses"` 显式 opt-in；它不是默认值。
+
+真实 provider 接线顺序：
+
+1. 先通过 gateway 或 `/models` 表面确认模型名可用。
+2. 用 `OpenAICompatible` 配好 provider chat/completions 通道。
+3. 仅当 provider 支持 `/responses` 时，再用 `OpenAIResponsesCompatible`
+   配好 provider responses 通道。
+4. 运行 runtime chat 路径：
+   `RuntimeConfig(mode="bridge", requester_strategy="chat_completions")`。
+5. 运行 runtime responses 路径：
+   `RuntimeConfig(mode="bridge", requester_strategy="responses")`。
+
+模型路由是另一条优先级链：`AgentSpec.llm_config["model"]` 会覆写 SDK
+`ChatRequest.model`；当 provider usage payload 没有返回 `model` 时，这个
+request model 是 runtime bridge 的真相来源。Agently settings 只负责
+base URL、auth、requester plugin 等 transport 配置，不能替代
+`AgentSpec.llm_config.model`。
 
 ### 3. Workflow 编排
 
 ```bash
 python examples/02_workflow/run.py
 ```
+
+### 4. Runtime capability preview
+
+```bash
+python examples/05_dynamic_dag_preview/run.py
+python examples/06_responses_bridge/run.py
+```
+
+这些预览能力仍只依赖 `capability_runtime` 公共契约：Dynamic DAG 使用
+`DynamicWorkflowPlan` / runtime 方法，Responses 使用
+`RuntimeConfig.requester_strategy`。下游不要把 upstream-native `TaskDAG`、
+`DynamicTask`、`Workspace`、`Action` 或 requester 对象作为稳定依赖面。
 
 更高层的示例索引请从 [examples/README.md](examples/README.md) 开始。
 
@@ -162,6 +196,21 @@ from capability_runtime import (
 - `mock`：不依赖真实 LLM 的确定性本地测试
 - `bridge`：Agently 传输层 + `skills-runtime-sdk` 执行语义
 - `sdk_native`：不经过 Agently，直接使用 `skills-runtime-sdk` backend
+
+Provider bridge strategy 与 `mode` 分离：
+
+- `RuntimeConfig.requester_strategy="chat_completions"`：legacy 兼容的默认 bridge 路径。
+- `RuntimeConfig.requester_strategy="responses"`：显式 opt-in 的 Responses bridge 路径。
+- `sdk_backend` 注入优先于这两种 strategy，用于离线回归和 fake-backend 测试。
+
+Dynamic DAG preview 不会隐式扩展 `WorkflowSpec.steps`：先把 TaskDAG-like
+mapping 编译为本仓 `DynamicWorkflowPlan`，用有限 `max_dynamic_nodes` 约束规模，
+并且每个节点只通过已注册 capability 执行。
+
+真实 provider 审计证据应落在 `NodeReport.usage`：provider 返回时必须保留
+`model`、`request_id`、`provider` 与 token 计数。若 provider 没有返回
+`model`，则回退到 `ChatRequest.model`；当已有更可信的 request/provider
+模型时，不能把 SDK 占位默认值（例如 `gpt-4`）当作真实 provider 证据。
 
 ## 仓库结构
 
@@ -211,3 +260,7 @@ from capability_runtime import (
 - `skills-runtime-sdk` 仍是 skills、approvals、tools、WAL 与事件证据链的真相源。
 - `Agently` 仍是本仓选择桥接而非 fork/重造的传输与编排底座。
 - `capability-runtime` 的职责是把这些上游能力收敛成更小、更稳定的宿主侧运行时契约面。
+- Legacy mode 非破坏：不配置 Responses、Dynamic DAG、Workspace/Recall 或
+  Action artifact evidence 预览能力时，既有 `Runtime.run()` /
+  `Runtime.run_stream()` / `WorkflowSpec` 消费方仍可继续读取原有
+  `NodeReport` 与 UI event 字段。

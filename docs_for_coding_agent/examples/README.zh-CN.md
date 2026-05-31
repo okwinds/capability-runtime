@@ -32,6 +32,19 @@
 - `recipes/04_invoke_capability_child_agent/`：渐进式披露：skills 驱动委托子 Agent（invoke_capability）
 - `recipes/05_invoke_capability_child_workflow/`：Agent → 子 Workflow（invoke_capability）
 
+Runtime capability preview 请看面向人类的示例：
+
+- `examples/05_dynamic_dag_preview/`
+- `examples/06_responses_bridge/`
+- `examples/08_workspace_recall_preview/`
+- `examples/09_action_artifact_evidence/`
+
+这些仍是 capability-runtime 示例，不应教下游智能体直接 import upstream-native 对象。
+
+真实 provider 示例中，模型应通过 `AgentSpec.llm_config.model` 设置，并检查
+`NodeReport.usage` 中的 `model`、`request_id` 与 `provider`。Agently settings
+只代表 transport 通道。
+
 ## 离线回归（门禁）
 
 ```bash

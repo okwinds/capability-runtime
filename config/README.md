@@ -12,8 +12,14 @@ Important boundaries:
 
 - the repository exposes `Runtime` and `RuntimeConfig` as the public entrypoint
 - example YAML files describe shapes, not secrets
-- runtime-only objects such as approval providers or Agently agents are still
+- runtime-only objects such as approval providers or upstream requester agents are still
   injected by host code, not by static YAML
+- requester strategy is a capability-runtime setting. Keep the default
+  `requester_strategy: "chat_completions"` unless the host explicitly opts in to
+  Responses.
+- model selection is not an Agently settings concern. Set per-capability models
+  through `AgentSpec.llm_config["model"]`; runtime copies that value into SDK
+  `ChatRequest.model`.
 
 ## Files
 
@@ -38,6 +44,8 @@ cfg = RuntimeConfig(
     mode=str(raw.get("mode") or "bridge"),
     workspace_root=Path(str(raw.get("workspace_root") or ".")),
     preflight_mode=str(raw.get("preflight_mode") or "error"),
+    requester_strategy=str(raw.get("requester_strategy") or "chat_completions"),
+    max_dynamic_nodes=int(raw.get("max_dynamic_nodes") or 64),
 )
 
 runtime = Runtime(cfg)
@@ -48,4 +56,14 @@ print(runtime.validate())
 
 - `sdk_config_paths` should point to real overlay files controlled by the host application.
 - `preflight_mode="error"` is the safest default when you want fail-closed behavior.
+- `requester_strategy="responses"` is opt-in and must not be treated as the
+  default bridge mode.
+- Existing callers may still pass `RuntimeConfig.agently_requester`; new config
+  templates should prefer `requester_strategy`.
+- `sdk.example.yaml` configures SDK/provider transport overlays. It does not
+  override per-agent request models; use `AgentSpec.llm_config.model`.
+- For real provider audit, `NodeReport.usage` should preserve `model`,
+  `request_id`, `provider`, and token counts when available.
+- `max_dynamic_nodes` bounds Dynamic DAG preview. Do not accept unbounded model
+  generated graphs.
 - never commit real `.env`, provider credentials, or environment-specific overlay files.

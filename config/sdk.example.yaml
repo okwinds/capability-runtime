@@ -37,8 +37,14 @@ llm:
   # API key 环境变量名（生产推荐由部署系统注入 OS env）
   api_key_env: "OPENAI_API_KEY"
   timeout_sec: 60
+  # transport overlay 不等于 runtime 请求模型优先级。
+  # 每个 capability 的请求模型应通过 AgentSpec.llm_config.model 设置，
+  # runtime 会把它复制到 SDK ChatRequest.model，再用于 usage.model fallback。
+  # requester strategy 不属于 skills-runtime-sdk overlay。
+  # 在 capability-runtime 中通过 RuntimeConfig.requester_strategy 选择：
+  # - chat_completions：legacy 默认
+  # - responses：显式 opt-in
 
 run:
   max_steps: 40
   max_wall_time_sec: 1800
-

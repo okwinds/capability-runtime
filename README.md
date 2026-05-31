@@ -25,6 +25,9 @@ The public contract of this repository is intentionally narrow:
 - Workflow orchestration on top of the runtime without exposing TriggerFlow as a public API
 - Evidence-first results through `NodeReport`, tool-call reports, approval summaries, and WAL locators
 - Host-facing helpers for wait/resume, approval tickets, continuity, and service streaming
+- Runtime capability previews behind the same runtime contract:
+  Responses requester opt-in, Dynamic DAG preview, workflow lifecycle summaries,
+  Workspace/Recall context packs, and Action artifact evidence summaries
 
 ## Architecture At A Glance
 
@@ -115,13 +118,45 @@ python examples/01_quickstart/run_bridge.py
 ```
 
 Bridge mode reuses Agently's OpenAI-compatible transport but still delegates the
-actual skills/tools/WAL semantics to `skills-runtime-sdk`.
+actual skills/tools/WAL semantics to `skills-runtime-sdk`. The legacy requester
+strategy is `chat_completions`. Responses mode is an explicit opt-in with
+`RuntimeConfig.requester_strategy="responses"`; it is not the default.
+
+Real provider wiring order:
+
+1. Verify the provider model name with the gateway or `/models` surface.
+2. Configure the provider chat lane with `OpenAICompatible` for chat/completions.
+3. Configure the provider responses lane with `OpenAIResponsesCompatible` only if
+   the provider supports `/responses`.
+4. Run the runtime chat path with
+   `RuntimeConfig(mode="bridge", requester_strategy="chat_completions")`.
+5. Run the runtime responses path with
+   `RuntimeConfig(mode="bridge", requester_strategy="responses")`.
+
+Model routing has a separate priority chain: `AgentSpec.llm_config["model"]`
+overrides the SDK `ChatRequest.model`, and that request model is the runtime
+bridge source of truth when the provider usage payload omits `model`. Agently
+settings configure transport details such as base URL, auth, and requester
+plugin settings; they do not replace `AgentSpec.llm_config.model`.
 
 ### 3. Workflow orchestration
 
 ```bash
 python examples/02_workflow/run.py
 ```
+
+### 4. Runtime capability previews
+
+```bash
+python examples/05_dynamic_dag_preview/run.py
+python examples/06_responses_bridge/run.py
+```
+
+These previews keep the public surface inside `capability_runtime`: use
+`DynamicWorkflowPlan` / runtime methods for Dynamic DAGs and
+`RuntimeConfig.requester_strategy` for Responses. Do not build downstream code on
+upstream-native `TaskDAG`, `DynamicTask`, `Workspace`, `Action`, or requester
+objects.
 
 For a higher-level index, start with [examples/README.md](examples/README.md).
 
@@ -160,8 +195,26 @@ from capability_runtime import (
 The runtime currently supports three execution modes through `RuntimeConfig.mode`:
 
 - `mock`: deterministic local testing without a real LLM backend
-- `bridge`: Agently transport + `skills-runtime-sdk` execution semantics
-- `sdk_native`: native `skills-runtime-sdk` backend without Agently transport
+- `bridge`: provider transport adapter + `skills-runtime-sdk` execution semantics
+- `sdk_native`: native `skills-runtime-sdk` backend without the provider transport adapter
+
+Provider bridge strategy is separate from `mode`:
+
+- `RuntimeConfig.requester_strategy="chat_completions"`: legacy-compatible
+  default bridge path.
+- `RuntimeConfig.requester_strategy="responses"`: opt-in Responses bridge path.
+- `sdk_backend` injection takes precedence over both strategies for offline
+  regression and fake-backend tests.
+
+Dynamic DAG preview is separate from `WorkflowSpec.steps`: compile a TaskDAG-like
+mapping into the runtime-owned `DynamicWorkflowPlan`, keep `max_dynamic_nodes`
+bounded, and execute nodes only through registered capabilities.
+
+Provider audit evidence is expected in `NodeReport.usage`: preserve
+`model`, `request_id`, `provider`, and token counts when the provider returns
+them. If the provider omits `model`, the request model from `ChatRequest.model`
+is the fallback; never treat an SDK placeholder such as `gpt-4` as real provider
+evidence when a more specific request/provider model is available.
 
 ## Repository Layout
 
@@ -214,3 +267,7 @@ configure the corresponding Trusted Publisher entry on `pypi.org`.
   chooses to bridge instead of forking or reimplementing.
 - `capability-runtime` is the contract-convergence layer: it narrows those
   upstream capabilities into a smaller host-facing runtime surface.
+- Legacy mode is non-breaking: if you do not configure Responses, Dynamic DAG,
+  Workspace/Recall, or Action artifact evidence previews, existing
+  `Runtime.run()` / `Runtime.run_stream()` / `WorkflowSpec` consumers can keep
+  reading the existing `NodeReport` and UI event fields.

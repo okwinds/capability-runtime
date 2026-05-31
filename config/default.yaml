@@ -8,6 +8,16 @@
 # 执行模式：bridge（默认）| sdk_native | mock
 mode: "bridge"
 
+# Provider requester strategy：
+# 只选择 transport lane，不选择每个 Agent 的请求模型。
+# 请求模型应通过 AgentSpec.llm_config.model -> SDK ChatRequest.model 设置。
+# - chat_completions：legacy 兼容默认值
+# - responses：显式 opt-in；不得作为默认值写入下游模板
+requester_strategy: "chat_completions"
+
+# Dynamic DAG preview 硬上限；超限应 fail-closed
+max_dynamic_nodes: 64
+
 # workspace_root：WAL/产物落盘根目录（建议用绝对路径；示例用相对路径）
 workspace_root: "."
 

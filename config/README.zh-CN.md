@@ -12,7 +12,12 @@
 
 - 公开入口是 `Runtime` 与 `RuntimeConfig`
 - YAML 只表达配置形态，不表达 secrets
-- approvals provider、Agently agent 之类运行期对象仍由宿主代码注入，而不是靠静态 YAML 直接构造
+- approvals provider、upstream requester agent 之类运行期对象仍由宿主代码注入，而不是靠静态 YAML 直接构造
+- requester strategy 是 capability-runtime 配置。除非宿主显式 opt-in
+  Responses，否则保持 `requester_strategy: "chat_completions"`。
+- 模型选择不属于 Agently settings 职责。每个能力的模型通过
+  `AgentSpec.llm_config["model"]` 设置；runtime 会把它复制到 SDK
+  `ChatRequest.model`。
 
 ## 文件说明
 
@@ -37,6 +42,8 @@ cfg = RuntimeConfig(
     mode=str(raw.get("mode") or "bridge"),
     workspace_root=Path(str(raw.get("workspace_root") or ".")),
     preflight_mode=str(raw.get("preflight_mode") or "error"),
+    requester_strategy=str(raw.get("requester_strategy") or "chat_completions"),
+    max_dynamic_nodes=int(raw.get("max_dynamic_nodes") or 64),
 )
 
 runtime = Runtime(cfg)
@@ -47,4 +54,12 @@ print(runtime.validate())
 
 - `sdk_config_paths` 应由宿主侧指向真实 overlay 文件。
 - `preflight_mode="error"` 是推荐的 fail-closed 默认值。
+- `requester_strategy="responses"` 是 opt-in，不能被当成默认 bridge mode。
+- 旧调用方仍可传 `RuntimeConfig.agently_requester`；新配置模板应优先使用
+  `requester_strategy`。
+- `sdk.example.yaml` 配置 SDK/provider transport overlay，不覆写每个 agent
+  的请求模型；请求模型应使用 `AgentSpec.llm_config.model`。
+- 真实 provider 审计时，`NodeReport.usage` 应尽量保留 `model`、
+  `request_id`、`provider` 与 token 计数。
+- `max_dynamic_nodes` 用于约束 Dynamic DAG preview；不要接受无上限的模型生成图。
 - 不要提交真实 `.env`、provider 凭证或环境专属 overlay 文件。

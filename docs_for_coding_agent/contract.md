@@ -19,6 +19,15 @@ When you implement changes in this repository, use this minimum loop:
 - execution entrypoint: `Runtime.run()` / `Runtime.run_stream()`
 - registration: `Runtime.register()` / `Runtime.register_many()`
 - dependency check: `Runtime.validate()`
+- requester selection: `RuntimeConfig.requester_strategy`, where
+  `responses` is opt-in and `chat_completions` is the compatibility default
+- model selection: `AgentSpec.llm_config["model"]` -> SDK `ChatRequest.model`;
+  Agently settings configure transport only
+- provider audit: preserve `NodeReport.usage.model`, `request_id`, `provider`,
+  and token counts; provider-returned model wins over request model, request
+  model wins over SDK placeholders
+- Dynamic DAG preview: compile into `DynamicWorkflowPlan` and execute through
+  registered capabilities only
 
 ## Workflow Checks
 
@@ -31,5 +40,9 @@ When you implement changes in this repository, use this minimum loop:
 
 - add upstream execution dependencies to the protocol layer
 - bypass `Runtime` by creating a second orchestration semantics path
+- expose upstream-native requester, `TriggerFlowExecution`, `DynamicTask`,
+  `Workspace`, `Action`, or `SkillsExecutor` objects as public contracts
+- document Agently settings as the runtime model precedence source
+- drop provider `request_id` or `provider` while repairing model metadata
 - hardcode business rules into runtime internals
 - commit real `.env` files or private collaboration documents

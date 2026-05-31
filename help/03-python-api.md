@@ -14,6 +14,18 @@ The supported public API is the package root import surface.
 - `RuntimeConfig`
 - `CustomTool`
 
+Provider bridge additions:
+
+- `ProviderRequesterStrategy`: `"chat_completions"` or `"responses"`.
+- `RuntimeConfig.requester_strategy`: requester strategy, defaulting to
+  `"chat_completions"` for legacy compatibility.
+- `RuntimeConfig.max_dynamic_nodes`: Dynamic DAG preview hard limit.
+
+Requester selection does not select the business model. Use
+`AgentSpec.llm_config["model"]` to set the runtime model; the lifecycle layer
+copies it into SDK `ChatRequest.model` before the provider backend sends the wire
+request. Agently settings remain transport settings.
+
 ## Capability Protocol
 
 - `CapabilitySpec`
@@ -24,6 +36,8 @@ The supported public API is the package root import surface.
 - `AgentIOSchema`
 - `PromptRenderMode`
 - `WorkflowSpec`
+- `DynamicWorkflowNode`
+- `DynamicWorkflowPlan`
 - `Step`
 - `LoopStep`
 - `ParallelStep`
@@ -144,10 +158,55 @@ or files.
 - `ApprovalTicket`
 - `ResumeIntent`
 - `HostRunSnapshot`
+- `WorkflowRunSnapshot` lifecycle fields are additive. Consumers may read
+  `lifecycle_state`, `execution_id`, `state_version`, `intervention_mode`,
+  `pending_interventions`, and `close_reason` when present, while older event
+  consumers can ignore them.
 - `RuntimeServiceFacade`
 - `RuntimeServiceRequest`
 - `RuntimeServiceHandle`
 - `RuntimeSession`
+
+## Runtime Capability Previews
+
+Responses bridge:
+
+```python
+from capability_runtime import RuntimeConfig
+
+cfg = RuntimeConfig(mode="bridge", requester_strategy="responses")
+```
+
+`"responses"` is opt-in. The default remains `"chat_completions"`, and
+`sdk_backend` injection still takes precedence for offline tests.
+
+Real provider audit:
+
+- chat/completions uses Agently `OpenAICompatible`; Responses uses
+  `OpenAIResponsesCompatible`.
+- `NodeReport.usage.model` prefers provider usage `model`, then falls back to
+  `ChatRequest.model`.
+- `NodeReport.usage.request_id` and `NodeReport.usage.provider` must be
+  preserved when returned by the provider/gateway.
+- Agently settings configure transport; do not rely on them as the only model
+  configuration path.
+
+Dynamic DAG preview:
+
+```python
+plan = runtime.compile_dynamic_workflow_plan(task_dag_like_mapping)
+result = await runtime.run_dynamic_workflow(plan, input={"topic": "release"})
+```
+
+Compile TaskDAG-like data into the runtime-owned `DynamicWorkflowPlan`; do not
+pass upstream-native `TaskDAG` / `DynamicTask` objects through application code as
+stable contracts. Nodes execute only through registered capability ids, with
+fail-closed `DYNAMIC_DAG_*` diagnostics and bounded `max_dynamic_nodes`.
+
+Workspace/Recall preview exposes a neutral `RuntimeRecallContextPack`; it is not
+a WAL or NodeReport replacement. Action artifact evidence is exposed as
+redacted artifact references and `NodeReport.meta` summaries, never raw artifact
+content.
 
 ## Errors
 
