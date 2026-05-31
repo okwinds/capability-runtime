@@ -8,7 +8,7 @@ rules_parser_pro：面向人类的小 app/MVP（skills-first）。
 
 双模式：
 - offline：FakeChatBackend 驱动真实 skills_runtime.Agent loop（可回归）
-- real：真模型（OpenAI-compatible，经 Agently requester 作为传输层）
+- real：真模型（OpenAI-compatible，经 runtime bridge requester 作为传输层）
 """
 
 import argparse

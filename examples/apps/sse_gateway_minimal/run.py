@@ -7,7 +7,7 @@ sse_gateway_minimal：HTTP/SSE 小服务（最小可运行）。
 - 不新增第三方依赖（仅使用 Python 标准库）
 - 双模式：
   - offline：FakeChatBackend 驱动真实 SDK agent loop（可回归）
-  - real：真模型（OpenAI-compatible，经 Agently requester 作为传输层）
+  - real：真模型（OpenAI-compatible，经 runtime bridge requester 作为传输层）
 """
 
 import argparse

@@ -138,8 +138,8 @@ async def main() -> None:
         from agently import Agently  # type: ignore
     except ModuleNotFoundError:
         print("=== 03_bridge_e2e ===")
-        print("环境变量已齐全，但无法导入 agently，已退出（exit code 0）。")
-        print("安装：python -m pip install agently")
+        print("环境变量已齐全，但无法导入 bridge 上游依赖，已退出（exit code 0）。")
+        print("安装项目依赖后重试。")
         return
 
     Agently.set_settings(

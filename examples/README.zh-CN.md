@@ -29,8 +29,25 @@ python examples/02_workflow/run.py
 | 01 | `01_quickstart/` | 最短闭环：mock + bridge（统一 Runtime） | 部分 ✅ |
 | 02 | `02_workflow/` | 顺序 + 循环 + 条件分支（统一 Runtime） | ❌ |
 | 03 | `03_bridge_e2e/` | 真实 LLM：tool_call + 自动审批 + NodeReport 证据链 | ✅ |
-| 04 | `04_triggerflow_orchestration/` | TriggerFlow 顶层编排多个 `Runtime.run()` | ✅ |
+| 04 | `04_triggerflow_orchestration/` | 通过 `Runtime` / `WorkflowSpec` 观察 workflow lifecycle snapshot | ❌ |
 | 05 | `05_workflow_skills_first/` | Workflow 编排 skills-first Agent（离线可回归） | ❌ |
+| 05 | `05_dynamic_dag_preview/` | Dynamic DAG preview（runtime-owned plan） | ❌ |
+| 06 | `06_responses_bridge/` | Responses requester 显式 opt-in 配置预览 | 可选 |
+| 08 | `08_workspace_recall_preview/` | 中立 Workspace/Recall context pack 预览 | ❌ |
+| 09 | `09_action_artifact_evidence/` | Action artifact reference evidence 摘要 | ❌ |
+| 10 | `10_runtime_bridge_showcase/` | 服务端已配置的 live runtime bridge 展示页 | ✅ |
+
+Capability preview 规则：只使用 `capability_runtime` 契约。Responses 是
+opt-in；Dynamic DAG 先编译为 `DynamicWorkflowPlan`。示例不得让下游依赖
+upstream-native requester、`TaskDAG`、`DynamicTask`、Workspace、Action 或
+TriggerFlow execution 对象。
+
+真实 provider 示例遵循固定接线顺序：先用 gateway 确认模型，再配置 provider
+chat transport；只有 `/responses` 可用时才配置 provider responses transport；
+随后分别跑 runtime chat 与 runtime responses smoke。runtime 请求模型必须来自
+`AgentSpec.llm_config.model`，这样 SDK `ChatRequest.model` 与
+`NodeReport.usage.model` 才可审计。chat 与 responses 两条路径都应保留
+`NodeReport.usage.request_id` 和 `NodeReport.usage.provider`。
 
 ## 人类小应用（apps/）
 

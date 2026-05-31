@@ -1,133 +1,125 @@
 """
-04_triggerflow_orchestration：TriggerFlow 顶层编排多个 Runtime.run()（示例）。
+04_triggerflow_orchestration：通过 capability-runtime 观察 workflow lifecycle。
 
 运行：
-  1) cp examples/04_triggerflow_orchestration/.env.example examples/04_triggerflow_orchestration/.env
-  2) 编辑 .env 填入真实配置
-  3) python examples/04_triggerflow_orchestration/run.py
+  python examples/04_triggerflow_orchestration/run.py
 
-注意：
-- 该示例展示“顶层编排”，不通过 SDK Agent tool 触发 TriggerFlow（按输入文档 2.5 决策）。
+说明：
+- TriggerFlow 是 runtime 内部编排底座，不作为示例的下游公共 import 面。
+- 本示例只使用 Runtime / WorkflowSpec，并打印宿主可读的 snapshot 摘要。
 """
 
 from __future__ import annotations
 
-import os
+import asyncio
+import sys
+from typing import Any, Dict
 from pathlib import Path
-from typing import Any, Optional
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = REPO_ROOT / "src"
+for path in (REPO_ROOT, SRC_ROOT):
+    path_text = str(path)
+    if path_text not in sys.path:
+        sys.path.insert(0, path_text)
 
-REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
-
-
-def load_env(dotenv_path: Path) -> None:
-    """读取 `.env` 并写入进程环境（不覆盖已有值）。"""
-
-    for raw in dotenv_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-def print_env_hint(dotenv_path: Path, missing: Optional[list[str]] = None) -> None:
-    """输出环境缺失提示并说明退出行为。"""
-
-    print("=== 04_triggerflow_orchestration ===")
-    print("缺少运行所需配置，已退出（exit code 0）。")
-    print(f"请准备：{dotenv_path}")
-    print("必需变量：OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME")
-    if missing:
-        print(f"缺失变量：{', '.join(missing)}")
+from capability_runtime import (
+    AgentSpec,
+    CapabilityKind,
+    CapabilityRef,
+    CapabilitySpec,
+    InputMapping,
+    Runtime,
+    RuntimeConfig,
+    Step,
+    WorkflowSpec,
+)
 
 
-def main() -> None:
-    """构造 TriggerFlow 并启动一次执行。"""
+def handler(spec: AgentSpec, input: Dict[str, Any], context=None) -> Any:
+    """离线 handler：固定输出，便于示例在无 key 环境中可回归。"""
 
-    dotenv_path = Path(__file__).resolve().parent / ".env"
-    if not dotenv_path.exists():
-        print_env_hint(dotenv_path)
-        return
+    _ = context
+    if spec.base.id == "agent.lifecycle.analyze":
+        return {"analysis": f"why={input.get('topic')}", "risk": "low"}
+    if spec.base.id == "agent.lifecycle.write":
+        return {"summary": f"summary based on {input.get('analysis')}"}
+    return {"unknown_agent": spec.base.id, "input": input}
 
-    load_env(dotenv_path)
-    missing = [key for key in REQUIRED if not os.getenv(key)]
-    if missing:
-        print_env_hint(dotenv_path, missing)
-        return
 
-    try:
-        from agently import Agently, TriggerFlow  # type: ignore
-    except ModuleNotFoundError:
-        print("=== 04_triggerflow_orchestration ===")
-        print("环境变量已齐全，但无法导入 agently，已退出（exit code 0）。")
-        print("安装：python -m pip install agently")
-        return
+async def main() -> None:
+    """运行一个两步 workflow，并展示 lifecycle/snapshot 可读面。"""
 
-    Agently.set_settings(
-        "OpenAICompatible",
-        {
-            "base_url": os.environ["OPENAI_BASE_URL"],
-            "model": os.environ["MODEL_NAME"],
-            "auth": os.environ["OPENAI_API_KEY"],
-        },
-    )
-
-    runtime = Runtime(
-        RuntimeConfig(
-            mode="bridge",
-            workspace_root=Path(__file__).resolve().parent,
-            preflight_mode="off",
-            agently_agent=Agently.create_agent(),
-        )
-    )
+    runtime = Runtime(RuntimeConfig(mode="mock", mock_handler=handler))
     runtime.register_many(
         [
             AgentSpec(
                 base=CapabilitySpec(
-                    id="agent.analyze",
+                    id="agent.lifecycle.analyze",
                     kind=CapabilityKind.AGENT,
                     name="Analyze",
-                    description="分析主题并给出三条要点（中文）。",
+                    description="Analyze a topic.",
                 )
             ),
             AgentSpec(
                 base=CapabilitySpec(
-                    id="agent.write",
+                    id="agent.lifecycle.write",
                     kind=CapabilityKind.AGENT,
                     name="Write",
-                    description="根据分析结果写一段简短说明（中文，<= 120 字）。",
+                    description="Write a short summary.",
                 )
             ),
         ]
     )
+    workflow = WorkflowSpec(
+        base=CapabilitySpec(
+            id="workflow.lifecycle.preview",
+            kind=CapabilityKind.WORKFLOW,
+            name="LifecyclePreview",
+        ),
+        steps=[
+            Step(id="analyze", capability=CapabilityRef(id="agent.lifecycle.analyze")),
+            Step(
+                id="write",
+                capability=CapabilityRef(id="agent.lifecycle.write"),
+                input_mappings=[InputMapping(source="step.analyze.analysis", target_field="analysis")],
+            ),
+        ],
+        output_mappings=[InputMapping(source="step.write.summary", target_field="summary")],
+    )
+    runtime.register(workflow)
     assert runtime.validate() == []
 
-    flow = TriggerFlow(name="runtime-orchestration-demo")
+    items = []
+    async for item in runtime.run_workflow_observable(
+        "workflow.lifecycle.preview",
+        input={"topic": "runtime workflow lifecycle"},
+    ):
+        items.append(item)
 
-    @flow.chunk
-    async def analyze(data: Any):
-        topic = getattr(data, "value", data)
-        r = await runtime.run("agent.analyze", input={"topic": topic})
-        return {"topic": topic, "analysis": r.output, "report": r.node_report}
-
-    @flow.chunk
-    async def write(data: Any):
-        payload = getattr(data, "value", data) or {}
-        r = await runtime.run(
-            "agent.write",
-            input={"topic": payload.get("topic"), "analysis": payload.get("analysis")},
-        )
-        return {"final": r.output, "report": r.node_report}
-
-    flow.to(analyze).to(write)
-    out = flow.start("为什么系统级证据链对 LLM 编排很重要？", wait_for_result=True, timeout=60)
+    snapshot = runtime.summarize_workflow_run(
+        workflow_id="workflow.lifecycle.preview",
+        items=items,
+        terminal=items[-1] if items else None,
+    )
+    lifecycle_events = [
+        item for item in items if isinstance(item, dict) and str(item.get("type", "")).startswith("workflow.lifecycle.")
+    ]
 
     print("=== 04_triggerflow_orchestration ===")
-    print(out)
+    print(f"workflow_id={snapshot.workflow_id}")
+    print(f"status={snapshot.status.value}")
+    print(f"workflow_instance_id={snapshot.workflow_instance_id}")
+    print(f"step_count={len(snapshot.steps)}")
+    print(f"lifecycle_state={snapshot.lifecycle_state}")
+    print(f"execution_id={snapshot.execution_id}")
+    print(f"state_version={snapshot.state_version}")
+    print(f"intervention_mode={snapshot.intervention_mode}")
+    print(f"pending_interventions={len(snapshot.pending_interventions)}")
+    print(f"close_reason={snapshot.close_reason}")
+    print(f"lifecycle_event_count={len(lifecycle_events)}")
+    print("lifecycle_fields=additive")
 
 
 if __name__ == "__main__":
-    main()
-
+    asyncio.run(main())

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Runtime Bridge Capability Showcase</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fa;
+        --panel: #ffffff;
+        --ink: #20242c;
+        --muted: #5f6978;
+        --line: #d8dde6;
+        --accent: #0b6e4f;
+        --accent-2: #375a7f;
+        --code: #111827;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+      header {
+        padding: 28px 32px 20px;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+      header p {
+        margin: 0;
+        max-width: 980px;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      main {
+        padding: 24px 32px 40px;
+        max-width: 1280px;
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      .metric,
+      section {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .metric {
+        padding: 14px 16px;
+      }
+      .metric strong {
+        display: block;
+        font-size: 20px;
+        margin-bottom: 4px;
+      }
+      .metric span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      section {
+        margin: 14px 0;
+        padding: 18px;
+      }
+      h2 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 14px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        background: #e7f4ef;
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        margin: 0 6px 8px 0;
+      }
+      .pill.blue {
+        background: #e7eef7;
+        color: var(--accent-2);
+      }
+      pre {
+        margin: 10px 0 0;
+        padding: 14px;
+        overflow: auto;
+        background: var(--code);
+        color: #e5edf6;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      ul {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      @media (max-width: 820px) {
+        header,
+        main {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Runtime Bridge Capability Showcase</h1>
+      <p>
+        这个页面展示 capability-runtime 升级后通过本仓稳定契约暴露的新能力：
+        Responses bridge、Dynamic DAG preview、TriggerFlow lifecycle、Workspace/Recall context pack、
+        Action artifact evidence，以及真实 provider evidence 修复。
+      </p>
+    </header>
+    <main>
+      <div class="summary">
+        <div class="metric"><strong>chat_completions</strong><span>默认 requester，不破 legacy</span></div>
+        <div class="metric"><strong>responses</strong><span>显式 opt-in requester</span></div>
+        <div class="metric"><strong>gpt-5.4</strong><span>真实 usage.model evidence</span></div>
+        <div class="metric"><strong>0 raw secrets</strong><span>只展示脱敏摘要和 references</span></div>
+      </div>
+
+      <section>
+        <h2>真实 Provider Bridge</h2>
+        <span class="pill">NodeReport.usage.model 修复</span>
+        <span class="pill blue">request_id 保留</span>
+        <div class="grid">
+          <div>
+            <strong>Chat Completions</strong>
+            <pre><code>status=success
+output_preview=Capability Runtime 在企业内的落地价值...
+has_node_report=True
+usage_model=gpt-5.4</code></pre>
+          </div>
+          <div>
+            <strong>Responses</strong>
+            <pre><code>status=success
+output_preview=caprt-runtime-responses-ok
+has_node_report=True
+usage_model=gpt-5.4
+usage_total_tokens=2371
+request_id_present=True
+responses_is_default=false</code></pre>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Dynamic DAG Preview</h2>
+        <span class="pill">TaskDAG-like input</span>
+        <span class="pill blue">DynamicWorkflowPlan</span>
+        <span class="pill blue">Runtime.run()</span>
+        <ul>
+          <li>不暴露上游原生 TaskDAG / DynamicTask。</li>
+          <li>每个 node 的 binding 必须指向已注册 capability id。</li>
+          <li>fan-out/fan-in 示例：context → security/reliability → comms。</li>
+        </ul>
+        <pre><code>scenario=incident_fan_out_fan_in
+incident_status=success
+nodes=context, security, reliability, comms
+incident_has_node_report=True</code></pre>
+      </section>
+
+      <section>
+        <h2>TriggerFlow Lifecycle</h2>
+        <span class="pill">additive events</span>
+        <span class="pill blue">WorkflowRunSnapshot</span>
+        <pre><code>status=completed
+lifecycle_state=closed
+execution_id=triggerflow-&lt;workflow_instance_id&gt;
+state_version=1
+pending_interventions=0
+close_reason=success
+lifecycle_event_count=2</code></pre>
+      </section>
+
+      <section>
+        <h2>Workspace / Recall Context Pack</h2>
+        <span class="pill">neutral refs</span>
+        <span class="pill blue">not WAL</span>
+        <pre><code>context_goal=continue incident briefing
+context_item_count=1
+context_omitted_count=1
+context_ref=rec-incident
+node_report_ref=node-report-summary
+raw_workspace_is_wal=false</code></pre>
+      </section>
+
+      <section>
+        <h2>Action Artifact Evidence</h2>
+        <span class="pill">reference only</span>
+        <span class="pill blue">raw body omitted</span>
+        <pre><code>artifact_refs=['agently-action://artifact-1']
+summary_count=1
+raw_body_present=False
+tools_execution_model_replaced=false</code></pre>
+      </section>
+    </main>
+  </body>
+</html>

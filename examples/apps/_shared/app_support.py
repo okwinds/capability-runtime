@@ -7,7 +7,7 @@ examples/apps 共享支持代码（面向人类的应用示例）。
 - 每个 app 示例都像“小应用/MVP”：有过程感、有产物、有证据链；
 - 支持双模式：
   - offline：离线可回归（FakeChatBackend 驱动真实 skills_runtime.Agent loop）
-  - real：真模型可跑（OpenAI-compatible，通过 Agently requester 作为传输层）
+  - real：真模型可跑（OpenAI-compatible，通过 runtime bridge requester 作为传输层）
 - skills-first：通过严格 mention token 触发 skills 注入（Scheme2：薄壳 Agent 节点承载 skills）。
 """
 
@@ -443,12 +443,12 @@ def build_bridge_runtime_from_env(
     - Runtime 实例
     """
 
-    agently_agent = None
+    bridge_upstream_agent = None
     if sdk_backend is None:
         try:
             from agently import Agently  # type: ignore
         except ModuleNotFoundError as exc:
-            raise RuntimeError("agently is required for real mode (bridge)") from exc
+            raise RuntimeError("bridge upstream dependency is required for real mode") from exc
 
         base_url = env_or_default("OPENAI_BASE_URL", "https://api.openai.com/v1")
         model_name = env_or_default("MODEL_NAME", "gpt-4o-mini")
@@ -460,7 +460,7 @@ def build_bridge_runtime_from_env(
             "OpenAICompatible",
             {"base_url": base_url, "model": model_name, "auth": api_key},
         )
-        agently_agent = Agently.create_agent()
+        bridge_upstream_agent = Agently.create_agent()
 
     return Runtime(
         RuntimeConfig(
@@ -468,7 +468,7 @@ def build_bridge_runtime_from_env(
             workspace_root=workspace_root,
             sdk_config_paths=[overlay],
             preflight_mode="off",
-            agently_agent=agently_agent,
+            agently_agent=bridge_upstream_agent,
             approval_provider=approval_provider,
             human_io=human_io,
             sdk_backend=sdk_backend,
