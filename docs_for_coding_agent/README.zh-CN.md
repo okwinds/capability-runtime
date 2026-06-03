@@ -36,6 +36,13 @@
 入口：
 - `examples/README.md`
 
+## Skills 执行边界
+
+Agently `SkillsExecutor` 不是 `capability-runtime` 的 skills 驱动器。它的
+`SKILL.md` 编写范式可以作为资产设计参考，但业务代码仍应通过
+`AgentSpec.skills`、`Runtime.run()` 与 `NodeReport` 使用本框架；skill 注入、
+tool 执行、approval、WAL、events 与证据聚合仍由 `skills-runtime-sdk` 负责。
+
 ## 本变更新增：可回归教学示例库（atomic + recipes）
 
 为让编码智能体通过小样本学习掌握“如何用本框架组织能力并落地代码”，新增：

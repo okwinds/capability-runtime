@@ -33,6 +33,9 @@ runtime surface.
 - `skills-runtime-sdk`: skills, tools, approvals, WAL, and event truth
 - `Agently`: OpenAI-compatible transport and workflow internals
 - `capability-runtime`: the smaller runtime contract that hosts can integrate
+- Agently `SkillsExecutor` is not a runtime skills driver here. Treat its
+  authoring patterns as `SKILL.md` bundle guidance only; execution truth remains
+  `skills-runtime-sdk`.
 
 ## Provider Bridge Boundary
 

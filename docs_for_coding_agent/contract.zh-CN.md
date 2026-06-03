@@ -31,5 +31,8 @@
 
 - 不要在 protocol 层引入上游执行依赖
 - 不要绕过 `Runtime` 手写另一套编排语义
+- 不要把 Agently `SkillsExecutor` 当成第二套 skills 执行路径；`SKILL.md`
+  编写范式可以复用，但 skill 注入、tool 执行、approval、WAL、events 与
+  `NodeReport` 证据链仍由 `skills-runtime-sdk` 负责
 - 不要把业务规则硬写进 runtime 核心
 - 不要提交真实 `.env` 或私有协作文档

@@ -32,7 +32,9 @@
 
 - `skills-runtime-sdk`：skills、tools、approvals、WAL、events
 - `Agently`：OpenAI-compatible transport 与 Workflow 内部编排底座
-- `capability-runtime`：把上游能力收敛为更小的宿主契约
+- `capability-runtime`：提供更小、更稳定的宿主侧运行时契约
+- Agently `SkillsExecutor` 不是本仓的 skills 驱动器；它的编写范式只能作为
+  `SKILL.md` bundle 设计参考，执行真相源仍是 `skills-runtime-sdk`
 
 ## 读代码建议
 

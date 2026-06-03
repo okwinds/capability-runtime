@@ -86,7 +86,9 @@ from capability_runtime import (
 
 Use `RuntimeConfig.requester_strategy="responses"` only for explicit Responses
 opt-in. Do not import upstream-native requester, workflow, Workspace, DynamicTask,
-or Action objects in downstream code.
+Action, or SkillsExecutor objects in downstream code. Agently SkillsExecutor
+patterns are authoring guidance only; runtime skills execution remains
+`skills-runtime-sdk`.
 
 ## Provider Bridge Runbook
 

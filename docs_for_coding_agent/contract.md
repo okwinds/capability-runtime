@@ -42,6 +42,9 @@ When you implement changes in this repository, use this minimum loop:
 - bypass `Runtime` by creating a second orchestration semantics path
 - expose upstream-native requester, `TriggerFlowExecution`, `DynamicTask`,
   `Workspace`, `Action`, or `SkillsExecutor` objects as public contracts
+- use Agently `SkillsExecutor` as a second skills execution path; SKILL.md
+  authoring patterns may be reused, but skill injection/tool execution/approval/
+  WAL/events/NodeReport evidence stay on `skills-runtime-sdk`
 - document Agently settings as the runtime model precedence source
 - drop provider `request_id` or `provider` while repairing model metadata
 - hardcode business rules into runtime internals

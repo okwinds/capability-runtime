@@ -25,10 +25,15 @@ It focuses on:
 4. [capability-coverage-map.md](capability-coverage-map.md) - capability to evidence mapping
 5. [examples/README.md](examples/README.md) - offline-regression examples
 
-For provider bridge upgrade work, read the upgrade spec first:
-`docs/specs/upgrade-agently-4.1.3.1.md`. The coding rule is simple: downstream
-code depends on `capability_runtime`, not upstream-native requester, TaskDAG,
-Workspace, Action, or TriggerFlow execution objects.
+For provider bridge, dynamic DAG, recall, or artifact evidence work, the coding
+rule is simple: downstream code depends on `capability_runtime`, not
+upstream-native requester, TaskDAG, Workspace, Action, SkillsExecutor, or
+TriggerFlow execution objects.
+
+Agently `SkillsExecutor` authoring patterns may inform how a `SKILL.md` bundle is
+written. They do not change the execution truth: skill injection, tool execution,
+approvals, WAL, events, and `NodeReport` evidence remain owned by
+`skills-runtime-sdk`.
 
 Real-provider work must also preserve the runtime wiring order:
 `models` check -> `OpenAICompatible` provider chat transport ->

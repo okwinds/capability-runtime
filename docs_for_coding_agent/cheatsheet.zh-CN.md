@@ -79,3 +79,4 @@ from capability_runtime import (
 - `needs_approval`: 读取 `NodeReport` 或 `HostRunSnapshot`
 - `preflight` 报错：检查 `sdk_config_paths` / `skills_config`
 - 想做宿主 streaming：看 `RuntimeServiceFacade`
+- 不要把 Agently `SkillsExecutor` 当成第二套 skills executor；skills 执行真相源仍是 `skills-runtime-sdk`
