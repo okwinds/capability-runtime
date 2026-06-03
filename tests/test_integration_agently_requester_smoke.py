@@ -5,7 +5,10 @@ import importlib.metadata as importlib_metadata
 
 import pytest
 
-from capability_runtime.adapters.agently_backend import build_openai_compatible_requester_factory
+from capability_runtime.adapters.agently_backend import (
+    build_openai_compatible_requester_factory,
+    build_openai_provider_requester_factory,
+)
 
 
 @pytest.mark.integration
@@ -51,6 +54,26 @@ def test_agently_openai_compatible_requester_generate_request_data_smoke():
 
     agently_agent = agently_mod.Agently.create_agent("agently-requester-smoke")
     factory = build_openai_compatible_requester_factory(agently_agent=agently_agent)
+    requester = factory()
+
+    request_data = requester.generate_request_data()
+    assert getattr(request_data, "request_url", "")
+    assert isinstance(getattr(request_data, "headers", {}), dict)
+    assert isinstance(getattr(request_data, "data", {}), dict)
+
+
+@pytest.mark.integration
+def test_public_openai_provider_requester_responses_generate_request_data_smoke():
+    """公开中立 helper 也必须能构造 Responses requester data；不访问网络。"""
+
+    assert importlib_metadata.version("agently") == "4.1.3.1"
+
+    factory = build_openai_provider_requester_factory(
+        base_url="https://provider.example/v1",
+        transport_model="model-smoke",
+        api_key="test-key",
+        strategy="responses",
+    )
     requester = factory()
 
     request_data = requester.generate_request_data()

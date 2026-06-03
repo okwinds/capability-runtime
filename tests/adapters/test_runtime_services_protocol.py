@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from capability_runtime import Runtime, RuntimeConfig, RuntimeServices
+from capability_runtime import Runtime, RuntimeConfig
+from capability_runtime.services import RuntimeServices
 
 
 def _accept_runtime_services(services: RuntimeServices) -> RuntimeServices:

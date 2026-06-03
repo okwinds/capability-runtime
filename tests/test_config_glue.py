@@ -24,10 +24,21 @@ def test_runtime_config_defaults():
     assert cfg.tool_choice_after_tool_result is None
 
 
-def test_runtime_config_legacy_requester_alias_takes_precedence():
-    cfg = RuntimeConfig(requester_strategy="chat_completions", agently_requester="responses")
+def test_runtime_config_legacy_requester_alias_remains_available_when_neutral_field_is_default():
+    cfg = RuntimeConfig(agently_requester="responses")
 
+    assert cfg.requester_strategy == "responses"
     assert cfg.effective_requester_strategy == "responses"
+
+
+def test_runtime_config_rejects_conflicting_legacy_requester_alias():
+    with pytest.raises(ValueError, match="agently_requester conflicts with requester_strategy"):
+        RuntimeConfig(requester_strategy="responses", agently_requester="chat_completions")
+
+
+def test_runtime_config_rejects_legacy_alias_that_overrides_explicit_canonical_default():
+    with pytest.raises(ValueError, match="agently_requester conflicts with requester_strategy"):
+        RuntimeConfig(requester_strategy="chat_completions", agently_requester="responses")
 
 
 def test_runtime_config_tool_choice_after_tool_result_is_explicit_opt_in():
@@ -41,6 +52,16 @@ def test_runtime_config_rejects_invalid_tool_choice_after_tool_result():
 
     with pytest.raises(ValueError, match="tool_choice_after_tool_result"):
         RuntimeConfig(tool_choice_after_tool_result="required")  # type: ignore[arg-type]
+
+
+def test_runtime_config_rejects_invalid_requester_strategy():
+    with pytest.raises(ValueError, match="requester_strategy"):
+        RuntimeConfig(requester_strategy="response")  # type: ignore[arg-type]
+
+
+def test_runtime_config_rejects_invalid_legacy_requester_alias():
+    with pytest.raises(ValueError, match="agently_requester"):
+        RuntimeConfig(agently_requester="chat_completion")  # type: ignore[arg-type]
 
 
 def test_normalize_workspace_root_default_is_cwd(tmp_path, monkeypatch):

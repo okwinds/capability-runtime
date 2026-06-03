@@ -7,8 +7,8 @@ import pytest
 from capability_runtime.types import NodeReport
 
 
-class _FakeWorkspace:
-    """记录 adapter 调用的最小 Workspace 替身。"""
+class _FakeRecallBackend:
+    """记录 adapter 调用的最小 RuntimeRecallBackend 替身。"""
 
     def __init__(self, context: dict[str, Any] | None = None) -> None:
         self.context = context or {}
@@ -30,11 +30,11 @@ class _FakeWorkspace:
 
 @pytest.mark.asyncio
 async def test_workspace_build_context_becomes_neutral_context_pack_and_redacts_secrets() -> None:
-    """Slice F happy/edge：Workspace context 只转为中立 pack，摘要脱敏并尊重 budget。"""
+    """Slice F happy/edge：recall backend context 只转为中立 pack，摘要脱敏并尊重 budget。"""
 
-    from capability_runtime.context_pack import RuntimeRecallContextPack, build_recall_context_pack
+    from capability_runtime.context_pack import RuntimeRecallBackend, RuntimeRecallContextPack, build_recall_context_pack
 
-    workspace = _FakeWorkspace(
+    backend = _FakeRecallBackend(
         {
             "items": [
                 {
@@ -53,7 +53,8 @@ async def test_workspace_build_context_becomes_neutral_context_pack_and_redacts_
         }
     )
 
-    pack = await build_recall_context_pack(workspace, goal="continue session", budget={"max_items": 1})
+    assert isinstance(backend, RuntimeRecallBackend)
+    pack = await build_recall_context_pack(backend, goal="continue session", budget={"max_items": 1})
 
     assert isinstance(pack, RuntimeRecallContextPack)
     assert pack.goal == "continue session"
@@ -64,7 +65,6 @@ async def test_workspace_build_context_becomes_neutral_context_pack_and_redacts_
     dumped = str((pack.goal, pack.items, pack.diagnostics))
     assert "SECRET_TOKEN" not in dumped
     assert "Authorization" not in dumped
-    assert "Workspace" not in dumped
     assert "Recall" not in dumped
 
 
@@ -81,18 +81,18 @@ async def test_workspace_context_preview_degrades_stably_when_backend_unavailabl
     assert pack.omitted_count == 0
     assert pack.diagnostics == {
         "degraded": True,
-        "code": "WORKSPACE_BACKEND_UNAVAILABLE",
-        "message": "workspace backend is not configured",
+        "code": "RECALL_BACKEND_UNAVAILABLE",
+        "message": "recall backend is not configured",
     }
 
 
 @pytest.mark.asyncio
 async def test_node_report_summary_written_to_workspace_uses_sanitized_reference_only() -> None:
-    """Slice F evidence write：写入 Workspace 的只能是 NodeReport 摘要，不含原始正文。"""
+    """Slice F evidence write：写入 recall backend 的只能是 NodeReport 摘要，不含原始正文。"""
 
     from capability_runtime.context_pack import write_node_report_summary
 
-    workspace = _FakeWorkspace()
+    backend = _FakeRecallBackend()
     report = NodeReport(
         status="success",
         completion_reason="run_completed",
@@ -105,13 +105,13 @@ async def test_node_report_summary_written_to_workspace_uses_sanitized_reference
         },
     )
 
-    ref = await write_node_report_summary(workspace, report, collection="runtime_evidence")
+    ref = await write_node_report_summary(backend, report, collection="runtime_evidence")
 
     assert ref.id == "rec-written"
     assert ref.collection == "runtime_evidence"
     assert ref.kind == "node_report_summary"
-    assert workspace.put_calls
-    dumped = repr(workspace.put_calls)
+    assert backend.put_calls
+    dumped = repr(backend.put_calls)
     assert "run-secret" in dumped
     assert "wal://run-secret" not in dumped
     assert "artifact://safe-ref" not in dumped
@@ -125,7 +125,7 @@ async def test_node_report_summary_written_to_workspace_uses_sanitized_reference
 def test_context_record_ref_preserves_identifier_fields_but_redacts_summary() -> None:
     """record id/collection 是稳定引用，不能因关键词脱敏被改写。"""
 
-    from capability_runtime.adapters.agently_workspace import _record_ref_from_value
+    from capability_runtime.context_pack import _record_ref_from_value
 
     ref = _record_ref_from_value(
         {
@@ -142,3 +142,49 @@ def test_context_record_ref_preserves_identifier_fields_but_redacts_summary() ->
     assert ref.summary is not None
     assert "SHOULD_NOT_LEAK" not in ref.summary
     assert "Authorization" not in ref.summary
+
+
+def test_context_record_ref_hashes_raw_path_locator_when_id_is_missing() -> None:
+    """Recall backend path / WAL / signed URL 不能作为 raw record id 泄露。"""
+
+    from capability_runtime.context_pack import _record_ref_from_value
+
+    ref = _record_ref_from_value(
+        {
+            "path": "wal://secret-run/private.jsonl?token=SHOULD_NOT_LEAK",
+            "collection": "runtime_evidence",
+            "summary": "safe summary",
+        }
+    )
+
+    assert ref.id.startswith("opaque-ref:sha256:")
+    assert "wal://secret-run" not in ref.id
+    assert "SHOULD_NOT_LEAK" not in ref.id
+
+
+def test_context_record_ref_hashes_locator_like_id_values() -> None:
+    """Recall backend 若把 locator 放进 id/record_id，也不能原样进入 context pack。"""
+
+    from types import SimpleNamespace
+
+    from capability_runtime.context_pack import _record_ref_from_value
+
+    dict_ref = _record_ref_from_value(
+        {
+            "id": "https://provider.example/private/context.json?token=SHOULD_NOT_LEAK",
+            "collection": "runtime_evidence",
+        }
+    )
+    object_ref = _record_ref_from_value(
+        SimpleNamespace(
+            record_id="/var/private/wal/run-secret.jsonl",
+            collection="runtime_evidence",
+        )
+    )
+
+    assert dict_ref.id.startswith("opaque-ref:sha256:")
+    assert object_ref.id.startswith("opaque-ref:sha256:")
+    dumped = repr((dict_ref, object_ref))
+    assert "provider.example/private" not in dumped
+    assert "SHOULD_NOT_LEAK" not in dumped
+    assert "/var/private/wal" not in dumped

@@ -1,6 +1,8 @@
 """公共 API 导出面回归测试（按输入文档 2.7 收敛）。"""
 from __future__ import annotations
 
+import inspect
+
 
 def test_public_api_all_exports_are_stable() -> None:
     """验证 `capability_runtime.__all__` 仅包含重构后允许暴露的公共符号。"""
@@ -14,12 +16,16 @@ def test_public_api_all_exports_are_stable() -> None:
         "ProviderRequesterStrategy",
         "AgentlyRequesterStrategy",
         "ToolChoiceAfterToolResult",
+        "ProviderRequester",
+        "ProviderRequesterFactory",
         "CustomTool",
         "StructuredStreamEvent",
         "RuntimeContextRecordRef",
+        "RuntimeRecallBackend",
         "RuntimeRecallContextPack",
         "build_recall_context_pack",
         "write_node_report_summary",
+        "build_openai_provider_requester_factory",
         # Reports
         "NodeReport",
         "NodeResult",
@@ -59,7 +65,6 @@ def test_public_api_all_exports_are_stable() -> None:
         "ConditionalStep",
         "InputMapping",
         "ExecutionContext",
-        "RuntimeServices",
         # Errors
         "RuntimeFrameworkError",
         "CapabilityNotFoundError",
@@ -84,6 +89,7 @@ def test_public_api_does_not_expose_internal_impl_details() -> None:
         "LoopBreakerError",
         "RecursionLimitError",
         "WorkflowStep",
+        "RuntimeServices",
         # Adapters（不作为公共 API）
         "AgentAdapter",
         "WorkflowAdapter",
@@ -105,3 +111,20 @@ def test_legacy_agently_requester_strategy_import_remains_available() -> None:
 
     assert "AgentlyRequesterStrategy" in caprt.__all__
     assert caprt.AgentlyRequesterStrategy == caprt.ProviderRequesterStrategy
+
+
+def test_openai_provider_requester_factory_uses_transport_model_parameter() -> None:
+    """公开 helper 应避免把 transport bootstrap model 伪装成业务请求模型入口。"""
+
+    import capability_runtime as caprt
+
+    signature = inspect.signature(caprt.build_openai_provider_requester_factory)
+    assert list(signature.parameters) == [
+        "base_url",
+        "transport_model",
+        "api_key",
+        "strategy",
+        "allowed_hosts",
+        "allow_insecure_transport",
+    ]
+    assert "model" not in signature.parameters

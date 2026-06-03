@@ -7,18 +7,6 @@ on:
         description: "Release tag to validate before publish (for example v0.1.0)"
         required: true
         type: string
-      real_provider_smoke_override_reason:
-        description: "Emergency-only override when real provider bridge smoke was already run externally"
-        required: false
-        type: string
-      real_provider_smoke_override_url:
-        description: "URL of the external real provider bridge smoke run"
-        required: false
-        type: string
-      real_provider_smoke_override_commit:
-        description: "Commit SHA verified by the external real provider bridge smoke run"
-        required: false
-        type: string
   push:
     tags:
       - "v*"
@@ -34,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', github.event.inputs.release_tag) || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -57,6 +47,8 @@ jobs:
           timeout 300s nice -n 19 ionice -c3 python -m pytest -q \
             tests/test_dependency_pins.py \
             tests/test_public_api_exports.py \
+            tests/test_review_followups_module_contracts.py \
+            tests/test_config_glue.py \
             tests/test_repo_no_deep_imports_in_user_facing_docs.py \
             tests/test_examples_smoke.py \
             tests/test_backend_mode.py \
@@ -66,14 +58,20 @@ jobs:
             tests/test_openai_responses_compatible_bridge.py \
             tests/test_agently_backend_authorization_header_contract.py \
             tests/test_agently_bridge_diagnostics.py \
+            tests/test_runtime_structured_stream.py \
             tests/test_dynamic_workflow_plan_contract.py \
             tests/test_dynamic_workflow_runtime.py \
             tests/test_triggerflow_lifecycle_mapping.py \
+            tests/test_workflow_host_runtime_surface.py \
+            tests/test_offline_backend_injection_evidence.py \
             tests/test_agently_workspace_recall_preview.py \
             tests/test_agently_action_artifact_evidence.py \
             tests/test_node_report_builder.py \
             tests/test_node_report_contract_v1.py \
+            tests/test_runtime_hooks_and_schema_gate.py \
             tests/test_per_capability_llm_config_model_routing.py \
+            tests/ui_events/test_runtime_ui_events_agent_stream.py \
+            tests/ui_events/test_dynamic_dag_ui_events.py \
             tests/adapters/test_agent_adapter.py \
             tests/test_publish_real_provider_gate.py
 
@@ -83,12 +81,20 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           MODEL_NAME: ${{ secrets.MODEL_NAME }}
-          OVERRIDE_REASON: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.real_provider_smoke_override_reason || '' }}
-          OVERRIDE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.real_provider_smoke_override_url || '' }}
-          OVERRIDE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.real_provider_smoke_override_commit || '' }}
+          CAPRT_REAL_PROVIDER_REQUIRE_TRUSTED_HOST: "1"
+          CAPRT_REAL_PROVIDER_ALLOWED_HOSTS: ${{ secrets.CAPRT_REAL_PROVIDER_ALLOWED_HOSTS }}
+          CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT: ${{ secrets.CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT }}
+          CAPRT_REAL_PROVIDER_REQUIRE_IDENTITY: "1"
+          CAPRT_REAL_PROVIDER_MODELS_SHA256: ${{ secrets.CAPRT_REAL_PROVIDER_MODELS_SHA256 }}
         run: |
           set -euo pipefail
-          if [ -n "${OPENAI_API_KEY}" ] && [ -n "${OPENAI_BASE_URL}" ] && [ -n "${MODEL_NAME}" ]; then
+          if [ -n "${CAPRT_REAL_PROVIDER_DISABLE_TRUSTED_HOST_GUARD_FOR_TESTS:-}" ] || [ -n "${CAPRT_REAL_PROVIDER_DISABLE_IDENTITY_GUARD_FOR_TESTS:-}" ]; then
+            echo "::error::Real provider guard disable variables are forbidden in publish gate."
+            exit 1
+          fi
+          unset CAPRT_REAL_PROVIDER_DISABLE_TRUSTED_HOST_GUARD_FOR_TESTS
+          unset CAPRT_REAL_PROVIDER_DISABLE_IDENTITY_GUARD_FOR_TESTS
+          if [ -n "${OPENAI_API_KEY}" ] && [ -n "${OPENAI_BASE_URL}" ] && [ -n "${MODEL_NAME}" ] && [ -n "${CAPRT_REAL_PROVIDER_ALLOWED_HOSTS}" ] && [ -n "${CAPRT_REAL_PROVIDER_MODELS_SHA256}" ]; then
             CAPRT_REAL_PROVIDER_TESTS=1 timeout 240s nice -n 19 ionice -c3 python -m pytest -q \
               --junitxml /tmp/caprt-real-provider-smoke.xml \
               tests/integration/test_runtime_real_provider_bridge.py
@@ -109,21 +115,39 @@ jobs:
           if skipped:
               print("::error::Real provider bridge smoke skipped tests; release gate requires actual executed tests.")
               sys.exit(1)
+          required_real_smokes = {
+              "test_real_provider_chat_completions_bridge_preserves_usage_model",
+              "test_real_provider_responses_bridge_preserves_usage_model",
+              "test_real_provider_chat_completions_tool_call_and_approval_evidence",
+              "test_real_provider_responses_tool_call_and_approval_evidence",
+              "test_real_provider_responses_named_tool_choice_and_approval_evidence",
+          }
+          passed_cases = {
+              case.attrib.get("name", "")
+              for suite in suites
+              for case in suite.findall("testcase")
+              if not case.findall("failure") and not case.findall("error") and not case.findall("skipped")
+          }
+          missing_real_smokes = sorted(required_real_smokes - passed_cases)
+          if missing_real_smokes:
+              print(f"::error::Real provider bridge smoke did not execute required tests: {missing_real_smokes}")
+              sys.exit(1)
           if passed < 5:
               print("::error::Real provider bridge smoke must execute at least five passing tests.")
               sys.exit(1)
           print(f"real provider bridge smoke passed={passed} skipped={skipped} failures={failures} errors={errors}")
           PY
+            for app in form_interview_pro incident_triage_assistant; do
+              printf 'OPENAI_API_KEY=%s\nOPENAI_BASE_URL=%s\nMODEL_NAME=%s\n' \
+                "${OPENAI_API_KEY}" "${OPENAI_BASE_URL}" "${MODEL_NAME}" > "examples/apps/${app}/.env"
+            done
+            CAPRT_TEST_E2E_BRIDGE=1 timeout 420s nice -n 19 ionice -c3 python -m pytest -q \
+              tests/test_examples_real_integration.py::test_real_form_interview_pro_non_interactive \
+              tests/test_examples_real_evidence_strict_integration.py::test_real_incident_triage_assistant_evidence_strict
             exit 0
           fi
 
-          expected_run_url_prefix="https://github.com/${GITHUB_REPOSITORY}/actions/runs/"
-          if [ -n "${OVERRIDE_REASON}" ] && [[ "${OVERRIDE_URL}" == "${expected_run_url_prefix}"* ]] && [ "${OVERRIDE_COMMIT}" = "${GITHUB_SHA}" ]; then
-            echo "::warning::real provider bridge smoke override accepted for ${GITHUB_SHA}; external evidence URL recorded."
-            exit 0
-          fi
-
-          echo "::error::Real provider bridge smoke is required before publishing. Configure OPENAI_API_KEY, OPENAI_BASE_URL, and MODEL_NAME secrets, or provide workflow_dispatch override reason, GitHub evidence URL, and matching commit SHA."
+          echo "::error::Real provider bridge smoke is required before publishing. Configure OPENAI_API_KEY, OPENAI_BASE_URL, MODEL_NAME, CAPRT_REAL_PROVIDER_ALLOWED_HOSTS, and CAPRT_REAL_PROVIDER_MODELS_SHA256 secrets so the release gate can prevent skipped tests, untrusted hosts, and model catalog drift before publishing."
           exit 1
 
       - name: Build sdist and wheel

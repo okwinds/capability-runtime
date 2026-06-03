@@ -146,6 +146,190 @@ def test_summarize_workflow_run_collects_step_statuses_and_waiting_approval() ->
     ]
 
 
+def test_summarize_workflow_run_event_only_waiting_approval() -> None:
+    """仅持久化 workflow events 时也应还原 WAITING_HUMAN 与 approval key。"""
+
+    rt = _build_runtime()
+    snapshot = rt.summarize_workflow_run(
+        workflow_id="wf.review",
+        items=[
+            {
+                "type": "workflow.started",
+                "run_id": "wf-run-2",
+                "workflow_id": "wf.review",
+                "workflow_instance_id": "wf-inst-2",
+            },
+            {
+                "type": "workflow.step.started",
+                "run_id": "wf-run-2",
+                "workflow_id": "wf.review",
+                "workflow_instance_id": "wf-inst-2",
+                "step_id": "review",
+                "capability_id": "agent.review",
+            },
+            {
+                "type": "workflow.step.finished",
+                "run_id": "wf-run-2",
+                "workflow_id": "wf.review",
+                "workflow_instance_id": "wf-inst-2",
+                "step_id": "review",
+                "capability_id": "agent.review",
+                "status": "pending",
+                "waiting_approval_key": "approval-event-1",
+            },
+        ],
+        terminal=None,
+    )
+
+    assert snapshot.status == WorkflowRunStatus.WAITING_HUMAN
+    assert snapshot.current_step_id == "review"
+    assert snapshot.waiting_approval_key == "approval-event-1"
+
+
+def test_summarize_workflow_run_event_only_pending_finished_is_waiting_human() -> None:
+    """workflow.finished status=pending 不能被 event-only snapshot 误判为 running。"""
+
+    rt = _build_runtime()
+    snapshot = rt.summarize_workflow_run(
+        workflow_id="wf.review",
+        items=[
+            {
+                "type": "workflow.started",
+                "run_id": "wf-run-pending",
+                "workflow_id": "wf.review",
+                "workflow_instance_id": "wf-inst-pending",
+            },
+            {
+                "type": "workflow.finished",
+                "run_id": "wf-run-pending",
+                "workflow_id": "wf.review",
+                "workflow_instance_id": "wf-inst-pending",
+                "status": "pending",
+                "waiting_approval_key": "approval-finished-1",
+            },
+        ],
+        terminal=None,
+    )
+
+    assert snapshot.status == WorkflowRunStatus.WAITING_HUMAN
+    assert snapshot.waiting_approval_key == "approval-finished-1"
+
+
+@pytest.mark.asyncio
+async def test_summarize_dynamic_workflow_run_collects_dag_nodes_as_steps() -> None:
+    """Dynamic DAG events must project into the same host WorkflowRunSnapshot surface."""
+
+    rt = _build_runtime()
+    rt.register(AgentSpec(base=CapabilitySpec(id="agent.first", kind=CapabilityKind.AGENT, name="First")))
+    rt.register(AgentSpec(base=CapabilitySpec(id="agent.second", kind=CapabilityKind.AGENT, name="Second")))
+
+    plan = rt.compile_dynamic_workflow_plan(
+        {
+            "graph_id": "dag.runtime",
+            "tasks": [
+                {"id": "first", "kind": "model", "binding": "agent.first"},
+                {"id": "second", "kind": "model", "binding": "agent.second", "depends_on": "first"},
+            ],
+        }
+    )
+    items = [item async for item in rt.run_dynamic_workflow_stream(plan, input={"topic": "snapshot"})]
+    terminal = next(item for item in items if isinstance(item, CapabilityResult))
+    workflow_events = [item for item in items if isinstance(item, dict)]
+
+    snapshot = rt.summarize_workflow_run(
+        workflow_id="dag.runtime",
+        items=workflow_events,
+        terminal=terminal,
+    )
+
+    assert snapshot.workflow_instance_id.startswith("dynamic-dag:")
+    assert snapshot.workflow_instance_id.endswith(":dag.runtime")
+    assert snapshot.status == WorkflowRunStatus.COMPLETED
+    assert [(step.step_id, step.status, step.capability_id) for step in snapshot.steps] == [
+        ("first", "success", "agent.first"),
+        ("second", "success", "agent.second"),
+    ]
+
+
+def test_summarize_dynamic_workflow_run_waiting_approval_preserves_current_node() -> None:
+    """Dynamic DAG needs_approval 节点应成为 host snapshot 的当前阻塞节点。"""
+
+    rt = _build_runtime()
+    terminal = CapabilityResult(
+        status=CapabilityStatus.PENDING,
+        error_code="DYNAMIC_DAG_NODE_NEEDS_APPROVAL",
+        node_report=NodeReport(
+            status="needs_approval",
+            reason="approval_pending",
+            completion_reason="approval_pending",
+            run_id="dag-run-approval",
+            tool_calls=[
+                NodeToolCallReport(
+                    call_id="call-dag",
+                    name="review",
+                    requires_approval=True,
+                    approval_key="approval-dag-1",
+                    ok=False,
+                )
+            ],
+            meta={
+                "dynamic_dag": {
+                    "graph_id": "dag.approval",
+                    "plan_hash": "hash",
+                    "node_count": 1,
+                    "source": "task_dag",
+                    "nodes": {
+                        "approval": {
+                            "id": "approval",
+                            "status": "needs_approval",
+                            "capability_id": "agent.approval",
+                        }
+                    },
+                    "waiting": {
+                        "dag_node_id": "approval",
+                        "approval_key": "approval-dag-1",
+                    },
+                }
+            },
+        ),
+    )
+
+    snapshot = rt.summarize_workflow_run(
+        workflow_id="dag.approval",
+        items=[
+            {
+                "type": "workflow.dynamic_dag.planned",
+                "run_id": "dag-run-approval",
+                "workflow_id": "dag.approval",
+                "workflow_instance_id": "dynamic-dag:dag-run-approval:dag.approval",
+            },
+            {
+                "type": "workflow.dynamic_dag.node.started",
+                "run_id": "dag-run-approval",
+                "workflow_id": "dag.approval",
+                "workflow_instance_id": "dynamic-dag:dag-run-approval:dag.approval",
+                "dag_node_id": "approval",
+                "capability_id": "agent.approval",
+            },
+            {
+                "type": "workflow.dynamic_dag.node.finished",
+                "run_id": "dag-run-approval",
+                "workflow_id": "dag.approval",
+                "workflow_instance_id": "dynamic-dag:dag-run-approval:dag.approval",
+                "dag_node_id": "approval",
+                "capability_id": "agent.approval",
+                "status": "needs_approval",
+                "waiting_approval_key": "approval-dag-1",
+            },
+        ],
+        terminal=terminal,
+    )
+
+    assert snapshot.status == WorkflowRunStatus.WAITING_HUMAN
+    assert snapshot.current_step_id == "approval"
+    assert snapshot.waiting_approval_key == "approval-dag-1"
+
+
 @pytest.mark.asyncio
 async def test_run_workflow_observable_yields_workflow_events_and_terminal() -> None:
     """回归：宿主可直接消费 workflow observable，而不是自己分流 mixed stream。"""
@@ -168,8 +352,8 @@ async def test_run_workflow_observable_yields_workflow_events_and_terminal() -> 
 
 
 @pytest.mark.asyncio
-async def test_replay_workflow_reexecutes_from_host_request_without_triggerflow_handle() -> None:
-    """回归：replay_workflow 只接受 host request/snapshot，不要求宿主传内部 execution handle。"""
+async def test_replay_workflow_from_snapshot_fails_closed_until_snapshot_replay_is_supported() -> None:
+    """from_snapshot 不能被静默当作从头 rerun，否则会重复已完成步骤副作用。"""
 
     rt = _build_runtime()
     rt.register(AgentSpec(base=CapabilitySpec(id="agent.draft", kind=CapabilityKind.AGENT, name="Draft Agent")))
@@ -196,5 +380,5 @@ async def test_replay_workflow_reexecutes_from_host_request_without_triggerflow_
         )
     )
 
-    assert result.status == CapabilityStatus.SUCCESS
-    assert result.output == {"draft": {"handled_by": "agent.draft", "input": {}}}
+    assert result.status == CapabilityStatus.FAILED
+    assert result.error_code == "WORKFLOW_SNAPSHOT_REPLAY_UNSUPPORTED"

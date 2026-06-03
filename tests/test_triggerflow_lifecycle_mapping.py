@@ -70,7 +70,11 @@ async def test_triggerflow_lifecycle_events_are_additive_and_snapshot_safe() -> 
 
     assert started["lifecycle_state"] == "open"
     assert isinstance(started["execution_id"], str) and started["execution_id"]
+    assert started["execution_id"].startswith("wfexec-")
+    assert not started["execution_id"].startswith("triggerflow-")
     assert started["state_version"] == 0
+    assert started["lifecycle_source"] == "runtime_triggerflow_adapter"
+    assert started["intervention_supported"] is False
     assert finished["lifecycle_state"] == "closed"
     assert finished["close_reason"] == "success"
     assert finished["execution_id"] == started["execution_id"]
@@ -84,6 +88,8 @@ async def test_triggerflow_lifecycle_events_are_additive_and_snapshot_safe() -> 
     assert snapshot.execution_id == started["execution_id"]
     assert snapshot.close_reason == "success"
     assert snapshot.state_version == finished["state_version"]
+    assert snapshot.lifecycle_source == "runtime_triggerflow_adapter"
+    assert snapshot.intervention_supported is False
     assert snapshot.intervention_mode is None
     assert snapshot.pending_interventions == []
 
@@ -144,6 +150,10 @@ async def test_run_ui_events_and_session_project_workflow_lifecycle_additively()
     allowed_phases = {"IDLE", "THINKING", "TOOL_RUNNING", "WAITING_APPROVAL", "RUNNING", "REPORTING", "DONE"}
     assert all(ev.data.get("phase") in allowed_phases for ev in out if ev.type == "node.phase")
     assert any(ev.type == "workflow.lifecycle.changed" for ev in out)
+    lifecycle_events = [ev for ev in out if ev.type == "workflow.lifecycle.changed"]
+    assert lifecycle_events
+    assert lifecycle_events[-1].data["lifecycle_source"] == "runtime_triggerflow_adapter"
+    assert lifecycle_events[-1].data["intervention_supported"] is False
 
     sess = rt.start_ui_events_session("wf.lifecycle", input={}, level=StreamLevel.UI, store_max_events=10_000)
     session_out = []

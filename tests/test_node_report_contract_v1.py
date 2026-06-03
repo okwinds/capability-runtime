@@ -90,7 +90,13 @@ def test_node_usage_report_extra_fields_are_rejected() -> None:
         NodeUsageReport.model_validate({"model": "m", "total_tokens": 1, "unexpected": True})
 
     ok = NodeUsageReport.model_validate(
-        {"model": "m", "total_tokens": 1, "request_id": "req_123", "provider": "openai-compatible"}
+        {
+            "model": "m",
+            "total_tokens": 1,
+            "request_id": "req_123",
+            "provider": "gateway-x",
+            "provider_transport": "chat_completions",
+        }
     )
     assert set(ok.model_dump().keys()) == {
         "model",
@@ -99,6 +105,7 @@ def test_node_usage_report_extra_fields_are_rejected() -> None:
         "total_tokens",
         "request_id",
         "provider",
+        "provider_transport",
     }
 
 

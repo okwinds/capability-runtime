@@ -287,7 +287,8 @@ def test_provider_stream_terminal_error_str_is_human_readable() -> None:
         completion_reason="response_failed",
         error_code="PROVIDER_STREAM_TERMINAL",
         request_id="resp_failed",
-        provider="openai-responses",
+        provider=None,
+        provider_transport="responses",
         model="gpt-responses",
     )
 
@@ -300,7 +301,8 @@ def test_provider_stream_terminal_error_str_is_human_readable() -> None:
         "completion_reason": "response_failed",
         "error_code": "PROVIDER_STREAM_TERMINAL",
         "request_id": "resp_failed",
-        "provider": "openai-responses",
+        "provider": None,
+        "provider_transport": "responses",
         "model": "gpt-responses",
     }
 
@@ -317,7 +319,8 @@ def test_report_uses_structured_provider_terminal_event() -> None:
                 "completion_reason": "response_failed",
                 "error_code": "PROVIDER_STREAM_TERMINAL",
                 "request_id": "resp_failed",
-                "provider": "openai-responses",
+                "provider": None,
+                "provider_transport": "responses",
                 "model": "gpt-responses",
             },
         ),
@@ -332,7 +335,9 @@ def test_report_uses_structured_provider_terminal_event() -> None:
     assert rep.usage is not None
     assert rep.usage.model == "gpt-responses"
     assert rep.usage.request_id == "resp_failed"
-    assert rep.usage.provider == "openai-responses"
+    assert rep.usage.provider is None
+    assert rep.usage.provider_transport == "responses"
+    assert rep.meta["provider_terminal"]["provider_transport"] == "responses"
     assert rep.meta["provider_terminal"]["error_code"] == "PROVIDER_STREAM_TERMINAL"
     assert "CAPRT_PROVIDER_STREAM_TERMINAL" not in rep.model_dump_json()
 

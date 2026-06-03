@@ -7,6 +7,7 @@ from __future__ import annotations
 """
 
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -18,6 +19,51 @@ from urllib.request import urlopen
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+
+def _env_without_provider_config(*, allow_skip: bool = False) -> dict[str, str]:
+    env = dict(os.environ)
+    for key in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME"):
+        env.pop(key, None)
+    if allow_skip:
+        env["CAPRT_EXAMPLE_ALLOW_SKIP"] = "1"
+    else:
+        env.pop("CAPRT_EXAMPLE_ALLOW_SKIP", None)
+    return env
+
+
+def test_bridge_examples_missing_provider_config_fail_closed_by_default() -> None:
+    for rel_path in [
+        "examples/01_quickstart/run_bridge.py",
+        "examples/03_bridge_e2e/run.py",
+        "examples/06_responses_bridge/run.py",
+    ]:
+        p = subprocess.run(
+            [sys.executable, rel_path],
+            cwd=_REPO_ROOT,
+            env=_env_without_provider_config(),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert p.returncode == 2, p.stdout + "\n" + p.stderr
+
+
+def test_bridge_examples_missing_provider_config_allow_explicit_skip() -> None:
+    for rel_path in [
+        "examples/03_bridge_e2e/run.py",
+        "examples/06_responses_bridge/run.py",
+    ]:
+        p = subprocess.run(
+            [sys.executable, rel_path],
+            cwd=_REPO_ROOT,
+            env=_env_without_provider_config(allow_skip=True),
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert p.returncode == 0, p.stdout + "\n" + p.stderr
+        assert "未触达真实 provider" in p.stdout or "skip_reason=missing provider configuration" in p.stdout
 
 
 def _read_sse_until_terminal(*, url: str, timeout_sec: int = 10) -> Dict[str, Any]:

@@ -62,7 +62,7 @@ def test_action_artifact_reference_summary_enters_node_report_without_raw_conten
 
     report = NodeReportBuilder().build(events=events)
 
-    assert report.artifacts == ["agently-action://art-1"]
+    assert report.artifacts == ["runtime-action://art-1"]
     assert report.meta["action_artifacts"] == [
         {
             "artifact_id": "art-1",
@@ -74,11 +74,12 @@ def test_action_artifact_reference_summary_enters_node_report_without_raw_conten
         }
     ]
     assert report.meta["runtime_action_artifact_refs"] == ["runtime-action://art-1"]
-    assert report.meta["agently_action_artifacts"] == report.meta["action_artifacts"]
+    assert report.meta["legacy_action_artifact_refs"] == ["agently-action://art-1"]
     assert report.meta["action_artifact_diagnostics"] == [
         {"code": "ACTION_ARTIFACT_INVALID", "index": 2, "source": "tool_call_finished"}
     ]
-    assert report.meta["agently_action_artifact_diagnostics"] == report.meta["action_artifact_diagnostics"]
+    assert "agently_action_artifacts" not in report.meta
+    assert "agently_action_artifact_diagnostics" not in report.meta
     assert report.tool_calls[0].data == {
         "artifact_refs": [
             {
@@ -140,6 +141,102 @@ def test_invalid_only_action_artifact_payload_never_falls_back_to_raw_data() -> 
     assert "INVALID_ONLY_VALUE_SHOULD_NOT_LEAK" not in dumped
 
 
+def test_nested_action_artifact_payload_never_falls_back_to_raw_data() -> None:
+    """Slice G regression：嵌套 artifact_refs 也必须触发 raw body 脱敏。"""
+
+    events = [
+        _ev("run_started"),
+        _ev("tool_call_requested", payload={"call_id": "call-nested", "name": "runtime_action", "arguments": {}}),
+        _ev(
+            "tool_call_finished",
+            payload={
+                "call_id": "call-nested",
+                "tool": "runtime_action",
+                "result": {
+                    "ok": True,
+                    "data": {
+                        "raw_text": "NESTED_RAW_BODY_SHOULD_NOT_LEAK",
+                        "observation": {
+                            "artifact_refs": [
+                                {
+                                    "artifact_id": "nested-art",
+                                    "artifact_type": "file",
+                                    "label": "nested stdout",
+                                    "preview": "NESTED_PREVIEW_SHOULD_NOT_LEAK",
+                                    "value": "NESTED_VALUE_SHOULD_NOT_LEAK",
+                                }
+                            ],
+                        },
+                    },
+                },
+            },
+        ),
+        _ev("run_completed", payload={"wal_locator": "wal://run-action"}),
+    ]
+
+    report = NodeReportBuilder().build(events=events)
+
+    assert report.artifacts == ["runtime-action://nested-art"]
+    assert report.tool_calls[0].data == {
+        "artifact_refs": [
+            {
+                "artifact_id": "nested-art",
+                "artifact_type": "file",
+                "label": "nested stdout",
+                "source": "runtime_action",
+            }
+        ]
+    }
+    dumped = report.model_dump_json()
+    assert "NESTED_RAW_BODY_SHOULD_NOT_LEAK" not in dumped
+    assert "NESTED_PREVIEW_SHOULD_NOT_LEAK" not in dumped
+    assert "NESTED_VALUE_SHOULD_NOT_LEAK" not in dumped
+
+
+def test_nested_invalid_action_artifact_payload_never_falls_back_to_raw_data() -> None:
+    """Slice G regression：嵌套非法 artifact 容器也不能触发整包 raw data 回退。"""
+
+    events = [
+        _ev("run_started"),
+        _ev(
+            "tool_call_requested",
+            payload={"call_id": "call-nested-invalid", "name": "runtime_action", "arguments": {}},
+        ),
+        _ev(
+            "tool_call_finished",
+            payload={
+                "call_id": "call-nested-invalid",
+                "tool": "runtime_action",
+                "result": {
+                    "ok": True,
+                    "data": {
+                        "raw_text": "NESTED_INVALID_RAW_BODY_SHOULD_NOT_LEAK",
+                        "result": {
+                            "artifact_refs": [
+                                {
+                                    "artifact_id": "",
+                                    "preview": "NESTED_INVALID_PREVIEW_SHOULD_NOT_LEAK",
+                                    "value": "NESTED_INVALID_VALUE_SHOULD_NOT_LEAK",
+                                }
+                            ],
+                        },
+                    },
+                },
+            },
+        ),
+        _ev("run_completed", payload={"wal_locator": "wal://run-action"}),
+    ]
+
+    report = NodeReportBuilder().build(events=events)
+
+    assert report.artifacts == []
+    assert report.tool_calls[0].data == {"artifact_refs": []}
+    dumped = report.model_dump_json()
+    assert "NESTED_INVALID_RAW_BODY_SHOULD_NOT_LEAK" not in dumped
+    assert "NESTED_INVALID_PREVIEW_SHOULD_NOT_LEAK" not in dumped
+    assert "NESTED_INVALID_VALUE_SHOULD_NOT_LEAK" not in dumped
+
+
 def test_ui_evidence_projects_action_artifact_reference_without_body() -> None:
     """Slice G UI：UI evidence 只暴露 artifact ref，不读取 artifact 原文。"""
 
@@ -152,7 +249,7 @@ def test_ui_evidence_projects_action_artifact_reference_without_body() -> None:
                 completion_reason="run_completed",
                 run_id="run-action",
                 events_path="wal://run-action",
-                artifacts=["agently-action://art-1"],
+                artifacts=["runtime-action://art-1"],
                 meta={
                     "runtime_action_artifact_refs": ["runtime-action://art-1"],
                     "action_artifacts": [
@@ -198,3 +295,34 @@ def test_ui_evidence_accepts_legacy_action_artifact_reference() -> None:
 
     assert terminal.evidence is not None
     assert terminal.evidence.artifact_ref == "agently-action://legacy-art"
+
+
+def test_ui_evidence_prefers_first_runtime_action_ref_when_multiple_artifacts_exist() -> None:
+    """UI evidence 是单 ref 摘要，新 consumer 首选中立 meta 的首个 canonical ref。"""
+
+    projector = RuntimeUIEventProjector(run_id="run-action", level=StreamLevel.UI)
+    terminal = projector.on_terminal(
+        result=CapabilityResult(
+            status=CapabilityStatus.SUCCESS,
+            node_report=NodeReport(
+                status="success",
+                completion_reason="run_completed",
+                run_id="run-action",
+                events_path="wal://run-action",
+                artifacts=["agently-action://legacy-first", "agently-action://legacy-second"],
+                meta={
+                    "runtime_action_artifact_refs": [
+                        "runtime-action://canonical-first",
+                        "runtime-action://canonical-second",
+                    ],
+                    "action_artifacts": [
+                        {"artifact_id": "canonical-first", "label": "first"},
+                        {"artifact_id": "canonical-second", "label": "second"},
+                    ],
+                },
+            ),
+        )
+    )[0]
+
+    assert terminal.evidence is not None
+    assert terminal.evidence.artifact_ref == "runtime-action://canonical-first"

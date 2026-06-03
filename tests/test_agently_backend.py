@@ -182,6 +182,7 @@ async def test_agently_backend_reports_usage_via_caprt_usage_sink():
             "total_tokens": 18,
             "request_id": "req_123",
             "provider": "openai-compatible",
+            "provider_transport": "chat_completions",
         }
     ]
 
@@ -220,6 +221,7 @@ async def test_agently_backend_usage_sink_accepts_missing_request_metadata():
             "total_tokens": 3,
             "request_id": None,
             "provider": None,
+            "provider_transport": "chat_completions",
         }
     ]
 
@@ -258,6 +260,7 @@ async def test_agently_backend_usage_sink_falls_back_to_request_model_when_provi
             "total_tokens": 10,
             "request_id": "req_no_model",
             "provider": "gateway-provider",
+            "provider_transport": "chat_completions",
         }
     ]
 
@@ -421,6 +424,38 @@ def test_supplemental_usage_metadata_helper_can_fill_missing_model() -> None:
     }
 
 
+def test_supplemental_usage_metadata_helper_can_fill_provider_transport() -> None:
+    """成功路径必须保留 bridge lane evidence，不得只在失败 provider_terminal 中出现。"""
+
+    ev = AgentEvent(
+        type="llm_usage",
+        timestamp="2026-06-04T00:00:00Z",
+        run_id="run_1",
+        payload={
+            "model": "provider-model",
+            "input_tokens": 1,
+            "output_tokens": 2,
+            "total_tokens": 3,
+            "request_id": "req_provider",
+        },
+    )
+
+    merged = _merge_supplemental_usage_metadata_event(
+        ev=ev,
+        supplemental_payloads=[{"provider_transport": "responses", "provider": "gateway-provider"}],
+    )
+
+    assert merged.payload == {
+        "model": "provider-model",
+        "input_tokens": 1,
+        "output_tokens": 2,
+        "total_tokens": 3,
+        "request_id": "req_provider",
+        "provider": "gateway-provider",
+        "provider_transport": "responses",
+    }
+
+
 def test_supplemental_usage_metadata_helper_does_not_overwrite_existing_model() -> None:
     ev = AgentEvent(
         type="llm_usage",
@@ -487,7 +522,7 @@ def test_supplemental_usage_metadata_helper_replaces_default_model_placeholder()
     }
 
 
-@pytest.mark.parametrize("placeholder_provider", ["openai", "openai-compatible"])
+@pytest.mark.parametrize("placeholder_provider", ["openai", "openai-compatible", "openai-responses"])
 def test_supplemental_usage_metadata_helper_overwrites_placeholder_provider(placeholder_provider: str) -> None:
     ev = AgentEvent(
         type="llm_usage",
@@ -528,7 +563,7 @@ def test_supplemental_usage_metadata_helper_overwrites_placeholder_provider(plac
     }
 
 
-@pytest.mark.parametrize("sink_provider", ["", "   ", "openai", "openai-compatible"])
+@pytest.mark.parametrize("sink_provider", ["", "   ", "openai", "openai-compatible", "openai-responses"])
 def test_supplemental_usage_metadata_helper_keeps_placeholder_when_sink_is_not_effective(
     sink_provider: str,
 ) -> None:
@@ -557,7 +592,7 @@ def test_supplemental_usage_metadata_helper_keeps_placeholder_when_sink_is_not_e
     }
 
 
-@pytest.mark.parametrize("placeholder_provider", ["openai", "openai-compatible"])
+@pytest.mark.parametrize("placeholder_provider", ["openai", "openai-compatible", "openai-responses"])
 @pytest.mark.asyncio
 async def test_upstream_placeholder_provider_is_replaced_by_sink_effective_provider(
     tmp_path,
