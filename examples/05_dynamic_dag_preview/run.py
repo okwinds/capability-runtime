@@ -4,8 +4,8 @@
 运行：
   python examples/05_dynamic_dag_preview/run.py
 
-当前主分支若尚未集成 Dynamic DAG runtime API，本示例会打印 preview skip 并
-exit 0；集成后会自动编译并运行最小 DAG。
+本示例会编译 TaskDAG-like mapping 为本仓 `DynamicWorkflowPlan`，并通过
+已注册 capability 执行一个最小 DAG 与一个 fan-out/fan-in 业务 DAG。
 """
 
 from __future__ import annotations
@@ -122,14 +122,6 @@ async def main() -> None:
             },
         ],
     }
-
-    if not hasattr(runtime, "compile_dynamic_workflow_plan") or not hasattr(runtime, "run_dynamic_workflow"):
-        print("=== 05_dynamic_dag_preview ===")
-        print("preview_api=unavailable")
-        print("graph_id=example.dynamic.preview")
-        print("node_count=2")
-        print("skip_reason=Dynamic DAG runtime API has not been integrated in this checkout.")
-        return
 
     plan = runtime.compile_dynamic_workflow_plan(task_dag_like)
     result = await runtime.run_dynamic_workflow(plan, input={"topic": "runtime bridge upgrade"})

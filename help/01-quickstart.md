@@ -33,10 +33,10 @@ configuration are ready for the `/responses` path.
 Use this order for real provider smoke tests:
 
 1. `models`: confirm the configured `MODEL_NAME` exists for the gateway.
-2. `chat`: configure the `OpenAICompatible` provider lane and run chat/completions.
-3. `responses`: configure the `OpenAIResponsesCompatible` provider lane only when the
-   gateway supports `/responses`.
-4. `runtime chat`: run bridge mode with the default `chat_completions` requester.
+2. `transport`: build `provider_requester_factory` with
+   `build_openai_provider_requester_factory(...)`.
+3. `chat`: run bridge mode with the default `chat_completions` requester.
+4. `responses`: opt in only when the gateway supports `/responses`.
 5. `runtime responses`: run bridge mode with
    `RuntimeConfig.requester_strategy="responses"`.
 

@@ -22,8 +22,9 @@ Provider bridge 新增面：
 - `RuntimeConfig.requester_strategy`：requester strategy，默认
   `"chat_completions"`，用于 legacy 兼容。
 - `RuntimeConfig.max_dynamic_nodes`：Dynamic DAG preview 硬上限。
+- `RuntimeRecallBackend`：本仓 runtime-owned context recall backend 协议。
 - `build_recall_context_pack` / `write_node_report_summary`：从根包导出的中立
-  Workspace/Recall preview helper。
+  recall context helper。
 
 requester selection 不负责选择业务模型。runtime 模型应通过
 `AgentSpec.llm_config["model"]` 设置；lifecycle 层会把它复制到 SDK
@@ -179,8 +180,8 @@ cfg = RuntimeConfig(mode="bridge", requester_strategy="responses")
 
 真实 provider 审计：
 
-- chat/completions 使用 Agently `OpenAICompatible`；Responses 使用
-  `OpenAIResponsesCompatible`。
+- 用 `build_openai_provider_requester_factory(...)` 构造 bridge transport，
+  并通过 `RuntimeConfig.requester_strategy` 选择通道。
 - `NodeReport.usage.model` 优先采用 provider usage `model`，否则回退到
   `ChatRequest.model`。
 - provider/gateway 返回时，`NodeReport.usage.request_id` 与
@@ -199,9 +200,11 @@ TaskDAG-like 数据必须先编译为本仓 `DynamicWorkflowPlan`；不要把 up
 capability id 执行，并通过有限 `max_dynamic_nodes` 与 `DYNAMIC_DAG_*` 诊断
 fail-closed。
 
-Workspace/Recall preview 暴露本仓中立 `RuntimeRecallContextPack`；它不是 WAL
-或 NodeReport 的替代品。Action artifact evidence 只暴露脱敏 artifact reference
-与 `NodeReport.meta` 摘要，不读取 artifact 原文。
+Recall context preview 接受本仓中立 `RuntimeRecallBackend`，并暴露
+`RuntimeRecallContextPack`；它不是 WAL 或 NodeReport 的替代品。上游
+Workspace 可以在 backend 协议背后被适配，但下游不应依赖上游原生对象。
+Action artifact evidence 只暴露脱敏 artifact reference 与 `NodeReport.meta`
+摘要，不读取 artifact 原文。
 
 Agently `SkillsExecutor` 不是 `capability-runtime` 的 skills 驱动器。可以复用
 它的一般 `SKILL.md` 编写纪律，但 `AgentSpec.skills` 仍通过

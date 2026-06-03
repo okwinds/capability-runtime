@@ -12,8 +12,21 @@ Important boundaries:
 
 - the repository exposes `Runtime` and `RuntimeConfig` as the public entrypoint
 - example YAML files describe shapes, not secrets
-- runtime-only objects such as approval providers or upstream requester agents are still
-  injected by host code, not by static YAML
+- runtime-only objects such as approval providers or provider requester
+  factories are injected by host code, not by static YAML
+- `provider_requester_factory` is the preferred bridge transport injection point;
+  `agently_agent` remains a legacy compatibility path and should not be used by
+  new application code as the primary bridge surface
+- for regular OpenAI-compatible real provider wiring, host bootstrap code should
+  build that factory with `build_openai_provider_requester_factory(...)`.
+  Hosts that already own a provider-native agent should wrap it behind their own
+  `ProviderRequesterFactory`; application code should not import
+  adapter-internal helpers.
+- `build_openai_provider_requester_factory(...)` rejects plain `http://` by
+  default. Controlled private providers must pass
+  `allow_insecure_transport=True` or set
+  `CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT=1`; release gates should also
+  restrict trusted hosts.
 - requester strategy is a capability-runtime setting. Keep the default
   `requester_strategy: "chat_completions"` unless the host explicitly opts in to
   Responses.
@@ -60,6 +73,12 @@ print(runtime.validate())
   default bridge mode.
 - Existing callers may still pass `RuntimeConfig.agently_requester`; new config
   templates should prefer `requester_strategy`.
+- Existing callers may still pass `RuntimeConfig.agently_agent`; new bridge
+  bootstrap code should prefer `provider_requester_factory`, usually produced by
+  `build_openai_provider_requester_factory(...)`.
+- Private `http://` provider wiring is an explicit exception, not a default.
+  Prefer HTTPS unless the provider is on a controlled private network and a
+  trusted-host guard is also in place.
 - `sdk.example.yaml` configures SDK/provider transport overlays. It does not
   override per-agent request models; use `AgentSpec.llm_config.model`.
 - For real provider audit, `NodeReport.usage` should preserve `model`,

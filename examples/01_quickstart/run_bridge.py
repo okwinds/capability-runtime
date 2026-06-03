@@ -7,13 +7,13 @@
   3) python examples/01_quickstart/run_bridge.py
 
 约束：
-- 缺少配置时只打印提示并退出（exit code 0），便于离线回归环境跳过。
+- 缺少配置时默认返回非 0，避免把未触达真实 provider 误判为成功。
+- 仅当设置 `CAPRT_EXAMPLE_ALLOW_SKIP=1` 时返回 0，供离线回归显式跳过。
 """
 
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import sys
 from pathlib import Path
@@ -25,7 +25,14 @@ for path in (REPO_ROOT, SRC_ROOT):
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import (
+    AgentSpec,
+    CapabilityKind,
+    CapabilitySpec,
+    Runtime,
+    RuntimeConfig,
+    build_openai_provider_requester_factory,
+)
 
 REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
 
@@ -45,15 +52,19 @@ def print_env_hint(dotenv_path: Path, missing: list[str] | None = None) -> None:
     """输出环境缺失提示并说明退出行为。"""
 
     print("=== 01_quickstart / bridge ===")
-    print("缺少运行所需配置，已退出（exit code 0）。")
+    print("缺少运行所需配置，未触达真实 provider。")
     print(f"请准备：{dotenv_path}")
     print("必需变量：OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME")
     if missing:
         print(f"缺失变量：{', '.join(missing)}")
 
 
-async def main() -> None:
-    """执行真实 Bridge 接线（缺依赖时 fail-open 退出）。
+def _skip_exit_code() -> int:
+    return 0 if os.getenv("CAPRT_EXAMPLE_ALLOW_SKIP") == "1" else 2
+
+
+async def main() -> int:
+    """执行真实 Bridge 接线（缺依赖/缺配置时默认 fail-closed）。
 
     说明：当前 legacy bridge 仍需要宿主注入运行期上游 agent。该接线被
     隔离在示例 bootstrap 内；应用侧稳定依赖面仍是 Runtime / RuntimeConfig。
@@ -65,32 +76,28 @@ async def main() -> None:
     missing = [key for key in REQUIRED if not os.getenv(key)]
     if missing:
         print_env_hint(dotenv_path, missing)
-        return
+        return _skip_exit_code()
 
     try:
-        upstream_mod = importlib.import_module("agently")
-        upstream_facade = getattr(upstream_mod, "Agently")
-    except (AttributeError, ModuleNotFoundError):
+        provider_requester_factory = build_openai_provider_requester_factory(
+            base_url=os.environ["OPENAI_BASE_URL"],
+            transport_model=os.environ["MODEL_NAME"],
+            api_key=os.environ["OPENAI_API_KEY"],
+            strategy="chat_completions",
+            allow_insecure_transport=os.getenv("CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT") == "1",
+        )
+    except ModuleNotFoundError:
         print("=== 01_quickstart / bridge ===")
-        print("环境变量已齐全，但无法导入 bridge 上游依赖，已退出（exit code 0）。")
+        print("环境变量已齐全，但无法导入 bridge 上游依赖。")
         print("安装项目依赖后重试。")
-        return
-
-    upstream_facade.set_settings(
-        "OpenAICompatible",
-        {
-            "base_url": os.environ["OPENAI_BASE_URL"],
-            "model": os.environ["MODEL_NAME"],
-            "auth": os.environ["OPENAI_API_KEY"],
-        },
-    )
+        return _skip_exit_code()
 
     rt = Runtime(
         RuntimeConfig(
             mode="bridge",
             workspace_root=Path.cwd(),
             preflight_mode="off",
-            agently_agent=upstream_facade.create_agent(),
+            provider_requester_factory=provider_requester_factory,
         )
     )
     rt.register(
@@ -115,7 +122,8 @@ async def main() -> None:
     print(f"has_node_report={result.node_report is not None}")
     usage = result.node_report.usage if result.node_report is not None else None
     print(f"usage_model={getattr(usage, 'model', None)}")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

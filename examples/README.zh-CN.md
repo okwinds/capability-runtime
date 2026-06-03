@@ -29,7 +29,7 @@ python examples/02_workflow/run.py
 | 01 | `01_quickstart/` | 最短闭环：mock + bridge（统一 Runtime） | 部分 ✅ |
 | 02 | `02_workflow/` | 顺序 + 循环 + 条件分支（统一 Runtime） | ❌ |
 | 03 | `03_bridge_e2e/` | 真实 LLM：tool_call + 自动审批 + NodeReport 证据链 | ✅ |
-| 04 | `04_triggerflow_orchestration/` | 通过 `Runtime` / `WorkflowSpec` 观察 workflow lifecycle snapshot | ❌ |
+| 04 | `04_triggerflow_orchestration/` | 通过 `Runtime` / `WorkflowSpec` 观察 runtime workflow lifecycle snapshot | ❌ |
 | 05 | `05_workflow_skills_first/` | Workflow 编排 skills-first Agent（离线可回归） | ❌ |
 | 05 | `05_dynamic_dag_preview/` | Dynamic DAG preview（runtime-owned plan） | ❌ |
 | 06 | `06_responses_bridge/` | Responses requester 显式 opt-in 配置预览 | 可选 |

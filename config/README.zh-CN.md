@@ -12,7 +12,17 @@
 
 - 公开入口是 `Runtime` 与 `RuntimeConfig`
 - YAML 只表达配置形态，不表达 secrets
-- approvals provider、upstream requester agent 之类运行期对象仍由宿主代码注入，而不是靠静态 YAML 直接构造
+- approvals provider、provider requester factory 之类运行期对象仍由宿主代码注入，
+  而不是靠静态 YAML 直接构造
+- `provider_requester_factory` 是首选 bridge transport 注入入口；
+  `agently_agent` 只保留为旧兼容路径，新应用代码不应把它作为主要 bridge 表面
+- 常规 OpenAI-compatible 真实 provider 接线应由宿主 bootstrap 代码通过
+  `build_openai_provider_requester_factory(...)` 构造该 factory。
+  已经持有 provider 原生 agent 的宿主，应自行包装成 `ProviderRequesterFactory`；
+  应用代码不要 import adapter 内部 helper。
+- `build_openai_provider_requester_factory(...)` 默认拒绝明文 `http://`。
+  受控私有 provider 必须显式传入 `allow_insecure_transport=True`，或设置
+  `CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT=1`；发布门禁仍应限制受信 host。
 - requester strategy 是 capability-runtime 配置。除非宿主显式 opt-in
   Responses，否则保持 `requester_strategy: "chat_completions"`。
 - 模型选择不属于 Agently settings 职责。每个能力的模型通过
@@ -57,6 +67,11 @@ print(runtime.validate())
 - `requester_strategy="responses"` 是 opt-in，不能被当成默认 bridge mode。
 - 旧调用方仍可传 `RuntimeConfig.agently_requester`；新配置模板应优先使用
   `requester_strategy`。
+- 旧调用方仍可传 `RuntimeConfig.agently_agent`；新的 bridge bootstrap 代码应优先使用
+  `provider_requester_factory`，通常由 `build_openai_provider_requester_factory(...)`
+  产生。
+- 私有 `http://` provider 接线是显式例外，不是默认行为。优先使用 HTTPS；
+  只有受控私有网络且已有 trusted-host guard 时才开启。
 - `sdk.example.yaml` 配置 SDK/provider transport overlay，不覆写每个 agent
   的请求模型；请求模型应使用 `AgentSpec.llm_config.model`。
 - 真实 provider 审计时，`NodeReport.usage` 应尽量保留 `model`、

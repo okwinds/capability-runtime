@@ -8,21 +8,33 @@
 
 注意：
 - 该示例用于验证“事件流/证据链闭环”，不是生产配置模板。
-- 缺少配置时只打印提示并退出（exit code 0），便于离线回归环境跳过。
+- 缺少配置时默认返回非 0；仅当设置 `CAPRT_EXAMPLE_ALLOW_SKIP=1` 时返回 0。
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
-from skills_runtime.tools.protocol import ToolCall, ToolSpec
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = REPO_ROOT / "src"
+for path in (REPO_ROOT, SRC_ROOT):
+    path_text = str(path)
+    if path_text not in sys.path:
+        sys.path.insert(0, path_text)
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import (
+    AgentSpec,
+    CapabilityKind,
+    CapabilitySpec,
+    Runtime,
+    RuntimeConfig,
+    build_openai_provider_requester_factory,
+)
 from capability_runtime import CustomTool
 
 REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
@@ -43,15 +55,19 @@ def print_env_hint(dotenv_path: Path, missing: Optional[list[str]] = None) -> No
     """输出环境缺失提示并说明退出行为。"""
 
     print("=== 03_bridge_e2e ===")
-    print("缺少运行所需配置，已退出（exit code 0）。")
+    print("缺少运行所需配置，未触达真实 provider。")
     print(f"请准备：{dotenv_path}")
     print("必需变量：OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME")
     if missing:
         print(f"缺失变量：{', '.join(missing)}")
 
 
+def _skip_exit_code() -> int:
+    return 0 if os.getenv("CAPRT_EXAMPLE_ALLOW_SKIP") == "1" else 2
+
+
 @dataclass
-class AutoApproveProvider(ApprovalProvider):
+class AutoApproveProvider:
     """
     示例用审批器：永远批准。
 
@@ -63,9 +79,11 @@ class AutoApproveProvider(ApprovalProvider):
     async def request_approval(
         self,
         *,
-        request: ApprovalRequest,
+        request: Any,
         timeout_ms: Optional[int] = None,
-    ) -> ApprovalDecision:
+    ) -> Any:
+        from skills_runtime.safety.approvals import ApprovalDecision
+
         _ = timeout_ms
         approval_key = str(getattr(request, "approval_key", "") or "")
         print(
@@ -77,7 +95,7 @@ class AutoApproveProvider(ApprovalProvider):
         return ApprovalDecision.APPROVED_FOR_SESSION
 
 
-def build_file_write_tool(*, root_dir: Path) -> tuple[ToolSpec, Any]:
+def build_file_write_tool(*, root_dir: Path) -> tuple[Any, Any]:
     """
     构造一个需要审批的 file_write 工具（示例）。
 
@@ -87,6 +105,8 @@ def build_file_write_tool(*, root_dir: Path) -> tuple[ToolSpec, Any]:
 
     artifacts_root = (root_dir / "artifacts").resolve()
     artifacts_root.mkdir(parents=True, exist_ok=True)
+
+    from skills_runtime.tools.protocol import ToolSpec
 
     spec = ToolSpec(
         name="file_write",
@@ -102,7 +122,7 @@ def build_file_write_tool(*, root_dir: Path) -> tuple[ToolSpec, Any]:
         requires_approval=True,
     )
 
-    def handler(call: ToolCall, ctx: Dict[str, Any]) -> Dict[str, Any]:
+    def handler(call: Any, ctx: Dict[str, Any]) -> Dict[str, Any]:
         """写入文件并返回写入位置（最小实现）。"""
 
         _ = ctx
@@ -120,36 +140,33 @@ def build_file_write_tool(*, root_dir: Path) -> tuple[ToolSpec, Any]:
     return spec, handler
 
 
-async def main() -> None:
+async def main() -> int:
     """跑通一次真实 bridge 执行，并打印证据链摘要。"""
 
     dotenv_path = Path(__file__).resolve().parent / ".env"
     if not dotenv_path.exists():
         print_env_hint(dotenv_path)
-        return
+        return _skip_exit_code()
 
     load_env(dotenv_path)
     missing = [key for key in REQUIRED if not os.getenv(key)]
     if missing:
         print_env_hint(dotenv_path, missing)
-        return
+        return _skip_exit_code()
 
     try:
-        from agently import Agently  # type: ignore
+        provider_requester_factory = build_openai_provider_requester_factory(
+            base_url=os.environ["OPENAI_BASE_URL"],
+            transport_model=os.environ["MODEL_NAME"],
+            api_key=os.environ["OPENAI_API_KEY"],
+            strategy="chat_completions",
+            allow_insecure_transport=os.getenv("CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT") == "1",
+        )
     except ModuleNotFoundError:
         print("=== 03_bridge_e2e ===")
-        print("环境变量已齐全，但无法导入 bridge 上游依赖，已退出（exit code 0）。")
+        print("环境变量已齐全，但无法导入 bridge 上游依赖。")
         print("安装项目依赖后重试。")
-        return
-
-    Agently.set_settings(
-        "OpenAICompatible",
-        {
-            "base_url": os.environ["OPENAI_BASE_URL"],
-            "model": os.environ["MODEL_NAME"],
-            "auth": os.environ["OPENAI_API_KEY"],
-        },
-    )
+        return _skip_exit_code()
 
     workspace_root = Path(__file__).resolve().parent
     tool_spec, tool_handler = build_file_write_tool(root_dir=workspace_root)
@@ -159,7 +176,7 @@ async def main() -> None:
             mode="bridge",
             workspace_root=workspace_root,
             preflight_mode="off",
-            agently_agent=Agently.create_agent(),
+            provider_requester_factory=provider_requester_factory,
             approval_provider=AutoApproveProvider(),
             custom_tools=[CustomTool(spec=tool_spec, handler=tool_handler, override=True)],
         )
@@ -174,7 +191,8 @@ async def main() -> None:
                     "请调用 tool `file_write` 写入一个 Python 文件，然后用一句话说明你写了什么。\n"
                     "要求：写入 hello.py（相对 artifacts/），内容是一个可运行的 hello world。"
                 ),
-            )
+            ),
+            llm_config={"model": os.environ["MODEL_NAME"]},
         )
     )
     assert rt.validate() == []
@@ -191,7 +209,7 @@ async def main() -> None:
     print(f"events_forwarded={got_events}")
     if terminal is None:
         print("no terminal CapabilityResult (unexpected)")
-        return
+        return 1
 
     print(f"status={terminal.status.value}")
     print(f"output_preview={str(terminal.output)[:220]}")
@@ -199,7 +217,8 @@ async def main() -> None:
     if terminal.node_report is not None:
         print(f"events_path={terminal.node_report.events_path!r}")
         print(f"tool_calls={len(getattr(terminal.node_report, 'tool_calls', []) or [])}")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

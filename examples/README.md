@@ -17,7 +17,7 @@ These are the mainline examples to learn the runtime surface from smallest to la
 | `01_quickstart/` | smallest loop with `Runtime` | optional |
 | `02_workflow/` | sequential, loop, and conditional workflow execution | no |
 | `03_bridge_e2e/` | real backend bridge path and evidence flow | yes |
-| `04_triggerflow_orchestration/` | workflow lifecycle snapshot through `Runtime` / `WorkflowSpec` | no |
+| `04_triggerflow_orchestration/` | runtime workflow lifecycle snapshot through `Runtime` / `WorkflowSpec` | no |
 | `05_workflow_skills_first/` | workflow composition with skills-first agents | no |
 | `05_dynamic_dag_preview/` | Dynamic DAG preview via runtime-owned plan | no |
 | `06_responses_bridge/` | Responses requester opt-in configuration preview | optional |
@@ -52,7 +52,7 @@ python examples/05_dynamic_dag_preview/run.py
 python examples/06_responses_bridge/run.py
 python examples/08_workspace_recall_preview/run.py
 python examples/09_action_artifact_evidence/run.py
-python examples/10_runtime_bridge_showcase/server.py --host 100.66.215.80 --port 8090
+python examples/10_runtime_bridge_showcase/server.py --host 127.0.0.1 --port 8090
 python examples/apps/sse_gateway_minimal/run.py
 ```
 

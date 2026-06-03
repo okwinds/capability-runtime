@@ -41,9 +41,9 @@ runtime surface.
 
 - Responses bridge is opt-in through `RuntimeConfig.requester_strategy="responses"`;
   the default remains `chat_completions`.
-- Real provider wiring is ordered: verify `models`, configure
-  `OpenAICompatible` for provider chat, configure `OpenAIResponsesCompatible`
-  only for `/responses`, then smoke runtime chat and runtime responses paths.
+- Real provider wiring is ordered: verify `models`, build a provider requester
+  factory from neutral transport settings, then smoke runtime chat and runtime
+  responses paths when `/responses` exists.
 - Runtime model selection flows through `AgentSpec.llm_config["model"]` into SDK
   `ChatRequest.model`. Agently settings are transport settings and must not be
   treated as the model precedence source.

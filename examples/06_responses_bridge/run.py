@@ -6,14 +6,14 @@
   2) 编辑 .env 或设置环境变量 OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME
   3) python examples/06_responses_bridge/run.py
 
-缺配置时 exit 0，便于离线环境执行。真实运行时通过
+缺配置时默认返回非 0，避免把未触达真实 provider 误判为成功；仅当
+`CAPRT_EXAMPLE_ALLOW_SKIP=1` 时返回 0。真实运行时通过
 RuntimeConfig(requester_strategy="responses") 显式 opt-in，不改变默认 requester。
 """
 
 from __future__ import annotations
 
 import asyncio
-import importlib
 import os
 import sys
 from pathlib import Path
@@ -25,7 +25,14 @@ for path in (REPO_ROOT, SRC_ROOT):
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import (
+    AgentSpec,
+    CapabilityKind,
+    CapabilitySpec,
+    Runtime,
+    RuntimeConfig,
+    build_openai_provider_requester_factory,
+)
 
 REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
 
@@ -44,7 +51,7 @@ def load_env(dotenv_path: Path) -> None:
 
 
 def print_env_hint(missing: list[str]) -> None:
-    """输出缺配置提示并保持 exit 0。"""
+    """输出缺配置提示。"""
 
     print("=== 06_responses_bridge ===")
     print("skip_reason=missing provider configuration")
@@ -53,39 +60,39 @@ def print_env_hint(missing: list[str]) -> None:
     print("responses_is_default=false")
 
 
-async def main() -> None:
+def _skip_exit_code() -> int:
+    return 0 if os.getenv("CAPRT_EXAMPLE_ALLOW_SKIP") == "1" else 2
+
+
+async def main() -> int:
     """运行 Responses bridge 真实 smoke。"""
 
     load_env(REPO_ROOT / ".env")
     missing = [key for key in REQUIRED if not os.getenv(key)]
     if missing:
         print_env_hint(missing)
-        return
+        return _skip_exit_code()
 
     try:
-        upstream_mod = importlib.import_module("agently")
-        upstream_facade = getattr(upstream_mod, "Agently")
-    except (AttributeError, ModuleNotFoundError):
+        provider_requester_factory = build_openai_provider_requester_factory(
+            base_url=os.environ["OPENAI_BASE_URL"],
+            transport_model=os.environ["MODEL_NAME"],
+            api_key=os.environ["OPENAI_API_KEY"],
+            strategy="responses",
+            allow_insecure_transport=os.getenv("CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT") == "1",
+        )
+    except ModuleNotFoundError:
         print("=== 06_responses_bridge ===")
         print("skip_reason=bridge upstream dependency is not importable")
         print("responses_is_default=false")
-        return
-
-    upstream_facade.set_settings(
-        "OpenAIResponsesCompatible",
-        {
-            "base_url": os.environ["OPENAI_BASE_URL"],
-            "model": os.environ["MODEL_NAME"],
-            "auth": os.environ["OPENAI_API_KEY"],
-        },
-    )
+        return _skip_exit_code()
 
     runtime = Runtime(
         RuntimeConfig(
             mode="bridge",
             workspace_root=Path.cwd(),
             preflight_mode="off",
-            agently_agent=upstream_facade.create_agent(),
+            provider_requester_factory=provider_requester_factory,
             requester_strategy="responses",
         )
     )
@@ -113,7 +120,8 @@ async def main() -> None:
     print(f"usage_total_tokens={getattr(usage, 'total_tokens', None)}")
     print(f"request_id_present={bool(getattr(usage, 'request_id', None))}")
     print("responses_is_default=false")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

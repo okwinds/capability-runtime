@@ -15,5 +15,5 @@ python examples/03_bridge_e2e/run.py
 ```
 
 说明：
-- 缺少 `.env` 或必要环境变量时，示例会打印提示并退出（exit code 0）。
-
+- 缺少 `.env` 或必要环境变量时，示例会打印提示并返回非 0；只有显式设置
+  `CAPRT_EXAMPLE_ALLOW_SKIP=1` 时才作为离线回归跳过并返回 0。

@@ -135,15 +135,16 @@
       <h1>Runtime Bridge Capability Showcase</h1>
       <p>
         这个页面展示 capability-runtime 升级后通过本仓稳定契约暴露的新能力：
-        Responses bridge、Dynamic DAG preview、TriggerFlow lifecycle、Workspace/Recall context pack、
+        Responses bridge、Dynamic DAG preview、Workflow lifecycle、Workspace/Recall context pack、
         Action artifact evidence，以及真实 provider evidence 修复。
+        当前文件只包含占位内容；实时模型反馈由 server.py 运行时返回。
       </p>
     </header>
     <main>
       <div class="summary">
         <div class="metric"><strong>chat_completions</strong><span>默认 requester，不破 legacy</span></div>
         <div class="metric"><strong>responses</strong><span>显式 opt-in requester</span></div>
-        <div class="metric"><strong>gpt-5.4</strong><span>真实 usage.model evidence</span></div>
+        <div class="metric"><strong>live model</strong><span>由服务端环境变量决定</span></div>
         <div class="metric"><strong>0 raw secrets</strong><span>只展示脱敏摘要和 references</span></div>
       </div>
 
@@ -155,18 +156,19 @@
           <div>
             <strong>Chat Completions</strong>
             <pre><code>status=success
-output_preview=Capability Runtime 在企业内的落地价值...
+output_preview=&lt;live provider response&gt;
 has_node_report=True
-usage_model=gpt-5.4</code></pre>
+usage_model=&lt;MODEL_NAME&gt;
+provider_transport=chat_completions</code></pre>
           </div>
           <div>
             <strong>Responses</strong>
             <pre><code>status=success
-output_preview=caprt-runtime-responses-ok
+output_preview=&lt;live provider response&gt;
 has_node_report=True
-usage_model=gpt-5.4
-usage_total_tokens=2371
-request_id_present=True
+usage_model=&lt;MODEL_NAME&gt;
+request_id_present=&lt;provider dependent&gt;
+provider_transport=responses
 responses_is_default=false</code></pre>
           </div>
         </div>
@@ -189,12 +191,12 @@ incident_has_node_report=True</code></pre>
       </section>
 
       <section>
-        <h2>TriggerFlow Lifecycle</h2>
+        <h2>Workflow Lifecycle</h2>
         <span class="pill">additive events</span>
         <span class="pill blue">WorkflowRunSnapshot</span>
         <pre><code>status=completed
 lifecycle_state=closed
-execution_id=triggerflow-&lt;workflow_instance_id&gt;
+execution_id=wfexec-&lt;workflow_instance_id&gt;
 state_version=1
 pending_interventions=0
 close_reason=success
@@ -210,7 +212,7 @@ context_item_count=1
 context_omitted_count=1
 context_ref=rec-incident
 node_report_ref=node-report-summary
-raw_workspace_is_wal=false</code></pre>
+raw_recall_backend_is_wal=false</code></pre>
       </section>
 
       <section>

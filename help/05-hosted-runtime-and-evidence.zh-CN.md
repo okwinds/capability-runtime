@@ -39,7 +39,10 @@
 - `ResumeIntent`
 - `HostRunSnapshot`
 
-这些是 wait/resume 与人工审批流程的稳定宿主对象。
+这些是等待摘要、approval ticket 与 resume intent preview 的稳定宿主对象。
+本版本没有把 `Runtime.continue_run()` / `Runtime.describe_wait()` 作为公开
+Runtime API 交付；宿主应使用当前 summary / ticket / intent 辅助对象，不要假设
+已经具备基于 snapshot 的恢复执行能力。
 
 ## Service Facade
 

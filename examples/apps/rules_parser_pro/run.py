@@ -240,8 +240,8 @@ def main() -> int:
         # strict 模式希望“快速失败/快速完成”，避免在真实模型不稳定时长时间挂起。
         max_steps=40 if args.evidence_strict else 120,
         safety_mode="ask",
-        planner_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if args.mode == "real" else None,
-        executor_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if args.mode == "real" else None,
+        planner_model=env_or_default("MODEL_NAME", "") if args.mode == "real" else None,
+        executor_model=env_or_default("MODEL_NAME", "") if args.mode == "real" else None,
     )
 
     if args.mode == "offline":
@@ -393,11 +393,11 @@ def main() -> int:
         )
     except Exception as exc:
         print("=== rules_parser_pro ===")
-        print("缺少真实模型配置，已退出（exit code 0）。")
+        print("缺少真实模型配置或 bridge 依赖，未触达真实 provider。")
         print("请准备：examples/apps/rules_parser_pro/.env")
         print("必需变量：OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME")
         print(f"error={type(exc).__name__}: {exc}")
-        return 0
+        return 0 if os.getenv("CAPRT_EXAMPLE_ALLOW_SKIP") == "1" else 2
 
     _register_capability(runtime)
     assert runtime.validate() == []

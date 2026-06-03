@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Workspace/Recall context pack preview（离线 deterministic）。"""
+"""Recall context pack preview（离线 deterministic）。"""
 
 import asyncio
 import sys
@@ -23,8 +23,8 @@ from capability_runtime import (
 )
 
 
-class FakeWorkspace:
-    """最小 Workspace-like backend；只返回 refs，不作为 WAL。"""
+class ExampleRecallBackend:
+    """最小 RuntimeRecallBackend；只返回 refs，不作为 WAL。"""
 
     def __init__(self) -> None:
         self.writes: list[dict[str, Any]] = []
@@ -59,9 +59,9 @@ class FakeWorkspace:
 
 
 async def main() -> None:
-    workspace = FakeWorkspace()
+    backend = ExampleRecallBackend()
     pack = await build_recall_context_pack(
-        workspace,
+        backend,
         goal="continue incident briefing",
         budget={"max_items": 1},
     )
@@ -72,7 +72,7 @@ async def main() -> None:
         events_path="wal://run-example",
         artifacts=["artifact://brief.md"],
     )
-    ref = await write_node_report_summary(workspace, report)
+    ref = await write_node_report_summary(backend, report)
 
     assert isinstance(pack, RuntimeRecallContextPack)
     assert isinstance(ref, RuntimeContextRecordRef)
@@ -83,7 +83,7 @@ async def main() -> None:
     print(f"context_omitted_count={pack.omitted_count}")
     print(f"context_ref={pack.items[0].id if pack.items else None}")
     print(f"node_report_ref={ref.id}")
-    print(f"raw_workspace_is_wal=false")
+    print(f"raw_recall_backend_is_wal=false")
 
 
 if __name__ == "__main__":

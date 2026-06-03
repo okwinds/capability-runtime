@@ -24,7 +24,7 @@ The public contract of this repository is intentionally narrow:
 - Public capability registration and manifest descriptors
 - Workflow orchestration on top of the runtime without exposing TriggerFlow as a public API
 - Evidence-first results through `NodeReport`, tool-call reports, approval summaries, and WAL locators
-- Host-facing helpers for wait/resume, approval tickets, continuity, and service streaming
+- Host-facing helpers for waiting summaries, approval tickets, resume-intent preview, continuity, and service streaming
 - Runtime capability previews behind the same runtime contract:
   Responses requester opt-in, Dynamic DAG preview, workflow lifecycle summaries,
   Workspace/Recall context packs, and Action artifact evidence summaries
@@ -35,7 +35,7 @@ The public contract of this repository is intentionally narrow:
                            +-----------------------------+
                            | Host Application            |
                            | - register capabilities     |
-                           | - run / stream / continue   |
+                           | - run / stream / summarize  |
                            +--------------+--------------+
                                           |
                                           v
@@ -125,12 +125,13 @@ strategy is `chat_completions`. Responses mode is an explicit opt-in with
 Real provider wiring order:
 
 1. Verify the provider model name with the gateway or `/models` surface.
-2. Configure the provider chat lane with `OpenAICompatible` for chat/completions.
-3. Configure the provider responses lane with `OpenAIResponsesCompatible` only if
-   the provider supports `/responses`.
-4. Run the runtime chat path with
+2. Build a provider requester factory from neutral transport settings with
+   `build_openai_provider_requester_factory(...)`.
+3. Keep chat/completions on the default `requester_strategy="chat_completions"`.
+4. Opt in to the responses lane only if the provider supports `/responses`.
+5. Run the runtime chat path with
    `RuntimeConfig(mode="bridge", requester_strategy="chat_completions")`.
-5. Run the runtime responses path with
+6. Run the runtime responses path with
    `RuntimeConfig(mode="bridge", requester_strategy="responses")`.
 
 Model routing has a separate priority chain: `AgentSpec.llm_config["model"]`
@@ -169,6 +170,10 @@ from capability_runtime import (
     Runtime,
     RuntimeConfig,
     CustomTool,
+    ProviderRequester,
+    ProviderRequesterFactory,
+    ProviderRequesterStrategy,
+    build_openai_provider_requester_factory,
     AgentSpec,
     AgentIOSchema,
     WorkflowSpec,
@@ -181,10 +186,19 @@ from capability_runtime import (
     CapabilityKind,
     CapabilityResult,
     CapabilityStatus,
+    DynamicWorkflowNode,
+    DynamicWorkflowPlan,
     NodeReport,
+    StructuredStreamEvent,
     HostRunSnapshot,
+    HostRunStatus,
     ApprovalTicket,
     ResumeIntent,
+    RuntimeContextRecordRef,
+    RuntimeRecallBackend,
+    RuntimeRecallContextPack,
+    build_recall_context_pack,
+    write_node_report_summary,
     RuntimeServiceFacade,
     RuntimeServiceRequest,
     RuntimeServiceHandle,

@@ -15,7 +15,7 @@ drift is easier to detect.
 | Runtime register / validate / run | `README.md` / `help/03-python-api.md` | `src/capability_runtime/runtime.py` | `examples/01_quickstart/` | `tests/test_public_api_exports.py` |
 | Workflow orchestration | `examples/README.md` | `src/capability_runtime/adapters/triggerflow_workflow_engine.py` | `examples/02_workflow/` | `tests/test_examples_smoke.py` |
 | NodeReport evidence | `help/05-hosted-runtime-and-evidence.md` | `src/capability_runtime/reporting/node_report.py` | `docs_for_coding_agent/examples/atomic/02_read_node_report/` | `tests/test_coding_agent_examples_atomic.py` |
-| Host wait/resume surface | `help/05-hosted-runtime-and-evidence.md` | `src/capability_runtime/host_protocol.py` | `examples/apps/ui_events_showcase/` | `tests/test_runtime_hitl_host_protocol.py` |
+| Host waiting summary / approval preview | `help/05-hosted-runtime-and-evidence.md` | `src/capability_runtime/host_protocol.py` | `examples/apps/ui_events_showcase/` | `tests/test_runtime_hitl_host_protocol.py` |
 | Runtime service facade | `help/05-hosted-runtime-and-evidence.md` | `src/capability_runtime/service_facade.py` | `examples/apps/sse_gateway_minimal/` | `tests/test_runtime_service_session_bridge.py` |
 | Coding-agent examples | `docs_for_coding_agent/README.md` | `docs_for_coding_agent/examples/**` | `docs_for_coding_agent/examples/` | `tests/test_coding_agent_examples_atomic.py`, `tests/test_coding_agent_examples_recipes.py` |
 | Real provider wiring | `help/01-quickstart.md` / `help/02-config-reference.md` | `RuntimeConfig.requester_strategy` + `AgentSpec.llm_config.model` -> SDK `ChatRequest.model` | `examples/01_quickstart/`, `examples/06_responses_bridge/` | `tests/integration/test_runtime_real_provider_bridge.py` |

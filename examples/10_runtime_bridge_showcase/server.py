@@ -26,7 +26,14 @@ for path in (REPO_ROOT, SRC_ROOT):
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
 
-from capability_runtime import AgentSpec, CapabilityKind, CapabilitySpec, Runtime, RuntimeConfig
+from capability_runtime import (
+    AgentSpec,
+    CapabilityKind,
+    CapabilitySpec,
+    Runtime,
+    RuntimeConfig,
+    build_openai_provider_requester_factory,
+)
 
 
 REQUIRED = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "MODEL_NAME")
@@ -171,7 +178,7 @@ def _html_page() -> bytes:
         <h2>新能力 Preview</h2>
         <ul>
           <li>Dynamic DAG：TaskDAG-like mapping 编译为 DynamicWorkflowPlan，节点通过 Runtime.run() 执行。</li>
-          <li>TriggerFlow lifecycle：新增 lifecycle_state / execution_id / state_version / close_reason，旧事件 additive 兼容。</li>
+          <li>Workflow lifecycle：新增 lifecycle_state / execution_id / state_version / close_reason，旧事件 additive 兼容。</li>
           <li>Workspace/Recall：只暴露 neutral context pack，不替代 WAL / NodeReport。</li>
           <li>Action artifact：只暴露 runtime artifact reference 摘要，不读取 raw artifact body。</li>
         </ul>
@@ -214,23 +221,19 @@ def _html_page() -> bytes:
 
 
 async def _run_strategy(strategy: str, prompt: str) -> dict[str, Any]:
-    from agently import Agently  # type: ignore
-
-    settings_name = "OpenAIResponsesCompatible" if strategy == "responses" else "OpenAICompatible"
-    Agently.set_settings(
-        settings_name,
-        {
-            "base_url": os.environ["OPENAI_BASE_URL"],
-            "model": os.environ["MODEL_NAME"],
-            "auth": os.environ["OPENAI_API_KEY"],
-        },
+    provider_requester_factory = build_openai_provider_requester_factory(
+        base_url=os.environ["OPENAI_BASE_URL"],
+        transport_model=os.environ["MODEL_NAME"],
+        api_key=os.environ["OPENAI_API_KEY"],
+        strategy=strategy,  # type: ignore[arg-type]
+        allow_insecure_transport=os.getenv("CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT") == "1",
     )
     runtime = Runtime(
         RuntimeConfig(
             mode="bridge",
             workspace_root=Path.cwd(),
             preflight_mode="off",
-            agently_agent=Agently.create_agent(),
+            provider_requester_factory=provider_requester_factory,
             requester_strategy=strategy,
         )
     )
@@ -243,7 +246,7 @@ async def _run_strategy(strategy: str, prompt: str) -> dict[str, Any]:
                 name=f"Showcase{strategy}",
                 description=prompt,
             ),
-            llm_config={"model": os.environ["MODEL_NAME"], "temperature": 0, "max_tokens": 96},
+            llm_config={"model": os.environ["MODEL_NAME"]},
         )
     )
     result = await runtime.run(capability_id, input={"prompt": prompt})
@@ -256,6 +259,7 @@ async def _run_strategy(strategy: str, prompt: str) -> dict[str, Any]:
         "usage_total_tokens": getattr(usage, "total_tokens", None),
         "request_id_present": bool(getattr(usage, "request_id", None)),
         "provider": getattr(usage, "provider", None),
+        "provider_transport": getattr(usage, "provider_transport", None),
     }
 
 
@@ -311,7 +315,12 @@ class ShowcaseHandler(BaseHTTPRequestHandler):
             try:
                 payload = asyncio.run(_run_live())
             except Exception as exc:
-                payload = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+                sys.stderr.write(f"showcase live provider error: {type(exc).__name__}: {exc}\n")
+                payload = {
+                    "ok": False,
+                    "error_code": "LIVE_PROVIDER_ERROR",
+                    "error": "live provider request failed; check server logs",
+                }
             if payload.get("ok"):
                 _CACHE.update({"payload": payload, "expires_at": now + 20})
             _json_response(self, 200 if payload.get("ok") else 500, payload)

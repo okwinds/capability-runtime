@@ -323,8 +323,8 @@ def create_server(
         skills_root=skills_root,
         max_steps=80,
         safety_mode=safety_mode,
-        planner_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if mode == "real" else None,
-        executor_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if mode == "real" else None,
+        planner_model=env_or_default("MODEL_NAME", "") if mode == "real" else None,
+        executor_model=env_or_default("MODEL_NAME", "") if mode == "real" else None,
     )
 
     report_md = "\n".join(
@@ -398,11 +398,11 @@ def main() -> int:
         )
     except Exception as exc:
         print("=== sse_gateway_minimal ===")
-        print("缺少真实模型配置，已退出（exit code 0）。")
+        print("缺少真实模型配置或 bridge 依赖，未触达真实 provider。")
         print("请准备：examples/apps/sse_gateway_minimal/.env")
         print("必需变量：OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME")
         print(f"error={type(exc).__name__}: {exc}")
-        return 0
+        return 0 if os.getenv("CAPRT_EXAMPLE_ALLOW_SKIP") == "1" else 2
 
     print(f"[sse] listening on http://{args.host}:{args.port}")
     print("[sse] endpoints: /start  /events?run_id=...")

@@ -40,7 +40,11 @@ terminal result and `NodeReport` are the stable evidence surfaces.
 - `ResumeIntent`
 - `HostRunSnapshot`
 
-These are the stable host-facing objects for wait/resume and human approval flows.
+These are the stable host-facing objects for waiting summaries, approval
+tickets, and resume-intent preview. `Runtime.continue_run()` and
+`Runtime.describe_wait()` are not public runtime APIs in this version; hosts
+should use the current summary/ticket/intent helpers instead of assuming
+snapshot-aware resume execution.
 
 ## Service Facade
 

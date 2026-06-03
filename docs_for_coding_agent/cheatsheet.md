@@ -80,6 +80,7 @@ from capability_runtime import (
     ProviderRequesterStrategy,
     DynamicWorkflowNode,
     DynamicWorkflowPlan,
+    RuntimeRecallBackend,
     RuntimeRecallContextPack,
 )
 ```
@@ -103,10 +104,9 @@ cfg = RuntimeConfig(mode="bridge", requester_strategy="chat_completions")
 Order for real provider checks:
 
 1. Confirm `MODEL_NAME` via the gateway or `/models`.
-2. Configure `OpenAICompatible` for provider chat/completions transport.
-3. Configure `OpenAIResponsesCompatible` only when `/responses` exists.
-4. Run runtime chat with `requester_strategy="chat_completions"`.
-5. Run runtime responses with `requester_strategy="responses"`.
+2. Build `provider_requester_factory` with `build_openai_provider_requester_factory(...)`.
+3. Run runtime chat with `requester_strategy="chat_completions"`.
+4. Run runtime responses with `requester_strategy="responses"` only when `/responses` exists.
 
 Model priority:
 

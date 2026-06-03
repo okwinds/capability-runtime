@@ -5,13 +5,13 @@
 本地拉起：
 
 ```bash
-python examples/10_runtime_bridge_showcase/server.py --host 100.66.215.80 --port 8090
+python examples/10_runtime_bridge_showcase/server.py --host 127.0.0.1 --port 8090
 ```
 
 然后打开：
 
 ```text
-http://100.66.215.80:8090/
+http://127.0.0.1:8090/
 ```
 
 页面由服务端调用真实 provider，展示已脱敏的模型输出与 NodeReport usage 证据，

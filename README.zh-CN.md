@@ -24,7 +24,7 @@
 - 面向公开 API 的能力注册与 manifest descriptor
 - 基于运行时的 Workflow 编排，而不是把 TriggerFlow 暴露成公共 API
 - 以 `NodeReport`、工具调用摘要、审批摘要、WAL locator 为核心的证据链
-- 面向宿主的 wait/resume、approval ticket、continuity 与 streaming 辅助面
+- 面向宿主的等待摘要、approval ticket、resume intent preview、continuity 与 streaming 辅助面
 - 通过同一运行时契约承载 runtime capability preview：Responses requester
   显式 opt-in、Dynamic DAG preview、workflow lifecycle 摘要、
   Workspace/Recall context pack、Action artifact evidence 摘要
@@ -35,7 +35,7 @@
                            +-----------------------------+
                            | 宿主应用                     |
                            | - 注册能力                   |
-                           | - run / stream / continue   |
+                           | - run / stream / summarize  |
                            +--------------+--------------+
                                           |
                                           v
@@ -125,12 +125,13 @@ Bridge 模式复用 Agently 的 OpenAI-compatible 传输层，但 skills/tools/W
 真实 provider 接线顺序：
 
 1. 先通过 gateway 或 `/models` 表面确认模型名可用。
-2. 用 `OpenAICompatible` 配好 provider chat/completions 通道。
-3. 仅当 provider 支持 `/responses` 时，再用 `OpenAIResponsesCompatible`
-   配好 provider responses 通道。
-4. 运行 runtime chat 路径：
+2. 用 `build_openai_provider_requester_factory(...)` 从中立 transport settings
+   构造 provider requester factory。
+3. chat/completions 保持默认 `requester_strategy="chat_completions"`。
+4. 仅当 provider 支持 `/responses` 时，再显式 opt-in responses 通道。
+5. 运行 runtime chat 路径：
    `RuntimeConfig(mode="bridge", requester_strategy="chat_completions")`。
-5. 运行 runtime responses 路径：
+6. 运行 runtime responses 路径：
    `RuntimeConfig(mode="bridge", requester_strategy="responses")`。
 
 模型路由是另一条优先级链：`AgentSpec.llm_config["model"]` 会覆写 SDK
@@ -168,6 +169,10 @@ from capability_runtime import (
     Runtime,
     RuntimeConfig,
     CustomTool,
+    ProviderRequester,
+    ProviderRequesterFactory,
+    ProviderRequesterStrategy,
+    build_openai_provider_requester_factory,
     AgentSpec,
     AgentIOSchema,
     WorkflowSpec,
@@ -180,10 +185,19 @@ from capability_runtime import (
     CapabilityKind,
     CapabilityResult,
     CapabilityStatus,
+    DynamicWorkflowNode,
+    DynamicWorkflowPlan,
     NodeReport,
+    StructuredStreamEvent,
     HostRunSnapshot,
+    HostRunStatus,
     ApprovalTicket,
     ResumeIntent,
+    RuntimeContextRecordRef,
+    RuntimeRecallBackend,
+    RuntimeRecallContextPack,
+    build_recall_context_pack,
+    write_node_report_summary,
     RuntimeServiceFacade,
     RuntimeServiceRequest,
     RuntimeServiceHandle,

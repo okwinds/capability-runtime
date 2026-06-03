@@ -283,8 +283,8 @@ def main() -> int:
         max_steps=60,
         safety_mode="ask",
         namespace=namespace_for_demo,
-        planner_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if args.mode == "real" else None,
-        executor_model=env_or_default("MODEL_NAME", "gpt-4o-mini") if args.mode == "real" else None,
+        planner_model=env_or_default("MODEL_NAME", "") if args.mode == "real" else None,
+        executor_model=env_or_default("MODEL_NAME", "") if args.mode == "real" else None,
     )
 
     if namespace_for_demo:
@@ -359,11 +359,11 @@ def main() -> int:
         )
     except Exception as exc:
         print("=== form_interview_pro ===")
-        print("缺少真实模型配置，已退出（exit code 0）。")
+        print("缺少真实模型配置或 bridge 依赖，未触达真实 provider。")
         print("请准备：examples/apps/form_interview_pro/.env")
         print("必需变量：OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_NAME")
         print(f"error={type(exc).__name__}: {exc}")
-        return 0
+        return 0 if os.getenv("CAPRT_EXAMPLE_ALLOW_SKIP") == "1" else 2
     _register_capability(runtime)
     assert runtime.validate() == []
     run_input = {}

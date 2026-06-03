@@ -36,11 +36,11 @@ approvals, WAL, events, and `NodeReport` evidence remain owned by
 `skills-runtime-sdk`.
 
 Real-provider work must also preserve the runtime wiring order:
-`models` check -> `OpenAICompatible` provider chat transport ->
-`OpenAIResponsesCompatible` provider responses transport when available -> runtime
-`chat_completions` smoke -> runtime `responses` smoke. The runtime model entry
-is `AgentSpec.llm_config["model"]` / SDK `ChatRequest.model`; Agently settings
-only configure transport. Audit `NodeReport.usage.model`,
+`models` check -> `build_openai_provider_requester_factory(...)` from neutral
+transport settings -> runtime `chat_completions` smoke -> runtime `responses`
+smoke when `/responses` exists. The runtime model entry is
+`AgentSpec.llm_config["model"]` / SDK `ChatRequest.model`; provider bootstrap
+settings only configure transport. Audit `NodeReport.usage.model`,
 `NodeReport.usage.request_id`, and `NodeReport.usage.provider` before declaring
 a provider bridge change done.
 

@@ -17,11 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
-from skills_runtime.core.contracts import AgentEvent
-from skills_runtime.safety.approvals import ApprovalDecision, ApprovalProvider, ApprovalRequest
-from skills_runtime.tools.protocol import HumanIOProvider
-
-from capability_runtime import Runtime, RuntimeConfig
+from capability_runtime import Runtime, RuntimeConfig, build_openai_provider_requester_factory
 
 
 def detect_skills_space_schema() -> str:
@@ -215,7 +211,7 @@ def write_overlay_for_app(
     return overlay
 
 
-class ScriptedApprovalProvider(ApprovalProvider):
+class ScriptedApprovalProvider:
     """
     离线回归用审批器：按次数返回预置审批决策。
 
@@ -223,11 +219,13 @@ class ScriptedApprovalProvider(ApprovalProvider):
     - decisions 用尽后默认拒绝（fail-closed），暴露测试/示例配置问题。
     """
 
-    def __init__(self, decisions: List[ApprovalDecision]) -> None:
+    def __init__(self, decisions: List[Any]) -> None:
         self._decisions = list(decisions)
-        self.calls: List[ApprovalRequest] = []
+        self.calls: List[Any] = []
 
-    async def request_approval(self, *, request: ApprovalRequest, timeout_ms: Optional[int] = None) -> ApprovalDecision:
+    async def request_approval(self, *, request: Any, timeout_ms: Optional[int] = None) -> Any:
+        from skills_runtime.safety.approvals import ApprovalDecision
+
         _ = timeout_ms
         self.calls.append(request)
         if self._decisions:
@@ -235,7 +233,7 @@ class ScriptedApprovalProvider(ApprovalProvider):
         return ApprovalDecision.DENIED
 
 
-class TerminalApprovalProvider(ApprovalProvider):
+class TerminalApprovalProvider:
     """
     终端交互式审批（最小 UX）。
 
@@ -243,7 +241,9 @@ class TerminalApprovalProvider(ApprovalProvider):
     - 默认 fail-closed（用户未明确输入 y/Y 则拒绝）。
     """
 
-    async def request_approval(self, *, request: ApprovalRequest, timeout_ms: Optional[int] = None) -> ApprovalDecision:
+    async def request_approval(self, *, request: Any, timeout_ms: Optional[int] = None) -> Any:
+        from skills_runtime.safety.approvals import ApprovalDecision
+
         _ = timeout_ms
         print("\n[approval] 需要审批：")
         print(f"- tool: {request.tool}")
@@ -256,7 +256,7 @@ class TerminalApprovalProvider(ApprovalProvider):
         return ApprovalDecision.DENIED
 
 
-class AutoApprovalProvider(ApprovalProvider):
+class AutoApprovalProvider:
     """
     自动审批器（非交互 smoke / 服务端示例用）。
 
@@ -269,15 +269,17 @@ class AutoApprovalProvider(ApprovalProvider):
     """
 
     def __init__(self) -> None:
-        self.calls: List[ApprovalRequest] = []
+        self.calls: List[Any] = []
 
-    async def request_approval(self, *, request: ApprovalRequest, timeout_ms: Optional[int] = None) -> ApprovalDecision:
+    async def request_approval(self, *, request: Any, timeout_ms: Optional[int] = None) -> Any:
+        from skills_runtime.safety.approvals import ApprovalDecision
+
         _ = timeout_ms
         self.calls.append(request)
         return ApprovalDecision.APPROVED_FOR_SESSION
 
 
-class ScriptedHumanIO(HumanIOProvider):
+class ScriptedHumanIO:
     """
     预置 HumanIOProvider：按 question_id 返回预置答案。
 
@@ -306,7 +308,7 @@ class ScriptedHumanIO(HumanIOProvider):
         return self._default
 
 
-class TerminalHumanIO(HumanIOProvider):
+class TerminalHumanIO:
     """终端交互式 HumanIOProvider（最小 UX）。"""
 
     def request_human_input(
@@ -376,7 +378,7 @@ def stream_runtime_with_min_ux(
     async def _run() -> Tuple[str, Optional[str]]:
         nonlocal final_output, wal_locator
         async for item in runtime.run_stream(capability_id, input=input or {}):
-            if isinstance(item, AgentEvent):
+            if hasattr(item, "type") and hasattr(item, "payload"):
                 if item.type in {
                     "run_started",
                     "run_completed",
@@ -424,8 +426,8 @@ def build_bridge_runtime_from_env(
     *,
     workspace_root: Path,
     overlay: Path,
-    approval_provider: Optional[ApprovalProvider],
-    human_io: Optional[HumanIOProvider],
+    approval_provider: Optional[Any],
+    human_io: Optional[Any],
     sdk_backend: Any = None,
     output_validation_mode: str = "off",
     output_validator: Optional[Callable[..., Any]] = None,
@@ -443,24 +445,28 @@ def build_bridge_runtime_from_env(
     - Runtime 实例
     """
 
-    bridge_upstream_agent = None
+    provider_requester_factory = None
     if sdk_backend is None:
-        try:
-            from agently import Agently  # type: ignore
-        except ModuleNotFoundError as exc:
-            raise RuntimeError("bridge upstream dependency is required for real mode") from exc
-
-        base_url = env_or_default("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        model_name = env_or_default("MODEL_NAME", "gpt-4o-mini")
+        base_url = env_or_default("OPENAI_BASE_URL", "")
+        model_name = env_or_default("MODEL_NAME", "")
         api_key = env_or_default("OPENAI_API_KEY", "")
+        if not base_url:
+            raise RuntimeError("missing OPENAI_BASE_URL")
+        if not model_name:
+            raise RuntimeError("missing MODEL_NAME")
         if not api_key:
             raise RuntimeError("missing OPENAI_API_KEY")
 
-        Agently.set_settings(
-            "OpenAICompatible",
-            {"base_url": base_url, "model": model_name, "auth": api_key},
-        )
-        bridge_upstream_agent = Agently.create_agent()
+        try:
+            provider_requester_factory = build_openai_provider_requester_factory(
+                base_url=base_url,
+                transport_model=model_name,
+                api_key=api_key,
+                strategy="chat_completions",
+                allow_insecure_transport=env_or_default("CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT", "") == "1",
+            )
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("bridge upstream dependency is required for real mode") from exc
 
     return Runtime(
         RuntimeConfig(
@@ -468,7 +474,7 @@ def build_bridge_runtime_from_env(
             workspace_root=workspace_root,
             sdk_config_paths=[overlay],
             preflight_mode="off",
-            agently_agent=bridge_upstream_agent,
+            provider_requester_factory=provider_requester_factory,
             approval_provider=approval_provider,
             human_io=human_io,
             sdk_backend=sdk_backend,

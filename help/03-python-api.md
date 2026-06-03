@@ -22,8 +22,10 @@ Provider bridge additions:
 - `RuntimeConfig.requester_strategy`: requester strategy, defaulting to
   `"chat_completions"` for legacy compatibility.
 - `RuntimeConfig.max_dynamic_nodes`: Dynamic DAG preview hard limit.
+- `RuntimeRecallBackend`: runtime-owned backend protocol for context recall
+  adapters.
 - `build_recall_context_pack` / `write_node_report_summary`: neutral
-  Workspace/Recall preview helpers exposed from the package root.
+  recall context helpers exposed from the package root.
 
 Requester selection does not select the business model. Use
 `AgentSpec.llm_config["model"]` to set the runtime model; the lifecycle layer
@@ -186,8 +188,8 @@ cfg = RuntimeConfig(mode="bridge", requester_strategy="responses")
 
 Real provider audit:
 
-- chat/completions uses Agently `OpenAICompatible`; Responses uses
-  `OpenAIResponsesCompatible`.
+- Build the bridge transport with `build_openai_provider_requester_factory(...)`
+  and select the lane through `RuntimeConfig.requester_strategy`.
 - `NodeReport.usage.model` prefers provider usage `model`, then falls back to
   `ChatRequest.model`.
 - `NodeReport.usage.request_id` and `NodeReport.usage.provider` must be
@@ -207,10 +209,12 @@ pass upstream-native `TaskDAG` / `DynamicTask` objects through application code 
 stable contracts. Nodes execute only through registered capability ids, with
 fail-closed `DYNAMIC_DAG_*` diagnostics and bounded `max_dynamic_nodes`.
 
-Workspace/Recall preview exposes a neutral `RuntimeRecallContextPack`; it is not
-a WAL or NodeReport replacement. Action artifact evidence is exposed as
-redacted artifact references and `NodeReport.meta` summaries, never raw artifact
-content.
+Recall context preview accepts a runtime-owned `RuntimeRecallBackend` and exposes
+a neutral `RuntimeRecallContextPack`; it is not a WAL or NodeReport replacement.
+An upstream Workspace can be adapted behind that backend protocol, but downstream
+code should not depend on the upstream-native object. Action artifact evidence is
+exposed as redacted artifact references and `NodeReport.meta` summaries, never
+raw artifact content.
 
 Agently `SkillsExecutor` is not a `capability-runtime` skills driver. You may
 reuse its general `SKILL.md` authoring discipline, but `AgentSpec.skills` still

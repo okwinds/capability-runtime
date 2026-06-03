@@ -32,10 +32,10 @@ Bridge 模式的公开入口仍是 `Runtime`。默认 bridge requester 仍为
 真实 provider smoke 请按这个顺序执行：
 
 1. `models`：确认 gateway 上配置的 `MODEL_NAME` 存在。
-2. `chat`：配置 `OpenAICompatible` provider 通道，跑 chat/completions。
-3. `responses`：只有 gateway 支持 `/responses` 时，才配置 Agently
-   `OpenAIResponsesCompatible` provider 通道。
-4. `runtime chat`：用默认 `chat_completions` requester 跑 bridge mode。
+2. `transport`：用 `build_openai_provider_requester_factory(...)` 构造
+   `provider_requester_factory`。
+3. `chat`：用默认 `chat_completions` requester 跑 bridge mode。
+4. `responses`：只有 gateway 支持 `/responses` 时，才显式 opt-in。
 5. `runtime responses`：用
    `RuntimeConfig.requester_strategy="responses"` 跑 bridge mode。
 

@@ -22,7 +22,7 @@ def main() -> None:
         completion_reason="run_completed",
         run_id="run-artifact",
         events_path="wal://run-artifact",
-        artifacts=["agently-action://artifact-1"],
+        artifacts=["runtime-action://artifact-1"],
         meta={
             "runtime_action_artifact_refs": ["runtime-action://artifact-1"],
             "action_artifacts": [
