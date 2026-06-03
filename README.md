@@ -263,6 +263,10 @@ configure the corresponding Trusted Publisher entry on `pypi.org`.
 
 - `skills-runtime-sdk` remains the source of truth for skills, approvals, tools,
   WAL, and event evidence.
+- Agently `SkillsExecutor` is not a `capability-runtime` skills driver. Its
+  authoring patterns may inform `SKILL.md` bundle design, but skill injection,
+  tool execution, approvals, WAL, events, and `NodeReport` aggregation remain
+  owned by `skills-runtime-sdk`.
 - `Agently` remains the transport/orchestration substrate where this repository
   chooses to bridge instead of forking or reimplementing.
 - `capability-runtime` is the contract-convergence layer: it narrows those

@@ -212,6 +212,11 @@ a WAL or NodeReport replacement. Action artifact evidence is exposed as
 redacted artifact references and `NodeReport.meta` summaries, never raw artifact
 content.
 
+Agently `SkillsExecutor` is not a `capability-runtime` skills driver. You may
+reuse its general `SKILL.md` authoring discipline, but `AgentSpec.skills` still
+flows through `skills-runtime-sdk` for skill injection, tools, approvals, WAL,
+events, and `NodeReport` evidence.
+
 ## Errors
 
 - `RuntimeFrameworkError`
