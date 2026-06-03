@@ -6,10 +6,7 @@ ChatBackend 协议定义。
 
 from __future__ import annotations
 
-from typing import AsyncGenerator, Protocol, runtime_checkable
-
-from skills_runtime.llm.chat_sse import ChatStreamEvent
-from skills_runtime.llm.protocol import ChatRequest
+from typing import Any, AsyncIterator, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -18,19 +15,19 @@ class ChatBackendProtocol(Protocol):
     ChatBackend 协议：定义流式聊天后端的接口。
 
     说明：
-    - 与 `skills_runtime.llm.protocol.ChatBackend` 对齐
+    - 与 runtime 注入的 streaming chat backend shape 对齐
     - 用于 backend wrapper 的类型注解，减少 `Any` 使用
     """
 
-    def stream_chat(self, request: ChatRequest) -> AsyncGenerator[ChatStreamEvent, None]:
+    def stream_chat(self, request: Any) -> AsyncIterator[Any]:
         """
         发起流式聊天请求。
 
         参数：
-        - request：ChatRequest 或兼容对象
+        - request：本仓 runtime 传入的 chat request 兼容对象
 
         返回：
-        - ChatStreamEvent 异步生成器
+        - chat stream event 兼容对象的异步迭代器
         """
         ...
 

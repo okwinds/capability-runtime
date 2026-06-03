@@ -52,7 +52,8 @@ class WorkflowRunSnapshot:
     - current_step_id：当前步骤 ID
     - waiting_approval_key：等待审批键
     - events_path：证据链 events 定位符
-    - lifecycle_state/execution_id/state_version：TriggerFlow lifecycle 中立摘要
+    - lifecycle_state/execution_id/state_version：workflow lifecycle 中立摘要
+    - lifecycle_source/intervention_supported：lifecycle 来源与是否支持 intervention 恢复
     - intervention_mode/pending_interventions：intervention preview 中立状态
     - close_reason：workflow close 原因摘要
     """
@@ -69,6 +70,8 @@ class WorkflowRunSnapshot:
     lifecycle_state: str | None = None
     execution_id: str | None = None
     state_version: int | None = None
+    lifecycle_source: str | None = None
+    intervention_supported: bool = False
     intervention_mode: str | None = None
     pending_interventions: list[dict[str, Any]] = field(default_factory=list)
     close_reason: str | None = None
@@ -116,9 +119,12 @@ def summarize_workflow_items(
     lifecycle_state: str | None = None
     execution_id: str | None = None
     state_version: int | None = None
+    lifecycle_source: str | None = None
+    intervention_supported = False
     intervention_mode: str | None = None
     pending_interventions: list[dict[str, Any]] = []
     close_reason: str | None = None
+    event_waiting_approval_key: str | None = None
 
     for item in items:
         if not isinstance(item, dict):
@@ -131,8 +137,13 @@ def summarize_workflow_items(
             lifecycle_state = _optional_text(item.get("lifecycle_state")) or lifecycle_state
             execution_id = _optional_text(item.get("execution_id")) or execution_id
             state_version = _optional_int(item.get("state_version"), default=state_version)
+            lifecycle_source = _optional_text(item.get("lifecycle_source")) or lifecycle_source
+            intervention_supported = _optional_bool(item.get("intervention_supported"), default=intervention_supported)
             intervention_mode = _optional_text(item.get("intervention_mode")) or intervention_mode
             pending_interventions = _normalize_pending_interventions(item.get("pending_interventions"), pending_interventions)
+            continue
+        if typ == "workflow.dynamic_dag.planned":
+            workflow_instance_id = str(item.get("workflow_instance_id") or workflow_instance_id or workflow_id)
             continue
         if typ in {
             "workflow.lifecycle.changed",
@@ -142,6 +153,8 @@ def summarize_workflow_items(
             lifecycle_state = _optional_text(item.get("lifecycle_state")) or lifecycle_state
             execution_id = _optional_text(item.get("execution_id")) or execution_id
             state_version = _optional_int(item.get("state_version"), default=state_version)
+            lifecycle_source = _optional_text(item.get("lifecycle_source")) or lifecycle_source
+            intervention_supported = _optional_bool(item.get("intervention_supported"), default=intervention_supported)
             intervention_mode = _optional_text(item.get("intervention_mode")) or intervention_mode
             pending_interventions = _normalize_pending_interventions(item.get("pending_interventions"), pending_interventions)
             close_reason = _optional_text(item.get("close_reason")) or close_reason
@@ -166,27 +179,76 @@ def summarize_workflow_items(
             if step_id not in ordered_steps:
                 ordered_steps.append(step_id)
             status = str(item.get("status") or "pending").strip() or "pending"
+            waiting_key = _optional_text(item.get("waiting_approval_key"))
+            if waiting_key:
+                event_waiting_approval_key = waiting_key
             steps[step_id] = WorkflowStepSnapshot(
                 step_id=step_id,
                 status=status,
                 capability_id=_optional_text(item.get("capability_id")),
                 error=_optional_text(item.get("error")),
             )
-            if status in {"running", "pending"}:
+            if status in {"running", "pending", "needs_approval"}:
                 current_step_id = step_id
+                if waiting_key:
+                    final_status = WorkflowRunStatus.WAITING_HUMAN
+            elif current_step_id == step_id:
+                current_step_id = None
+            continue
+        if typ == "workflow.dynamic_dag.node.started":
+            step_id = str(item.get("dag_node_id") or "").strip()
+            if not step_id:
+                continue
+            current_step_id = step_id
+            if step_id not in ordered_steps:
+                ordered_steps.append(step_id)
+            steps[step_id] = WorkflowStepSnapshot(
+                step_id=step_id,
+                status="running",
+                capability_id=_optional_text(item.get("capability_id")),
+            )
+            workflow_instance_id = str(item.get("workflow_instance_id") or workflow_instance_id or workflow_id)
+            continue
+        if typ == "workflow.dynamic_dag.node.finished":
+            step_id = str(item.get("dag_node_id") or "").strip()
+            if not step_id:
+                continue
+            if step_id not in ordered_steps:
+                ordered_steps.append(step_id)
+            status = str(item.get("status") or "pending").strip() or "pending"
+            waiting_key = _optional_text(item.get("waiting_approval_key"))
+            if waiting_key:
+                event_waiting_approval_key = waiting_key
+            steps[step_id] = WorkflowStepSnapshot(
+                step_id=step_id,
+                status=status,
+                capability_id=_optional_text(item.get("capability_id")),
+                error=_optional_text(item.get("error") or item.get("error_code")),
+            )
+            workflow_instance_id = str(item.get("workflow_instance_id") or workflow_instance_id or workflow_id)
+            if status in {"running", "pending", "needs_approval"}:
+                current_step_id = step_id
+                if waiting_key:
+                    final_status = WorkflowRunStatus.WAITING_HUMAN
             elif current_step_id == step_id:
                 current_step_id = None
             continue
         if typ == "workflow.finished":
             final_status = _map_workflow_status_from_event(str(item.get("status") or "pending"))
+            waiting_key = _optional_text(item.get("waiting_approval_key"))
+            if waiting_key:
+                event_waiting_approval_key = waiting_key
+                final_status = WorkflowRunStatus.WAITING_HUMAN
             lifecycle_state = _optional_text(item.get("lifecycle_state")) or lifecycle_state
             execution_id = _optional_text(item.get("execution_id")) or execution_id
             state_version = _optional_int(item.get("state_version"), default=state_version)
+            lifecycle_source = _optional_text(item.get("lifecycle_source")) or lifecycle_source
+            intervention_supported = _optional_bool(item.get("intervention_supported"), default=intervention_supported)
             intervention_mode = _optional_text(item.get("intervention_mode")) or intervention_mode
             pending_interventions = _normalize_pending_interventions(item.get("pending_interventions"), pending_interventions)
             close_reason = _optional_text(item.get("close_reason")) or close_reason
 
-    waiting_approval_key = None
+    waiting_approval_key = event_waiting_approval_key
     events_path = None
     host_runtime: dict[str, Any] | None = None
     if terminal is not None and terminal.node_report is not None:
@@ -197,6 +259,14 @@ def summarize_workflow_items(
             host_step_id = _optional_text(host_runtime.get("step_id"))
             if host_step_id:
                 current_step_id = host_step_id
+            dynamic_waiting = terminal.node_report.meta.get("dynamic_dag", {}).get("waiting")
+            if isinstance(dynamic_waiting, dict):
+                dynamic_step_id = _optional_text(dynamic_waiting.get("dag_node_id"))
+                dynamic_approval_key = _optional_text(dynamic_waiting.get("approval_key"))
+                if dynamic_step_id:
+                    current_step_id = dynamic_step_id
+                if dynamic_approval_key:
+                    waiting_approval_key = dynamic_approval_key
         if isinstance(terminal.node_report.events_path, str) and terminal.node_report.events_path:
             events_path = terminal.node_report.events_path
         if not run_id:
@@ -223,6 +293,8 @@ def summarize_workflow_items(
         lifecycle_state=lifecycle_state,
         execution_id=execution_id,
         state_version=state_version,
+        lifecycle_source=lifecycle_source,
+        intervention_supported=intervention_supported,
         intervention_mode=intervention_mode,
         pending_interventions=pending_interventions,
         close_reason=close_reason,
@@ -271,6 +343,14 @@ def _optional_int(value: Any, *, default: int | None) -> int | None:
         return value
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
+    return default
+
+
+def _optional_bool(value: Any, *, default: bool) -> bool:
+    """只接受真实 bool，避免字符串误开启 intervention 能力。"""
+
+    if isinstance(value, bool):
+        return value
     return default
 
 

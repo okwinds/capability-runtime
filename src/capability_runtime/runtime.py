@@ -54,7 +54,7 @@ from .structured_output import (
     validate_structured_output,
 )
 from .structured_stream import StructuredStreamEvent, diff_top_level_fields
-from .types import NodeReport
+from .types import NodeReport, NodeUsageReport
 from .adapters.agent_adapter import AgentAdapter
 from .adapters.workflow_engine import WorkflowStreamEvent
 from .adapters.triggerflow_workflow_engine import TriggerFlowWorkflowEngine
@@ -711,6 +711,26 @@ class Runtime(RuntimeUIEventsMixin):
         - context：可选执行上下文；为空时使用 request.run_id 新建
         """
 
+        if request.from_snapshot is not None:
+            report = self.build_fail_closed_report(
+                run_id=request.run_id,
+                status="failed",
+                reason="workflow_replay_unsupported",
+                completion_reason="workflow_replay_unsupported",
+                meta={
+                    "workflow_id": request.workflow_id,
+                    "snapshot_run_id": request.from_snapshot.run_id,
+                    "error_code": "WORKFLOW_SNAPSHOT_REPLAY_UNSUPPORTED",
+                    "message": "Workflow snapshot-aware replay is not supported; use current_input rerun without from_snapshot.",
+                },
+            )
+            return CapabilityResult(
+                status=CapabilityStatus.FAILED,
+                error="Workflow snapshot-aware replay is not supported; use current_input rerun without from_snapshot.",
+                error_code="WORKFLOW_SNAPSHOT_REPLAY_UNSUPPORTED",
+                report=report,
+                node_report=report,
+            )
         ctx = context or ExecutionContext(run_id=request.run_id, max_depth=self._config.max_depth)
         return await self.run(request.workflow_id, input=request.current_input or {}, context=ctx)
 
@@ -823,8 +843,9 @@ class Runtime(RuntimeUIEventsMixin):
 
         node_summaries: dict[str, dict[str, Any]] = {}
         node_outputs: dict[str, Any] = {}
+        node_reports: dict[str, NodeReport] = {}
         blocked_nodes: set[str] = set()
-        first_error: tuple[str, str] | None = None
+        first_error: tuple[str, str, CapabilityStatus, str, str | None] | None = None
 
         for group in topological_dynamic_groups(compiled):
             for node in group:
@@ -845,7 +866,13 @@ class Runtime(RuntimeUIEventsMixin):
                     node_summaries[node.id] = self._build_dynamic_node_summary(node, status="failed", error_code="DYNAMIC_DAG_NODE_UNRESOLVED")
                     blocked_nodes.add(node.id)
                     if first_error is None:
-                        first_error = ("DYNAMIC_DAG_NODE_UNRESOLVED", f"Dynamic DAG node cannot resolve a registered capability: {node.id}")
+                        first_error = (
+                            "DYNAMIC_DAG_NODE_UNRESOLVED",
+                            f"Dynamic DAG node cannot resolve a registered capability: {node.id}",
+                            CapabilityStatus.FAILED,
+                            "failed",
+                            None,
+                        )
                     yield self._dynamic_node_event(
                         "workflow.dynamic_dag.node.finished",
                         ctx=ctx,
@@ -870,6 +897,8 @@ class Runtime(RuntimeUIEventsMixin):
                 node_input["dependency_results"] = {dep: node_outputs.get(dep) for dep in node.depends_on}
 
                 result = await self.run(node.capability_id, input=node_input, context=ctx)
+                if isinstance(result.node_report, NodeReport):
+                    node_reports[node.id] = result.node_report
                 if result.status == CapabilityStatus.SUCCESS:
                     node_outputs[node.id] = result.output
                     node_summaries[node.id] = self._build_dynamic_node_summary(node, status="success", output=result.output)
@@ -884,23 +913,35 @@ class Runtime(RuntimeUIEventsMixin):
                     continue
 
                 blocked_nodes.add(node.id)
-                error_code = result.error_code or "DYNAMIC_DAG_NODE_FAILED"
+                node_status, terminal_status, report_status, default_error_code = self._dynamic_status_from_result(result)
+                error_code = result.error_code or default_error_code
                 node_summaries[node.id] = self._build_dynamic_node_summary(
                     node,
-                    status="failed",
+                    status=node_status,
                     error_code=error_code,
                     error=result.error,
                 )
+                waiting_summary = self._dynamic_waiting_summary(node_id=node.id, result=result)
+                if waiting_summary:
+                    node_summaries[node.id]["waiting"] = dict(waiting_summary)
                 if first_error is None:
-                    first_error = ("DYNAMIC_DAG_NODE_FAILED", result.error or f"Dynamic DAG node failed: {node.id}")
+                    first_error = (
+                        default_error_code,
+                        result.error or f"Dynamic DAG node did not complete successfully: {node.id}",
+                        terminal_status,
+                        report_status,
+                        node.id,
+                    )
                 yield self._dynamic_node_event(
                     "workflow.dynamic_dag.node.finished",
                     ctx=ctx,
                     plan=compiled,
                     workflow_instance_id=workflow_instance_id,
                     node=node,
-                    status="failed",
+                    status=node_status,
                     error_code=error_code,
+                    error=result.error,
+                    waiting_approval_key=waiting_summary.get("approval_key") if waiting_summary else None,
                 )
 
         terminal = self._build_dynamic_workflow_terminal_result(
@@ -908,6 +949,7 @@ class Runtime(RuntimeUIEventsMixin):
             plan=compiled,
             node_summaries=node_summaries,
             node_outputs=node_outputs,
+            node_reports=node_reports,
             first_error=first_error,
             started=started,
         )
@@ -1192,6 +1234,33 @@ class Runtime(RuntimeUIEventsMixin):
             summary["output_type"] = type(output).__name__
         return summary
 
+    def _dynamic_status_from_result(self, result: CapabilityResult) -> tuple[str, CapabilityStatus, str, str]:
+        """把能力执行结果归一为 Dynamic DAG 节点状态、终态和默认错误码。"""
+
+        report_status = getattr(getattr(result, "node_report", None), "status", None)
+        if report_status == "needs_approval":
+            return "needs_approval", CapabilityStatus.PENDING, "needs_approval", "DYNAMIC_DAG_NODE_NEEDS_APPROVAL"
+        if result.status == CapabilityStatus.PENDING:
+            return "pending", CapabilityStatus.PENDING, "incomplete", "DYNAMIC_DAG_NODE_PENDING"
+        if result.status == CapabilityStatus.CANCELLED:
+            return "cancelled", CapabilityStatus.CANCELLED, "incomplete", "DYNAMIC_DAG_NODE_CANCELLED"
+        return "failed", CapabilityStatus.FAILED, "failed", "DYNAMIC_DAG_NODE_FAILED"
+
+    def _dynamic_waiting_summary(self, *, node_id: str, result: CapabilityResult) -> dict[str, Any]:
+        """提取 Dynamic DAG 等待人工介入的最小恢复证据。"""
+
+        node_report = result.node_report
+        if node_report is None or node_report.status != "needs_approval":
+            return {}
+        waiting: dict[str, Any] = {"dag_node_id": node_id}
+        for call in node_report.tool_calls:
+            if call.requires_approval and call.approval_key:
+                waiting["approval_key"] = call.approval_key
+                waiting["call_id"] = call.call_id
+                waiting["tool_name"] = call.name
+                break
+        return waiting
+
     def _build_dynamic_workflow_terminal_result(
         self,
         *,
@@ -1199,7 +1268,8 @@ class Runtime(RuntimeUIEventsMixin):
         plan: DynamicWorkflowPlan,
         node_summaries: dict[str, dict[str, Any]],
         node_outputs: dict[str, Any],
-        first_error: tuple[str, str] | None,
+        node_reports: dict[str, NodeReport],
+        first_error: tuple[str, str, CapabilityStatus, str, str | None] | None,
         started: float,
     ) -> CapabilityResult:
         meta = {
@@ -1211,6 +1281,16 @@ class Runtime(RuntimeUIEventsMixin):
                 "nodes": node_summaries,
             }
         }
+        waiting = next(
+            (
+                summary.get("waiting")
+                for summary in node_summaries.values()
+                if isinstance(summary, dict) and isinstance(summary.get("waiting"), dict)
+            ),
+            None,
+        )
+        if isinstance(waiting, dict):
+            meta["dynamic_dag"]["waiting"] = dict(waiting)
         if first_error is None:
             report = NodeReport(
                 status="success",
@@ -1226,6 +1306,7 @@ class Runtime(RuntimeUIEventsMixin):
                 artifacts=[],
                 meta=meta,
             )
+            self._apply_dynamic_success_evidence(report=report, plan=plan, node_reports=node_reports)
             attach_agently_bridge_diagnostics(
                 report,
                 mode=self._config.mode,
@@ -1239,21 +1320,47 @@ class Runtime(RuntimeUIEventsMixin):
                 duration_ms=(time.monotonic() - started) * 1000,
             )
 
-        error_code, error = first_error
+        error_code, error, terminal_status, report_status, error_node_id = first_error
+        reason = (
+            "approval_pending"
+            if report_status == "needs_approval"
+            else "cancelled"
+            if terminal_status == CapabilityStatus.CANCELLED
+            else "dynamic_dag_pending"
+            if terminal_status == CapabilityStatus.PENDING
+            else "dynamic_dag_failed"
+        )
         report = build_fail_closed_report(
             run_id=run_id,
-            status="failed",
-            reason="dynamic_dag_failed",
-            completion_reason="dynamic_dag_failed",
+            status=report_status,
+            reason=reason,
+            completion_reason=reason,
             meta=meta,
         )
+        evidence_report = node_reports.get(error_node_id or "")
+        if evidence_report is not None:
+            report.events_path = evidence_report.events_path
+            report.usage = evidence_report.usage
+            report.tool_calls = list(evidence_report.tool_calls)
+            report.artifacts = list(evidence_report.artifacts)
+            for key in (
+                "approval_requested_at_ms",
+                "workflow_id",
+                "workflow_instance_id",
+                "step_id",
+                "waiting_human_kind",
+                "final_message",
+            ):
+                value = evidence_report.meta.get(key)
+                if value is not None:
+                    report.meta[key] = value
         attach_agently_bridge_diagnostics(
             report,
             mode=self._config.mode,
             requester_strategy=self._config.effective_requester_strategy,
         )
         return CapabilityResult(
-            status=CapabilityStatus.FAILED,
+            status=terminal_status,
             error=error,
             error_code=error_code,
             output={"graph_id": plan.graph_id, "plan_hash": plan.plan_hash, "nodes": node_summaries, "outputs": node_outputs},
@@ -1261,6 +1368,67 @@ class Runtime(RuntimeUIEventsMixin):
             node_report=report,
             duration_ms=(time.monotonic() - started) * 1000,
         )
+
+    def _apply_dynamic_success_evidence(
+        self,
+        *,
+        report: NodeReport,
+        plan: DynamicWorkflowPlan,
+        node_reports: dict[str, NodeReport],
+    ) -> None:
+        """把成功 Dynamic DAG 节点证据聚合到 workflow-owned terminal report。"""
+
+        usage_totals: dict[str, int] = {}
+        usage_model: str | None = None
+        usage_request_id: str | None = None
+        usage_provider: str | None = None
+        usage_provider_transport: str | None = None
+        tool_calls = []
+        artifacts: list[str] = []
+        activated_skills: list[str] = []
+
+        for node in plan.nodes:
+            node_report = node_reports.get(node.id)
+            if node_report is None or node_report.status != "success":
+                continue
+            if node_report.events_path:
+                report.events_path = node_report.events_path
+            if node_report.usage is not None:
+                for field in ("input_tokens", "output_tokens", "total_tokens"):
+                    value = getattr(node_report.usage, field)
+                    if isinstance(value, int):
+                        usage_totals[field] = usage_totals.get(field, 0) + value
+                usage_model = node_report.usage.model or usage_model
+                usage_request_id = node_report.usage.request_id or usage_request_id
+                usage_provider = node_report.usage.provider or usage_provider
+                usage_provider_transport = node_report.usage.provider_transport or usage_provider_transport
+            tool_calls.extend(node_report.tool_calls)
+            for artifact in node_report.artifacts:
+                if artifact not in artifacts:
+                    artifacts.append(artifact)
+            for skill in node_report.activated_skills:
+                if skill not in activated_skills:
+                    activated_skills.append(skill)
+
+        report.tool_calls = tool_calls
+        report.artifacts = artifacts
+        report.activated_skills = activated_skills
+        if (
+            usage_totals
+            or usage_model is not None
+            or usage_request_id is not None
+            or usage_provider is not None
+            or usage_provider_transport is not None
+        ):
+            report.usage = NodeUsageReport(
+                model=usage_model,
+                input_tokens=usage_totals.get("input_tokens"),
+                output_tokens=usage_totals.get("output_tokens"),
+                total_tokens=usage_totals.get("total_tokens"),
+                request_id=usage_request_id,
+                provider=usage_provider,
+                provider_transport=usage_provider_transport,
+            )
 
     def _build_dynamic_workflow_error_result(
         self,
@@ -1312,6 +1480,8 @@ class Runtime(RuntimeUIEventsMixin):
         node: DynamicWorkflowNode,
         status: str,
         error_code: str | None = None,
+        error: str | None = None,
+        waiting_approval_key: str | None = None,
     ) -> WorkflowStreamEvent:
         event: WorkflowStreamEvent = {
             "type": event_type,
@@ -1326,6 +1496,10 @@ class Runtime(RuntimeUIEventsMixin):
         }
         if error_code:
             event["error_code"] = error_code
+        if error:
+            event["error"] = error
+        if waiting_approval_key:
+            event["waiting_approval_key"] = waiting_approval_key
         return event
 
 

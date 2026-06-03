@@ -4,7 +4,7 @@ Usage 提取工具：从 LLM usage payload 中提取标准化指标。
 兼容：
 - 本仓规范字段：`input_tokens/output_tokens/total_tokens`
 - OpenAI 风格字段：`prompt_tokens/completion_tokens/total_tokens`
-- provider metadata：`request_id/id/provider`
+- provider metadata：`request_id/id/provider/provider_transport`
 - 可选嵌套：`payload["usage"]`
 """
 
@@ -41,7 +41,7 @@ def extract_usage_metrics(payload: Any) -> Dict[str, Optional[Any]]:
     - payload：AgentEvent.payload 或类似结构
 
     返回：
-    - dict 包含 model/input_tokens/output_tokens/total_tokens/request_id/provider
+    - dict 包含 model/input_tokens/output_tokens/total_tokens/request_id/provider/provider_transport
     """
 
     if not isinstance(payload, dict):
@@ -52,6 +52,7 @@ def extract_usage_metrics(payload: Any) -> Dict[str, Optional[Any]]:
             "total_tokens": None,
             "request_id": None,
             "provider": None,
+            "provider_transport": None,
         }
 
     usage_raw = payload.get("usage")
@@ -64,6 +65,9 @@ def extract_usage_metrics(payload: Any) -> Dict[str, Optional[Any]]:
         or _usage_text(usage_dict.get("id"))
     )
     provider = _usage_text(payload.get("provider")) or _usage_text(usage_dict.get("provider"))
+    provider_transport = _usage_text(payload.get("provider_transport")) or _usage_text(
+        usage_dict.get("provider_transport")
+    )
 
     input_tokens = _usage_int(usage_dict.get("input_tokens"))
     if input_tokens is None:
@@ -82,4 +86,5 @@ def extract_usage_metrics(payload: Any) -> Dict[str, Optional[Any]]:
         "total_tokens": total_tokens,
         "request_id": request_id,
         "provider": provider,
+        "provider_transport": provider_transport,
     }

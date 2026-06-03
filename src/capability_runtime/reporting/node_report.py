@@ -121,15 +121,15 @@ def _summarize_action_artifact(value: Any) -> Optional[Dict[str, str]]:
 
 
 def _action_artifact_ref(summary: Dict[str, str]) -> str:
-    """生成兼容旧 userspace 的 action artifact reference locator。"""
-
-    return f"agently-action://{summary['artifact_id']}"
-
-
-def _runtime_action_artifact_ref(summary: Dict[str, str]) -> str:
-    """生成中立 action artifact reference locator。"""
+    """生成 runtime-owned action artifact reference locator。"""
 
     return f"runtime-action://{summary['artifact_id']}"
+
+
+def _legacy_action_artifact_ref(summary: Dict[str, str]) -> str:
+    """生成旧 action artifact reference locator，仅用于兼容读取/迁移摘要。"""
+
+    return f"agently-action://{summary['artifact_id']}"
 
 
 @dataclass
@@ -188,6 +188,7 @@ class NodeReportBuilder:
         seen_artifacts: set[str] = set()
         action_artifacts: List[Dict[str, str]] = []
         runtime_action_artifact_refs: List[str] = []
+        legacy_action_artifact_refs: List[str] = []
         seen_action_artifacts: set[str] = set()
         action_artifact_diagnostics: List[Dict[str, Any]] = []
 
@@ -213,19 +214,34 @@ class NodeReportBuilder:
                 return
             seen_action_artifacts.add(artifact_id)
             action_artifacts.append(dict(summary))
-            runtime_action_artifact_refs.append(_runtime_action_artifact_ref(summary))
+            runtime_action_artifact_refs.append(_action_artifact_ref(summary))
+            legacy_action_artifact_refs.append(_legacy_action_artifact_ref(summary))
             _add_artifact(_action_artifact_ref(summary))
 
         def _extract_action_artifacts(data: Any, *, source: str) -> List[Dict[str, str]]:
             """从 action observation data 中提取 artifact reference 摘要。"""
 
-            if not isinstance(data, dict):
+            if not isinstance(data, (dict, list)):
                 return []
             raw_items: List[Any] = []
-            for key in ("artifact_refs", "artifacts"):
-                value = data.get(key)
+
+            def _collect(value: Any, *, depth: int = 0) -> None:
+                if depth > 4:
+                    return
+                if isinstance(value, dict):
+                    for key in ("artifact_refs", "artifacts"):
+                        raw = value.get(key)
+                        if isinstance(raw, list):
+                            raw_items.extend(raw)
+                    for key in ("observation", "result", "output", "data"):
+                        if key in value:
+                            _collect(value.get(key), depth=depth + 1)
+                    return
                 if isinstance(value, list):
-                    raw_items.extend(value)
+                    for item in value:
+                        _collect(item, depth=depth + 1)
+
+            _collect(data)
             summaries: List[Dict[str, str]] = []
             seen_in_payload: set[str] = set()
             for index, item in enumerate(raw_items):
@@ -245,9 +261,17 @@ class NodeReportBuilder:
         def _has_action_artifact_container(data: Any) -> bool:
             """判断 data 是否带有 action artifact 容器字段。"""
 
-            if not isinstance(data, dict):
+            if not isinstance(data, (dict, list)):
                 return False
-            return isinstance(data.get("artifact_refs"), list) or isinstance(data.get("artifacts"), list)
+            if isinstance(data, list):
+                return any(_has_action_artifact_container(item) for item in data)
+            if isinstance(data.get("artifact_refs"), list) or isinstance(data.get("artifacts"), list):
+                return True
+            return any(
+                _has_action_artifact_container(data.get(key))
+                for key in ("observation", "result", "output", "data")
+                if key in data
+            )
 
         # call_id -> aggregated fields
         tool_calls: Dict[str, Dict[str, Any]] = {}
@@ -275,6 +299,7 @@ class NodeReportBuilder:
         usage_total_seen = False
         usage_request_id: Optional[str] = None
         usage_provider: Optional[str] = None
+        usage_provider_transport: Optional[str] = None
         provider_terminal: Optional[Dict[str, Any]] = None
 
         def _ensure_tool(call_id: str, *, name: str) -> Dict[str, Any]:
@@ -339,6 +364,9 @@ class NodeReportBuilder:
                 provider = usage_summary.get("provider")
                 if isinstance(provider, str) and provider.strip():
                     usage_provider = provider.strip()
+                provider_transport = usage_summary.get("provider_transport")
+                if isinstance(provider_transport, str) and provider_transport.strip():
+                    usage_provider_transport = provider_transport.strip()
 
                 input_tokens = usage_summary.get("input_tokens")
                 if isinstance(input_tokens, int):
@@ -361,6 +389,8 @@ class NodeReportBuilder:
                     usage_request_id = str(provider_terminal.get("request_id"))
                 if provider_terminal.get("provider") is not None:
                     usage_provider = str(provider_terminal.get("provider"))
+                if provider_terminal.get("provider_transport") is not None:
+                    usage_provider_transport = str(provider_terminal.get("provider_transport"))
                 if provider_terminal.get("model") is not None:
                     usage_model = str(provider_terminal.get("model"))
 
@@ -464,6 +494,8 @@ class NodeReportBuilder:
                             usage_request_id = str(provider_terminal.get("request_id"))
                         if provider_terminal.get("provider") is not None:
                             usage_provider = str(provider_terminal.get("provider"))
+                        if provider_terminal.get("provider_transport") is not None:
+                            usage_provider_transport = str(provider_terminal.get("provider_transport"))
                         if provider_terminal.get("model") is not None:
                             usage_model = str(provider_terminal.get("model"))
                         continue
@@ -535,6 +567,7 @@ class NodeReportBuilder:
             or usage_total_seen
             or usage_request_id is not None
             or usage_provider is not None
+            or usage_provider_transport is not None
         ):
             usage_report = NodeUsageReport(
                 model=usage_model,
@@ -543,6 +576,7 @@ class NodeReportBuilder:
                 total_tokens=usage_total_total if usage_total_seen else None,
                 request_id=usage_request_id,
                 provider=usage_provider,
+                provider_transport=usage_provider_transport,
             )
 
         report = NodeReport(
@@ -582,7 +616,7 @@ class NodeReportBuilder:
                     {
                         "action_artifacts": action_artifacts,
                         "runtime_action_artifact_refs": runtime_action_artifact_refs,
-                        "agently_action_artifacts": action_artifacts,
+                        "legacy_action_artifact_refs": legacy_action_artifact_refs,
                     }
                     if action_artifacts
                     else {}
@@ -590,7 +624,6 @@ class NodeReportBuilder:
                 **(
                     {
                         "action_artifact_diagnostics": action_artifact_diagnostics,
-                        "agently_action_artifact_diagnostics": action_artifact_diagnostics,
                     }
                     if action_artifact_diagnostics
                     else {}

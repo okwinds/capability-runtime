@@ -11,13 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional
-
-from skills_runtime.core.exec_sessions import ExecSessionsProvider
-from skills_runtime.llm.protocol import ChatBackend
-from skills_runtime.safety.approvals import ApprovalProvider
-from skills_runtime.state.wal_protocol import WalBackend
-from skills_runtime.tools.protocol import HumanIOProvider, ToolSpec
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Literal, Optional, Protocol
 
 
 PreflightMode = Literal["error", "warn", "off"]
@@ -26,6 +20,31 @@ OutputValidationMode = Literal["off", "warn", "error"]
 ProviderRequesterStrategy = Literal["chat_completions", "responses"]
 AgentlyRequesterStrategy = ProviderRequesterStrategy
 ToolChoiceAfterToolResult = Literal["none", "auto"]
+
+
+class ProviderRequester(Protocol):
+    """Runtime-owned provider requester shape used by bridge transport adapters."""
+
+    def generate_request_data(self) -> Any:
+        """Return a mutable request data object consumed by the bridge adapter."""
+
+        ...
+
+    def request_model(self, request_data: Any) -> AsyncIterator[tuple[str, Any]] | Awaitable[AsyncIterator[tuple[str, Any]]]:
+        """Execute a model request and return provider stream events."""
+
+        ...
+
+
+class ProviderRequesterFactory(Protocol):
+    """Factory for creating provider requesters without exposing provider-native agent objects."""
+
+    requester_strategy: ProviderRequesterStrategy
+
+    def __call__(self) -> ProviderRequester:
+        """Create a provider requester instance."""
+
+        ...
 
 
 @dataclass(frozen=True)
@@ -40,7 +59,7 @@ class CustomTool:
     - descriptor：可选上游 tool descriptor（若注册签名支持则透传）
     """
 
-    spec: ToolSpec
+    spec: Any
     handler: Any
     override: bool = False
     descriptor: Any | None = None
@@ -53,7 +72,8 @@ class RuntimeConfig:
 
     参数分组：
     - 执行模式：mode
-    - 桥接执行：workspace_root / sdk_config_paths / agently_agent / requester_strategy
+    - 桥接执行：workspace_root / sdk_config_paths / provider_requester_factory /
+      requester_strategy / agently_agent（legacy 兼容）
     - Workflow：workflow_engine（可注入）
     - SDK 注入：approval_provider / human_io / cancel_checker / wal_backend / env_vars
     - Skills 配置：skills_config / in_memory_skills
@@ -69,8 +89,9 @@ class RuntimeConfig:
     # === 桥接配置（mode=bridge 时使用）===
     workspace_root: Optional[Path] = None
     sdk_config_paths: List[Path] = field(default_factory=list)
+    provider_requester_factory: Optional[ProviderRequesterFactory] = None
     agently_agent: Optional[Any] = None
-    requester_strategy: ProviderRequesterStrategy = "chat_completions"
+    requester_strategy: Optional[ProviderRequesterStrategy] = None
     agently_requester: Optional[AgentlyRequesterStrategy] = None
     # 显式兼容开关：工具结果回注后的后续 LLM 请求是否覆写 tool_choice。
     # 默认 None 表示保持 AgentSpec.llm_config["tool_choice"] 原样透传。
@@ -84,11 +105,29 @@ class RuntimeConfig:
         `requester_strategy` 是中立首选字段；`agently_requester` 保留为旧配置兼容入口。
         """
 
-        return self.agently_requester or self.requester_strategy
+        return self.requester_strategy or "chat_completions"
 
     def __post_init__(self) -> None:
         """运行时配置枚举值校验，避免非法 opt-in 值穿透到 provider。"""
 
+        if self.requester_strategy not in (None, "chat_completions", "responses"):
+            raise ValueError("requester_strategy must be one of: 'chat_completions', 'responses'")
+        if self.agently_requester not in (None, "chat_completions", "responses"):
+            raise ValueError("agently_requester must be one of: None, 'chat_completions', 'responses'")
+        if self.requester_strategy is not None and self.agently_requester is not None and self.agently_requester != self.requester_strategy:
+            raise ValueError("agently_requester conflicts with requester_strategy")
+        effective_strategy = self.requester_strategy or self.agently_requester or "chat_completions"
+        object.__setattr__(self, "requester_strategy", effective_strategy)
+        if self.provider_requester_factory is not None:
+            factory_strategy = getattr(self.provider_requester_factory, "requester_strategy", None)
+            if factory_strategy is None:
+                raise ValueError("provider_requester_factory must expose requester_strategy")
+            if factory_strategy not in ("chat_completions", "responses"):
+                raise ValueError("provider_requester_factory requester_strategy must be one of: 'chat_completions', 'responses'")
+            if factory_strategy != self.effective_requester_strategy:
+                raise ValueError(
+                    "provider_requester_factory requester_strategy conflicts with RuntimeConfig.requester_strategy"
+                )
         if self.tool_choice_after_tool_result not in (None, "none", "auto"):
             raise ValueError("tool_choice_after_tool_result must be one of: None, 'none', 'auto'")
 
@@ -111,12 +150,12 @@ class RuntimeConfig:
     runtime_server: Optional[Any] = None
 
     # === SDK 注入 ===
-    approval_provider: Optional[ApprovalProvider] = None
-    human_io: Optional[HumanIOProvider] = None
+    approval_provider: Optional[Any] = None
+    human_io: Optional[Any] = None
     cancel_checker: Optional[Callable[[], bool]] = None
-    exec_sessions: Optional[ExecSessionsProvider] = None
+    exec_sessions: Optional[Any] = None
     collab_manager: Optional[object] = None
-    wal_backend: Optional[WalBackend] = None
+    wal_backend: Optional[Any] = None
     env_vars: Dict[str, str] = field(default_factory=dict)
 
     # === SDK LLM backend 注入（离线回归/测试）===
@@ -128,7 +167,7 @@ class RuntimeConfig:
     # - 当你需要离线可回归（不依赖外网/真实 key），可注入 FakeChatBackend 等实现驱动真实 Agent loop，
     #   以获得完整的 tool/approvals/WAL/NodeReport 证据链。
     # - 该字段仅改变“LLM 传输层”，不改变 tool/skills/WAL 的执行真相源（仍为 skills_runtime.Agent）。
-    sdk_backend: Optional[ChatBackend] = None
+    sdk_backend: Optional[Any] = None
 
     # === Skills 配置 ===
     skills_config: Optional[Dict[str, Any]] = None
@@ -194,6 +233,8 @@ __all__ = [
     "ProviderRequesterStrategy",
     "AgentlyRequesterStrategy",
     "ToolChoiceAfterToolResult",
+    "ProviderRequester",
+    "ProviderRequesterFactory",
     "CustomTool",
     "RuntimeConfig",
     "normalize_workspace_root",

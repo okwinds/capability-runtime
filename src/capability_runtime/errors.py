@@ -26,6 +26,7 @@ class ProviderStreamTerminalError(RuntimeFrameworkError):
         error_code: str,
         request_id: str | None = None,
         provider: str | None = None,
+        provider_transport: str | None = None,
         model: str | None = None,
     ) -> None:
         super().__init__(message)
@@ -36,6 +37,7 @@ class ProviderStreamTerminalError(RuntimeFrameworkError):
         self.error_code = error_code
         self.request_id = request_id
         self.provider = provider
+        self.provider_transport = provider_transport
         self.model = model
 
     def __str__(self) -> str:
@@ -52,6 +54,7 @@ class ProviderStreamTerminalError(RuntimeFrameworkError):
             "error_code": self.error_code,
             "request_id": self.request_id,
             "provider": self.provider,
+            "provider_transport": self.provider_transport,
             "model": self.model,
         }
 

@@ -84,10 +84,13 @@ def _workflow_lifecycle_summary(ev: Dict[str, Any]) -> Dict[str, Any]:
     """从 workflow 轻量事件中提取可公开的中立 lifecycle 摘要。"""
 
     data: Dict[str, Any] = {}
-    for key in ("lifecycle_state", "execution_id", "state_version", "intervention_mode", "close_reason"):
+    for key in ("lifecycle_state", "execution_id", "state_version", "lifecycle_source", "intervention_mode", "close_reason"):
         value = ev.get(key)
         if isinstance(value, (str, int)) and str(value).strip():
             data[key] = value
+    supported = ev.get("intervention_supported")
+    if isinstance(supported, bool):
+        data["intervention_supported"] = supported
     pending = ev.get("pending_interventions")
     if isinstance(pending, list):
         safe_pending: List[Dict[str, Any]] = []
@@ -361,7 +364,11 @@ class RuntimeUIEventProjector:
                 return out
 
             status_raw = str(ev.get("status") or "").strip()
-            status = status_raw if status_raw in {"success", "failed", "pending", "cancelled", "skipped"} else "pending"
+            status = (
+                status_raw
+                if status_raw in {"success", "failed", "pending", "cancelled", "needs_approval", "skipped"}
+                else "pending"
+            )
             data: Dict[str, Any] = {
                 "status": status,
                 "workflow_id": workflow_id,
@@ -372,6 +379,10 @@ class RuntimeUIEventProjector:
             }
             if isinstance(ev.get("error_code"), str) and str(ev.get("error_code")).strip():
                 data["error_code"] = str(ev.get("error_code")).strip()
+            if isinstance(ev.get("waiting_approval_key"), str) and str(ev.get("waiting_approval_key")).strip():
+                data["waiting_approval_key"] = str(ev.get("waiting_approval_key")).strip()
+            if isinstance(ev.get("error"), str) and str(ev.get("error")).strip():
+                data["error"] = str(ev.get("error")).strip()
             if self._level != StreamLevel.LITE:
                 out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
             out.append(self._emit(type="node.finished", path=path, data=data))
@@ -402,7 +413,7 @@ class RuntimeUIEventProjector:
 
         if typ == "workflow.step.finished" and workflow_id and step_id:
             status_raw = str(ev.get("status") or "").strip()
-            status = status_raw if status_raw in {"success", "failed", "pending", "cancelled"} else "pending"
+            status = status_raw if status_raw in {"success", "failed", "pending", "cancelled", "needs_approval"} else "pending"
             wf_seg = PathSegment(
                 kind="workflow",
                 id=workflow_instance_id or workflow_id,
@@ -416,11 +427,21 @@ class RuntimeUIEventProjector:
             ]
             if self._level != StreamLevel.LITE:
                 out.append(self._emit(type="node.phase", path=path, data={"phase": "DONE"}))
+            data: Dict[str, Any] = {
+                "status": status,
+                "workflow_id": workflow_id,
+                "workflow_instance_id": workflow_instance_id,
+                "step_id": step_id,
+            }
+            if isinstance(ev.get("waiting_approval_key"), str) and str(ev.get("waiting_approval_key")).strip():
+                data["waiting_approval_key"] = str(ev.get("waiting_approval_key")).strip()
+            if isinstance(ev.get("error"), str) and str(ev.get("error")).strip():
+                data["error"] = str(ev.get("error")).strip()
             out.append(
                 self._emit(
                     type="node.finished",
                     path=path,
-                    data={"status": status, "workflow_id": workflow_id, "workflow_instance_id": workflow_instance_id, "step_id": step_id},
+                    data=data,
                 )
             )
             return out
@@ -539,7 +560,8 @@ class RuntimeUIEventProjector:
             return out
 
         if ev.type == "llm_usage":
-            out.append(self._emit(type="metrics", path=base_path, data=extract_usage_metrics(ev.payload)))
+            metrics = {key: value for key, value in extract_usage_metrics(ev.payload).items() if value is not None}
+            out.append(self._emit(type="metrics", path=base_path, data=metrics))
             return out
 
         if ev.type in ("run_completed", "run_failed", "run_cancelled", "run_waiting_human"):

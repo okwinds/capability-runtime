@@ -24,6 +24,7 @@ from ..protocol.workflow import (
     WorkflowStep,
 )
 from ..services import RuntimeServices
+from ..types import NodeReport
 from .workflow_engine import WorkflowStreamEvent, WorkflowStreamItem
 
 
@@ -96,6 +97,106 @@ class TriggerFlowWorkflowEngine:
             node_report=report,
         )
 
+    def _wrap_workflow_terminal_result(
+        self,
+        *,
+        result: CapabilityResult,
+        spec: WorkflowSpec,
+        context: ExecutionContext,
+        workflow_instance_id: str,
+        execution_id: str,
+        lifecycle_state: str,
+        state_version: int,
+        close_reason: str,
+    ) -> CapabilityResult:
+        """为 workflow 终态生成 workflow-owned NodeReport，避免复用子 step 报告。"""
+
+        child_report = result.node_report if isinstance(result.node_report, NodeReport) else None
+        report_status = "failed"
+        report_reason = "workflow_failed"
+        completion_reason = "workflow_failed"
+        if child_report is not None and child_report.status == "needs_approval":
+            report_status = "needs_approval"
+            report_reason = "approval_pending"
+            completion_reason = "workflow_waiting_human"
+        elif result.status == CapabilityStatus.SUCCESS:
+            report_status = "success"
+            report_reason = None
+            completion_reason = "workflow_completed"
+        elif result.status == CapabilityStatus.CANCELLED:
+            report_status = "incomplete"
+            report_reason = "cancelled"
+            completion_reason = "workflow_cancelled"
+        elif result.status in (CapabilityStatus.PENDING, CapabilityStatus.RUNNING):
+            report_status = "incomplete"
+            report_reason = "workflow_pending"
+            completion_reason = "workflow_pending"
+
+        child_terminal: Dict[str, Any] | None = None
+        if child_report is not None:
+            child_terminal = {
+                "status": child_report.status,
+                "reason": child_report.reason,
+                "completion_reason": child_report.completion_reason,
+                "run_id": child_report.run_id,
+            }
+            if result.error_code:
+                child_terminal["error_code"] = result.error_code
+            if child_report.status == "failed" and child_report.reason:
+                report_reason = child_report.reason
+                completion_reason = child_report.completion_reason or completion_reason
+
+        meta: Dict[str, Any] = {
+            "workflow_id": str(spec.base.id),
+            "workflow_instance_id": workflow_instance_id,
+            "approval_requested_at_ms": 0,
+            "workflow": {
+                "workflow_id": str(spec.base.id),
+                "workflow_instance_id": workflow_instance_id,
+                "execution_id": execution_id,
+                "lifecycle_state": lifecycle_state,
+                "state_version": state_version,
+                "close_reason": close_reason,
+            }
+        }
+        if child_terminal is not None:
+            meta["child_terminal"] = child_terminal
+            if child_report is not None:
+                for key in (
+                    "step_id",
+                    "capability_id",
+                    "exception_type",
+                    "approval_requested_at_ms",
+                    "waiting_human_kind",
+                    "final_message",
+                ):
+                    value = child_report.meta.get(key)
+                    if value is not None:
+                        meta[key] = value
+
+        bridge = {"name": "capability-runtime"}
+        if child_report is not None:
+            child_agently = child_report.bridge.get("agently")
+            if isinstance(child_agently, dict):
+                bridge["agently"] = dict(child_agently)
+
+        workflow_report = NodeReport(
+            status=report_status,  # type: ignore[arg-type]
+            reason=report_reason,
+            completion_reason=completion_reason,
+            engine={"name": "capability-runtime", "component": "workflow"},
+            bridge=bridge,
+            run_id=context.run_id,
+            turn_id=child_report.turn_id if child_report is not None else None,
+            events_path=child_report.events_path if child_report is not None else None,
+            usage=child_report.usage if child_report is not None else None,
+            activated_skills=list(child_report.activated_skills) if child_report is not None else [],
+            tool_calls=list(child_report.tool_calls) if child_report is not None else [],
+            artifacts=list(child_report.artifacts) if child_report is not None else [],
+            meta=meta,
+        )
+        return replace(result, report=workflow_report, node_report=workflow_report)
+
     async def execute(
         self,
         *,
@@ -146,7 +247,7 @@ class TriggerFlowWorkflowEngine:
         """
 
         workflow_instance_id = uuid.uuid4().hex
-        execution_id = f"triggerflow-{workflow_instance_id}"
+        execution_id = f"wfexec-{workflow_instance_id}"
         lifecycle_state = "open"
         state_version = 0
         context = context.with_bag_overlay(**(input or {}))
@@ -172,6 +273,8 @@ class TriggerFlowWorkflowEngine:
                 "lifecycle_state": state,
                 "execution_id": execution_id,
                 "state_version": version,
+                "lifecycle_source": "runtime_triggerflow_adapter",
+                "intervention_supported": False,
                 "intervention_mode": None,
                 "pending_interventions": [],
             }
@@ -282,6 +385,8 @@ class TriggerFlowWorkflowEngine:
 
                 if result.status != CapabilityStatus.SUCCESS:
                     payload["__terminal_result__"] = result
+                else:
+                    payload["__last_success_result__"] = result
                 return payload
 
             chain = chain.to((f"wf_step_{index}_{getattr(step, 'id', index)}", run_step))
@@ -299,12 +404,31 @@ class TriggerFlowWorkflowEngine:
                 output = self._resolve_output_mappings(spec.output_mappings, context_holder.context)
                 if output is None:
                     output = dict(context_holder.context.step_outputs)
-                result = CapabilityResult(status=CapabilityStatus.SUCCESS, output=output)
+                last_success = payload.get("__last_success_result__")
+                if isinstance(last_success, CapabilityResult):
+                    result = CapabilityResult(
+                        status=CapabilityStatus.SUCCESS,
+                        output=output,
+                        report=last_success.report,
+                        node_report=last_success.node_report,
+                    )
+                else:
+                    result = CapabilityResult(status=CapabilityStatus.SUCCESS, output=output)
 
-            terminal_holder["result"] = result
             lifecycle_state = "closed"
             state_version += 1
             close_reason = getattr(result.status, "value", str(result.status))
+            result = self._wrap_workflow_terminal_result(
+                result=result,
+                spec=spec,
+                context=context_holder.context,
+                workflow_instance_id=workflow_instance_id,
+                execution_id=execution_id,
+                lifecycle_state=lifecycle_state,
+                state_version=state_version,
+                close_reason=close_reason,
+            )
+            terminal_holder["result"] = result
             await emit(
                 {
                     "type": "workflow.lifecycle.changed",

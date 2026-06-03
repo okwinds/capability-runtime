@@ -4,9 +4,18 @@ from __future__ import annotations
 __version__ = "0.1.4"
 
 # === 统一入口 ===
-from .config import AgentlyRequesterStrategy, CustomTool, ProviderRequesterStrategy, RuntimeConfig, ToolChoiceAfterToolResult
+from .config import (
+    AgentlyRequesterStrategy,
+    CustomTool,
+    ProviderRequester,
+    ProviderRequesterFactory,
+    ProviderRequesterStrategy,
+    RuntimeConfig,
+    ToolChoiceAfterToolResult,
+)
 from .context_pack import (
     RuntimeContextRecordRef,
+    RuntimeRecallBackend,
     RuntimeRecallContextPack,
     build_recall_context_pack,
     write_node_report_summary,
@@ -14,6 +23,7 @@ from .context_pack import (
 from .runtime import Runtime
 from .service_facade import RuntimeServiceFacade, RuntimeServiceHandle, RuntimeServiceRequest, RuntimeSession
 from .structured_stream import StructuredStreamEvent
+from .adapters.agently_backend import build_openai_provider_requester_factory
 
 # === 报告类型 ===
 from .types import NodeReport, NodeResult
@@ -42,7 +52,6 @@ from .protocol.workflow import (
     Step,
     WorkflowSpec,
 )
-from .services import RuntimeServices
 from .workflow_runtime import WorkflowReplayRequest, WorkflowRunSnapshot, WorkflowRunStatus, WorkflowStepSnapshot
 
 # === 错误导出 ===
@@ -55,12 +64,16 @@ __all__ = [
     "ProviderRequesterStrategy",
     "AgentlyRequesterStrategy",
     "ToolChoiceAfterToolResult",
+    "ProviderRequester",
+    "ProviderRequesterFactory",
     "CustomTool",
     "StructuredStreamEvent",
     "RuntimeContextRecordRef",
+    "RuntimeRecallBackend",
     "RuntimeRecallContextPack",
     "build_recall_context_pack",
     "write_node_report_summary",
+    "build_openai_provider_requester_factory",
     # Reports
     "NodeReport",
     "NodeResult",
@@ -100,7 +113,6 @@ __all__ = [
     "ConditionalStep",
     "InputMapping",
     "ExecutionContext",
-    "RuntimeServices",
     # Errors
     "RuntimeFrameworkError",
     "CapabilityNotFoundError",

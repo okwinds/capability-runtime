@@ -402,8 +402,18 @@ class AgentAdapter:
                         **prompt_plan.evidence,
                     },
                 )
-                if exc.model is not None or exc.request_id is not None or exc.provider is not None:
-                    report.usage = NodeUsageReport(model=exc.model, request_id=exc.request_id, provider=exc.provider)
+                if (
+                    exc.model is not None
+                    or exc.request_id is not None
+                    or exc.provider is not None
+                    or exc.provider_transport is not None
+                ):
+                    report.usage = NodeUsageReport(
+                        model=exc.model,
+                        request_id=exc.request_id,
+                        provider=exc.provider,
+                        provider_transport=exc.provider_transport,
+                    )
             self._apply_prompt_evidence(report=report, evidence=prompt_plan.evidence)
             _apply_on_event_error_evidence(report)
             status = map_node_status(report)

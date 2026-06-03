@@ -246,18 +246,28 @@ class SdkLifecycle:
             # 离线/测试注入：允许用 FakeChatBackend 等驱动真实 Agent loop，产出完整证据链。
             return self._config.sdk_backend
         elif mode == "bridge":
-            if self._config.agently_agent is None:
-                raise ValueError("RuntimeConfig.agently_agent is required when mode='bridge'")
             from .adapters.agently_backend import (
                 AgentlyBackendConfig,
                 AgentlyChatBackend,
                 build_agently_requester_factory,
             )
 
-            requester_factory = build_agently_requester_factory(
-                agently_agent=self._config.agently_agent,
-                strategy=self._config.effective_requester_strategy,
-            )
+            if self._config.provider_requester_factory is not None:
+                requester_factory = self._config.provider_requester_factory
+            else:
+                if self._config.agently_agent is None:
+                    raise ValueError(
+                        "RuntimeConfig.provider_requester_factory or legacy agently_agent is required when mode='bridge'"
+                    )
+                requester_factory = build_agently_requester_factory(
+                    agently_agent=self._config.agently_agent,
+                    strategy=self._config.effective_requester_strategy,
+                )
+            factory_strategy = getattr(requester_factory, "requester_strategy", None)
+            if factory_strategy is not None and factory_strategy != self._config.effective_requester_strategy:
+                raise ValueError(
+                    "provider_requester_factory requester_strategy conflicts with RuntimeConfig.requester_strategy"
+                )
             return AgentlyChatBackend(
                 config=AgentlyBackendConfig(
                     requester_factory=requester_factory,
@@ -802,7 +812,7 @@ def _now_rfc3339() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-_USAGE_PROVIDER_PLACEHOLDERS = {"openai", "openai-compatible"}
+_USAGE_PROVIDER_PLACEHOLDERS = {"openai", "openai-compatible", "openai-responses"}
 _USAGE_MODEL_PLACEHOLDERS = {"gpt-4"}
 
 
@@ -815,7 +825,7 @@ def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_pay
     - supplemental_payloads：`_caprt_usage_sink` 收集到的 provider/gateway usage payload 列表
 
     返回：
-    - 新 AgentEvent；仅在上游 metadata 缺失时补 `model/request_id/provider`，不写入 token 字段；
+    - 新 AgentEvent；仅在上游 metadata 缺失时补 `model/request_id/provider/provider_transport`，不写入 token 字段；
       `provider` 可在上游为 OpenAI-compatible 占位值时被 effective provider 受控覆盖。
     """
 
@@ -841,6 +851,13 @@ def _merge_supplemental_usage_metadata_event(*, ev: AgentEvent, supplemental_pay
             supplemental_request_id = supplemental_summary.get("request_id")
             if isinstance(supplemental_request_id, str) and supplemental_request_id.strip():
                 merged_payload["request_id"] = supplemental_request_id.strip()
+
+        current_provider_transport = extract_usage_metrics(merged_payload).get("provider_transport")
+        if not (isinstance(current_provider_transport, str) and current_provider_transport.strip()):
+            supplemental_provider_transport = supplemental_summary.get("provider_transport")
+            if isinstance(supplemental_provider_transport, str) and supplemental_provider_transport.strip():
+                merged_payload["provider_transport"] = supplemental_provider_transport.strip()
+
         current_provider = extract_usage_metrics(merged_payload).get("provider")
         supplemental_provider = supplemental_summary.get("provider")
         if not (isinstance(supplemental_provider, str) and supplemental_provider.strip()):
