@@ -10,6 +10,7 @@ incident_triage_assistant：面向人类的小 app/MVP（skills-first）。
 
 import argparse
 import asyncio
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional

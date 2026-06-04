@@ -11,8 +11,10 @@ form_interview_pro：面向人类的小 app/MVP（skills-first）。
 import argparse
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
+from typing import Dict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SRC_ROOT = REPO_ROOT / "src"

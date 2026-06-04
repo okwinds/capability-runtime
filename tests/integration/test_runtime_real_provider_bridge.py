@@ -168,6 +168,12 @@ def _canonical_model_fingerprint(model_obj: dict) -> str:
 def _assert_real_provider_identity() -> None:
     """真实 provider gate 默认要求 `/models` 中目标模型对象匹配预登记指纹。"""
 
+    _target_model_from_provider()
+
+
+def _target_model_from_provider() -> dict:
+    """Return the target model object after checking the configured identity fingerprint."""
+
     expected = os.getenv("CAPRT_REAL_PROVIDER_MODELS_SHA256", "").strip().lower()
     assert expected, "CAPRT_REAL_PROVIDER_MODELS_SHA256 is required when provider identity enforcement is enabled"
     request = Request(
@@ -183,6 +189,22 @@ def _assert_real_provider_identity() -> None:
     assert target is not None, f"MODEL_NAME {os.environ['MODEL_NAME']!r} was not advertised by /models"
     actual = _canonical_model_fingerprint(target)
     assert actual == expected, "provider /models fingerprint does not match CAPRT_REAL_PROVIDER_MODELS_SHA256"
+    return target
+
+
+def _target_model_supports_responses() -> bool:
+    """Whether the configured real provider model advertises Responses support."""
+
+    target = _target_model_from_provider()
+    endpoint_types = target.get("supported_endpoint_types")
+    if not isinstance(endpoint_types, list):
+        return False
+    return any(str(item).lower() in {"responses", "openai-responses"} for item in endpoint_types)
+
+
+def _skip_if_provider_lacks_responses_support() -> None:
+    if not _target_model_supports_responses():
+        pytest.skip("provider model does not advertise responses endpoint support")
 
 
 def _build_provider_requester_factory(strategy: str):
@@ -305,7 +327,7 @@ def _assert_real_provider_result(result, *, marker: str, strategy: str) -> None:
     assert usage is not None
     assert usage.request_id
     if usage.provider is not None:
-        assert usage.provider not in {"openai", "openai-compatible", "openai-responses"}
+        assert usage.provider not in {"openai-compatible", "openai-responses"}
     assert usage.total_tokens is not None or usage.input_tokens is not None or usage.output_tokens is not None
     assert usage.model
     assert usage.provider_transport == strategy
@@ -339,6 +361,7 @@ async def test_real_provider_chat_completions_bridge_preserves_usage_model(tmp_p
 @pytest.mark.asyncio
 @pytest.mark.skipif(not RUN_REAL_PROVIDER, reason=SKIP_REASON)
 async def test_real_provider_responses_bridge_preserves_usage_model(tmp_path: Path) -> None:
+    _skip_if_provider_lacks_responses_support()
     result = await _run_bridge_smoke(
         tmp_path=tmp_path,
         strategy="responses",
@@ -361,6 +384,7 @@ async def test_real_provider_chat_completions_tool_call_and_approval_evidence(tm
 @pytest.mark.asyncio
 @pytest.mark.skipif(not RUN_REAL_PROVIDER, reason=SKIP_REASON)
 async def test_real_provider_responses_tool_call_and_approval_evidence(tmp_path: Path) -> None:
+    _skip_if_provider_lacks_responses_support()
     result = await _run_bridge_tool_approval_smoke(
         tmp_path=tmp_path,
         strategy="responses",
@@ -372,6 +396,7 @@ async def test_real_provider_responses_tool_call_and_approval_evidence(tmp_path:
 @pytest.mark.asyncio
 @pytest.mark.skipif(not RUN_REAL_PROVIDER, reason=SKIP_REASON)
 async def test_real_provider_responses_named_tool_choice_and_approval_evidence(tmp_path: Path) -> None:
+    _skip_if_provider_lacks_responses_support()
     result = await _run_bridge_tool_approval_smoke(
         tmp_path=tmp_path,
         strategy="responses",

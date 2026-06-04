@@ -53,15 +53,20 @@ def test_publish_workflow_requires_real_provider_bridge_gate() -> None:
     assert "xml.etree.ElementTree" in gate
     assert "failures" in gate
     assert "errors" in gate
-    assert "skipped" in gate
+    assert "unexpected_skips" in gate
     assert "passed" in gate
     assert "required_real_smokes" in gate
+    assert "optional_response_smokes" in gate
     assert "test_real_provider_chat_completions_bridge_preserves_usage_model" in gate
-    assert "test_real_provider_responses_bridge_preserves_usage_model" in gate
     assert "test_real_provider_chat_completions_tool_call_and_approval_evidence" in gate
+    assert "test_real_provider_responses_bridge_preserves_usage_model" in gate
     assert "test_real_provider_responses_tool_call_and_approval_evidence" in gate
     assert "test_real_provider_responses_named_tool_choice_and_approval_evidence" in gate
+    assert "provider did not advertise Responses support" in gate
     assert "examples/apps/${app}/.env" in gate
+    assert "CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT=%s" in gate
+    assert "trap cleanup_examples_env EXIT" in gate
+    assert "rm -f examples/apps/form_interview_pro/.env examples/apps/incident_triage_assistant/.env" in gate
     assert "CAPRT_TEST_E2E_BRIDGE=1" in gate
     assert "tests/test_examples_real_integration.py::test_real_form_interview_pro_non_interactive" in gate
     assert (
