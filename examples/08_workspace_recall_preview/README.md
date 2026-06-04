@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Workspace / Recall Preview
 
 Offline deterministic example for the runtime context pack bridge.

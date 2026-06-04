@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Runtime Bridge 能力展示页
 
 这是升级后的 capability-runtime bridge 静态展示页。

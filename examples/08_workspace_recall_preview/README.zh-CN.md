@@ -1,3 +1,9 @@
+<div align="center">
+
+[English](README.md) | [中文](README.zh-CN.md)
+
+</div>
+
 # Workspace / Recall 预览
 
 这是 runtime context pack bridge 的离线确定性示例。
