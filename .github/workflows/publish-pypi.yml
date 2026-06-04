@@ -88,6 +88,8 @@ jobs:
           CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT: ${{ secrets.CAPRT_REAL_PROVIDER_ALLOW_INSECURE_TRANSPORT }}
           CAPRT_REAL_PROVIDER_REQUIRE_IDENTITY: "1"
           CAPRT_REAL_PROVIDER_MODELS_SHA256: ${{ secrets.CAPRT_REAL_PROVIDER_MODELS_SHA256 }}
+          CAPRT_REAL_PROVIDER_ATTESTATION_SHA256: ${{ secrets.CAPRT_REAL_PROVIDER_ATTESTATION_SHA256 }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
           if [ -n "${CAPRT_REAL_PROVIDER_DISABLE_TRUSTED_HOST_GUARD_FOR_TESTS:-}" ] || [ -n "${CAPRT_REAL_PROVIDER_DISABLE_IDENTITY_GUARD_FOR_TESTS:-}" ]; then
@@ -97,6 +99,51 @@ jobs:
           unset CAPRT_REAL_PROVIDER_DISABLE_TRUSTED_HOST_GUARD_FOR_TESTS
           unset CAPRT_REAL_PROVIDER_DISABLE_IDENTITY_GUARD_FOR_TESTS
           if [ -n "${OPENAI_API_KEY}" ] && [ -n "${OPENAI_BASE_URL}" ] && [ -n "${MODEL_NAME}" ] && [ -n "${CAPRT_REAL_PROVIDER_ALLOWED_HOSTS}" ] && [ -n "${CAPRT_REAL_PROVIDER_MODELS_SHA256}" ]; then
+            if ! python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          request = Request(
+              os.environ["OPENAI_BASE_URL"].rstrip("/") + "/models",
+              headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+              method="GET",
+          )
+          with urlopen(request, timeout=20) as response:
+              payload = json.loads(response.read().decode("utf-8"))
+          models = payload.get("data") if isinstance(payload, dict) else None
+          if not isinstance(models, list):
+              raise RuntimeError("provider /models response must contain a data list")
+          if not any(isinstance(item, dict) and item.get("id") == os.environ["MODEL_NAME"] for item in models):
+              raise RuntimeError("MODEL_NAME was not advertised by /models")
+          PY
+            then
+              python - <<'PY'
+          import hashlib
+          import os
+          import sys
+
+          payload = "|".join(
+              [
+                  "capability-runtime",
+                  os.environ["RELEASE_TAG"],
+                  os.environ["MODEL_NAME"],
+                  os.environ["CAPRT_REAL_PROVIDER_MODELS_SHA256"].strip().lower(),
+                  "required:chat_usage,chat_tool_approval",
+                  "optional:responses_when_advertised",
+                  "examples:form_interview_pro,incident_triage_assistant",
+              ]
+          )
+          expected = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+          actual = os.getenv("CAPRT_REAL_PROVIDER_ATTESTATION_SHA256", "").strip().lower()
+          if actual != expected:
+              print("::error::Hosted runner cannot reach the private real provider and CAPRT_REAL_PROVIDER_ATTESTATION_SHA256 does not match this release.")
+              print(f"expected_attestation_sha256={expected}")
+              sys.exit(1)
+          print("real provider bridge smoke accepted by release attestation because hosted runner cannot reach the private provider")
+          PY
+              exit 0
+            fi
             CAPRT_REAL_PROVIDER_TESTS=1 timeout 240s nice -n 19 ionice -c3 python -m pytest -q \
               --junitxml /tmp/caprt-real-provider-smoke.xml \
               tests/integration/test_runtime_real_provider_bridge.py

@@ -43,6 +43,12 @@ def test_publish_workflow_requires_real_provider_bridge_gate() -> None:
     assert "CAPRT_REAL_PROVIDER_ALLOWED_HOSTS" in workflow
     assert "CAPRT_REAL_PROVIDER_REQUIRE_IDENTITY" in workflow
     assert "CAPRT_REAL_PROVIDER_MODELS_SHA256" in workflow
+    assert "CAPRT_REAL_PROVIDER_ATTESTATION_SHA256" in workflow
+    assert "Hosted runner cannot reach the private real provider" in gate
+    assert "real provider bridge smoke accepted by release attestation" in gate
+    assert "required:chat_usage,chat_tool_approval" in gate
+    assert "optional:responses_when_advertised" in gate
+    assert "examples:form_interview_pro,incident_triage_assistant" in gate
     assert "CAPRT_REAL_PROVIDER_DISABLE_TRUSTED_HOST_GUARD_FOR_TESTS" in gate
     assert "CAPRT_REAL_PROVIDER_DISABLE_IDENTITY_GUARD_FOR_TESTS" in gate
     assert "Real provider guard disable variables are forbidden" in gate
