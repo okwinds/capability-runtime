@@ -85,6 +85,7 @@ def test_publish_workflow_release_regression_guardrails_cover_upgrade_contracts(
     required_tests = {
         "tests/test_integration_agently_requester_smoke.py",
         "tests/test_repo_no_deep_imports_in_user_facing_docs.py",
+        "tests/test_docs_scheme2_no_skilladapter_residue.py",
         "tests/test_review_followups_module_contracts.py",
         "tests/test_examples_smoke.py",
         "tests/adapters/test_agent_adapter.py",

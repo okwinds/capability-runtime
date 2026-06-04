@@ -20,7 +20,7 @@ Provider bridge additions:
 - `ToolChoiceAfterToolResult`: explicit provider compatibility override after a
   tool result, currently `"none"` or `"auto"`.
 - `RuntimeConfig.requester_strategy`: requester strategy, defaulting to
-  `"chat_completions"` for legacy compatibility.
+  `"chat_completions"` for backward compatibility.
 - `RuntimeConfig.max_dynamic_nodes`: Dynamic DAG preview hard limit.
 - `RuntimeRecallBackend`: runtime-owned backend protocol for context recall
   adapters.

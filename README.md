@@ -118,7 +118,7 @@ python examples/01_quickstart/run_bridge.py
 ```
 
 Bridge mode reuses Agently's OpenAI-compatible transport but still delegates the
-actual skills/tools/WAL semantics to `skills-runtime-sdk`. The legacy requester
+actual skills/tools/WAL semantics to `skills-runtime-sdk`. The default requester
 strategy is `chat_completions`. Responses mode is an explicit opt-in with
 `RuntimeConfig.requester_strategy="responses"`; it is not the default.
 
@@ -214,7 +214,7 @@ The runtime currently supports three execution modes through `RuntimeConfig.mode
 
 Provider bridge strategy is separate from `mode`:
 
-- `RuntimeConfig.requester_strategy="chat_completions"`: legacy-compatible
+- `RuntimeConfig.requester_strategy="chat_completions"`: backward-compatible
   default bridge path.
 - `RuntimeConfig.requester_strategy="responses"`: opt-in Responses bridge path.
 - `sdk_backend` injection takes precedence over both strategies for offline
@@ -285,7 +285,7 @@ configure the corresponding Trusted Publisher entry on `pypi.org`.
   chooses to bridge instead of forking or reimplementing.
 - `capability-runtime` is the contract-convergence layer: it narrows those
   upstream capabilities into a smaller host-facing runtime surface.
-- Legacy mode is non-breaking: if you do not configure Responses, Dynamic DAG,
+- Default bridge mode is non-breaking: if you do not configure Responses, Dynamic DAG,
   Workspace/Recall, or Action artifact evidence previews, existing
   `Runtime.run()` / `Runtime.run_stream()` / `WorkflowSpec` consumers can keep
   reading the existing `NodeReport` and UI event fields.
