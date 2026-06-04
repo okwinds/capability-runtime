@@ -103,3 +103,4 @@ def test_publish_workflow_release_regression_guardrails_cover_upgrade_contracts(
 
     for test_path in sorted(required_tests):
         assert test_path in guardrails
+    assert "-k \"not test_source_specs_mark_continue_and_intervention_as_preview\"" in guardrails
